@@ -5761,19 +5761,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 </article>
                 <article class="module-tile">
                   <div class="module-title">
-                    <strong>远近手感曲线</strong>
-                    <label class="switch"><input id="personal_motion_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">让准星在离目标远的时候走得快一点、贴近的时候走得慢一点（更接近真人的手感）。默认关，关着的时候完全不影响输出。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">曲线强度<input id="personal_motion_curve_blend" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">0 = 完全不按曲线走（跟关着一样），1 = 完全按曲线。想只要一点点效果就填 0.3~0.5。</span></label>
-                    </div>
-                    <div class="field-hint">内置曲线是「贴着目标时 0.75 倍，离 128 像素以上 1.25 倍」，中间平滑过渡。要自己画曲线得改配置文件里的 knots（面板没做编辑器）。</div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
                     <strong>弧线拉枪</strong>
                     <label class="switch"><input id="bezier_enabled" data-config type="checkbox"><span></span></label>
                   </div>
@@ -6570,10 +6557,6 @@ const BB_CTRL_MODULES = [
     ["freq", "n", 1.0],
     ["smooth", "n", 0.5],
   ]],
-  ["personal_motion", [
-    ["enabled", "b", false],
-    ["curve_blend", "n", 1.0],
-  ]],
   ["bezier", [
     ["enabled", "b", false],
     ["curvature", "n", 0.2],
@@ -6699,7 +6682,7 @@ const BB_SECTION_MODULES = {
   "assist-section-recoil": ["recoil_bb", "vc"],
   "assist-section-trigger": ["trigger", "trigger2"],
   "assist-section-lead": ["lead1", "lead2"],
-  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "personal_motion", "bezier"],
+  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "bezier"],
   "assist-section-selector": ["selector"],
 };
 

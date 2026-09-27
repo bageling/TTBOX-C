@@ -884,9 +884,6 @@ CTRL_BLOCKS = [
     #   （此前只有几行手写搬运，UI 缺）⇒ 只能手改 json。本轮补成表驱动 + 卡片。
     #   只暴露 PersonalMotion 真正读的两个字段（enabled / curve_blend）；
     #   speed_blend / reaction_blend / max_reaction_delay_ms core 从不读，不进表。
-    ('personal_motion', 'personal_motion', [
-        ('enabled', 'b', False), ('curve_blend', 'n', 1.0),
-    ]),
     # 贝塞尔弧线（2026-09-26 接线）：只暴露 warp 用法真正读到的字段。
     #   generation / segments 是 path1/path2 拆点列那套用的，主链走 warp_error 不读它们
     #   ⇒ 刻意不进表（不补默认值，由 Core 结构体默认兜住），免得面板摆一堆无效开关。
