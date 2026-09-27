@@ -256,6 +256,8 @@ ENV_ALLOW = {
     "USB_PROXY_EXTRA_ARGS", "USB_PROXY_GADGET_CONFIG_FILE",
     # 1.5.26 新增（自带库目录 + 两处死等超时；登记册 §2.3）
     "USB_PROXY_LIBDIR", "USB_PROXY_UDC_WAIT_SECONDS", "USB_PROXY_MOUSE_WAIT_SECONDS",
+    # 1.5.62 新增（降级后自动接管鼠标；登记册 §2.3）
+    "USB_PROXY_MOUSE_AUTO_RECOVER", "USB_PROXY_SERVICE_NAME",
     # 1.5.22 起 ttbox_dtb_fix.sh 的 TEST 域钩子（源 DTB 路径覆盖 / 免 root 免重启开关；登记册 §2.5）
     "TTBOX_DTB_SRC", "TTBOX_DTB_FIX_TEST",
 }

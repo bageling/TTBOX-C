@@ -93,7 +93,9 @@
 | `USB_PROXY_EXTRA_ARGS` | 字符串 | 空 | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_LIBDIR` | 路径 | `<usbproxy 目录>/lib` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_UDC_WAIT_SECONDS` | 秒 | `60` | `run-ttbox-usb-proxy.sh` | RUNTIME |
-| `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `30` | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `90`（1.5.62 起；旧值 30 太短，quirk 鼠标重枚举要 40s+） | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_MOUSE_AUTO_RECOVER` | 开关 | `1`（降级合成后继续盯物理鼠标，出现即重启本服务接管） | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_SERVICE_NAME` | 服务名 | `ttbox-usbproxy`（自动接管要重启的 unit） | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_MLOCK` | 开关 | `1`（`0`=关） | `usbproxy/misc.cpp`（`mlockall`，转发路径防换页） | RUNTIME |
 | `USB_PROXY_ENDPOINT_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用） | `usbproxy/proxy.cpp` 端点读/写线程 | RUNTIME |
 | `USB_PROXY_EP0_RT_PRIORITY` | SCHED_FIFO 优先级 | `65`（`0`=不启用） | `usbproxy/proxy.cpp` `ep0_loop` | RUNTIME |
