@@ -8,6 +8,7 @@
 // 不做、永远退出 0（本项目已在 test_stats_window.cpp 上栽过一次：缺陷复现了它照样打印
 // PASSED）。这里一律走 CHECK 宏，任何优化级别下都真的执行。
 #include "../hid_report_layout.hpp"
+#include "../hidraw_source.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -352,6 +353,33 @@ static void test_logitech_12bit_desc() {
     CHECK(rep[4] == 0xFF);            // wheel=-1
 }
 
+// ── hid_layout_decide：1.5.57 布局学习兜底的决策表（1.5.56 事故钉死的行为）──
+static void test_hid_layout_decide() {
+    using A = ttbox_usbproxy::HidLayoutAction;
+    std::printf("--- hid_layout_decide ---\n");
+
+    // 已就绪 → 永远等待（不动已学好的布局）。
+    CHECK(ttbox_usbproxy::hid_layout_decide(true, false, 0, 0) == A::kWait);
+    CHECK(ttbox_usbproxy::hid_layout_decide(true, true, 0, 999) == A::kWait);
+
+    // 有 hidraw 缓存 → 永远走缓存（零 USB 请求，quirk 固件安全）。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, true, 0, 0) == A::kFeedPrefetch);
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, true, 3, 999) == A::kFeedPrefetch);
+
+    // 没缓存、class 请求没试过 → 试一次（只此一次）。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 0, 0) == A::kTryClassRequest);
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 0, 9) == A::kTryClassRequest);
+
+    // 试过一次就不再试：quirk 固件（Nearlink dongle 板端实测）会被该请求打死，
+    // 反复重试 = 反复打 Dongle。之后只能等 stall 累积 → fail-open。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 1, 0) == A::kWait);
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 2, 5) == A::kWait);
+
+    // 无进展满 10 轮（×500ms ≈ 5s）→ fail-open：开门保物理透传。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 1, 10) == A::kFailOpen);
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 1, 50) == A::kFailOpen);
+}
+
 int main() {
     std::printf("=== hid_report_layout 自测（CHECK 计数，非裸 assert）===\n");
     test_synthetic_gadget_desc();
@@ -362,6 +390,7 @@ int main() {
     test_bad_descriptors();
     test_field_primitives();
     test_logitech_12bit_desc();
+    test_hid_layout_decide();
 
     std::printf("\n=== 结果：%d 项检查，%d 项失败 ===\n", g_checks, g_failures);
     if (g_failures == 0) std::printf("PASSED\n");

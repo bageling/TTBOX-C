@@ -36,6 +36,7 @@ SRCS := \
 	proxy.cpp \
 	mouse_control.cpp \
 	hid_report_layout.cpp \
+	hidraw_source.cpp \
 	inject_clock.cpp \
 	synthetic.cpp \
 	device-libusb.cpp \
@@ -48,7 +49,7 @@ OBJS := $(SRCS:.cpp=.o)
 # 覆盖：HID 描述符解析（按真实布局读写）+ 注入节拍（限幅/顺延/丢弃/报告构造）。
 TEST_SRCS := tests/test_hid_layout.cpp tests/test_inject_clock.cpp
 TEST_BINS := $(TEST_SRCS:.cpp=.exe)
-TEST_DEPS := hid_report_layout.cpp inject_clock.cpp
+TEST_DEPS := hid_report_layout.cpp inject_clock.cpp hidraw_source.cpp
 
 .PHONY: test
 test: $(TEST_BINS)

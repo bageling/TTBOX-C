@@ -459,6 +459,11 @@ int setup_host_usb_desc() {
 
 int main(int argc, char **argv)
 {
+	// ★ 2026-09-27（1.5.57）：stdout 转【行缓冲】。systemd/journald 下 stdout 是
+	// socket ⇒ glibc 默认全缓冲（4KB 才刷），排障时日志停在半截、关键事件看不到
+	// （1.5.56 事故里 active fetch 的失败日志就这样被吞了）。行缓冲才有实时日志。
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	const char *device = "dummy_udc.0";
 	const char *driver = "dummy_udc";
 	int vendor_id = -1;

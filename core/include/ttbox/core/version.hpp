@@ -8,6 +8,6 @@ inline constexpr const char* kAppName = "ttbox_core";
 //   · kCoreVersion          = 内核内部版本（仅日志/诊断，core 自述）；
 //   · kAppVersion           = 面板对外可见版本（web: plugins/web/bin/ttbox-web.py）；
 //   · TTBOX_RELEASE_VERSION = 出货留档版本（构建/安装脚本消费）。
-inline constexpr const char* kCoreVersion = "1.5.56";
+inline constexpr const char* kCoreVersion = "1.5.57";
 
 }  // namespace ttbox::core

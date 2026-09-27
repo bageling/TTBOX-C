@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言同值。
-project(ttbox_core VERSION 1.5.56 LANGUAGES CXX)
+project(ttbox_core VERSION 1.5.57 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

@@ -9,6 +9,7 @@
 
 #include "device-libusb.h"
 #include "proxy.h"
+#include "hidraw_source.hpp"
 
 libusb_device 			**devs;
 libusb_device_handle 		*dev_handle;
@@ -164,6 +165,42 @@ int connect_device(int vendor_id, int product_id) {
 		fprintf(stderr, "libusb_get_configuration() failed: %s\n",
 				libusb_strerror((libusb_error)result));
 		return result;
+	}
+
+	// ★ 2026-09-27（1.5.57）：detach 内核驱动【之前】，把内核缓存在 hidraw 里的
+	// HID 报告描述符抄走（HIDIOCGRDESC 只读内核缓存，零 USB 请求）。背景：
+	// quirk 固件（Compx Nearlink Dongle 373b:10c9 板端实测）在 usbfs/libusb
+	// 上下文里对 class GET_DESCRIPTOR(Report) 一律超时且控制端点被打死，而
+	// 内核正常枚举时拿得到 ⇒ hidraw 是唯一可靠的描述符来源。若 hidraw 缺失
+	// （usb-proxy 重启而设备未重插：驱动已被上一轮 detach），把接口短暂绑回
+	// usbhid 让内核在「正常枚举上下文」里重读一次，读完立刻解绑。
+	{
+		const uint8_t bus = libusb_get_bus_number(found);
+		const uint8_t addr = libusb_get_device_address(found);
+		ttbox_usbproxy::hidraw_clear();
+		int hid_total = 0;
+		for (int i = 0; i < device_device_desc.bNumConfigurations; i++) {
+			if (device_config_desc[i]->bConfigurationValue != config)
+				continue;
+			for (int j = 0; j < device_config_desc[i]->bNumInterfaces; j++) {
+				const struct libusb_interface* itf =
+					&device_config_desc[i]->interface[j];
+				for (int a = 0; a < itf->num_altsetting; a++) {
+					if (itf->altsetting[a].bInterfaceClass == LIBUSB_CLASS_HID) {
+						hid_total++;
+						break;
+					}
+				}
+			}
+		}
+		const int got = ttbox_usbproxy::hidraw_prefetch_descriptors(bus, addr);
+		printf("hidraw: prefetch %d/%d HID report descriptors for %d:%d (pre-detach)\n",
+			got, hid_total, bus, addr);
+		if (got < hid_total) {
+			const int got2 = ttbox_usbproxy::hidraw_refetch_via_rebind(bus, addr);
+			printf("hidraw: rebind refetch +%d (total %d/%d)\n",
+				got2, got + got2, hid_total);
+		}
 	}
 
 	for (int i = 0; i < device_device_desc.bNumConfigurations; i++) {

@@ -12,6 +12,7 @@
 #include "misc.h"
 #include "mouse_control.hpp"
 #include "synthetic.h"
+#include "hidraw_source.hpp"
 
 #ifdef HAVE_LUA
 extern "C" {
@@ -125,50 +126,127 @@ static bool is_hid_report_descriptor_request(const struct usb_ctrlrequest *ctrl)
 	       (ctrl->wValue >> 8) == HID_DT_REPORT;
 }
 
-// ── 2026-09-27：报告描述符「主动拉取」兜底（用户反馈「有些鼠标不识别」）──
-// 依赖说明：此前布局学习只发生在「主机来要描述符」的嗅探路径上（ep0 转发顺带解析）。
-// 若主机枚举时跳过 GET_DESCRIPTOR(Report)（系统描述符缓存 / 私有协议栈 / 复用旧实例），
-// mouse_control 永远拿不到布局 ⇒ fail-closed = 该鼠标按键门与注入全废，用户视角就是
-// 「盒子不识别这只鼠标」（鼠标本身照常透传）。这里在 SET_CONFIGURATION 落定后，
-// 对还没就绪的 HID 接口**直接向物理设备**发一次 GET_DESCRIPTOR(Report) 补课，
-// 让布局学习不再依赖主机的行为。
-static void active_fetch_hid_report_descriptors(int config_index)
+// ── 2026-09-27（1.5.57 重构自 ec49c73 的「主动拉取」）────────────────────
+// 布局学习兜底改为【后台 worker】，绝不阻塞 ep0 热路径。1.5.56 事故复盘：
+//   ec49c73 在 ep0_loop 的 SET_CONFIGURATION 分支里同步向物理设备发 class
+//   GET_DESCRIPTOR(Report)。Compx Nearlink Dongle 373b:10c9 板端实测对 usbfs
+//   上下文的该请求一律超时（3 接口 × 3 种 wLength 全 -7）且控制端点被打死；
+//   每次超时 1s × 3 接口全打在 ep0 线程上 ⇒ 电脑枚举超时、1.6s 一次 reset
+//   风暴后放弃，UDC 恒 default，鼠标彻底死。且门控 fail-closed 无重试无退路。
+// worker 的兜底顺序（见 hidraw_source.hpp）：
+//   hidraw 抄底（零 USB 请求，connect 时已预取）→ 每接口至多 1 次 class 请求
+//   → 10 轮（约 5s）无进展 fail-open 开门，物理透传先用起来（注入无布局自动
+//   降级为不可用，不影响透传正确性）。
+static bool active_fetch_one_interface(uint8_t iface_num)
+{
+	struct usb_ctrlrequest req = {};
+	req.bRequestType = USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE;
+	req.bRequest = USB_REQ_GET_DESCRIPTOR;
+	req.wValue = static_cast<uint16_t>(HID_DT_REPORT << 8);
+	req.wIndex = iface_num;
+	req.wLength = MAX_TRANSFER_SIZE;
+
+	unsigned char data[MAX_TRANSFER_SIZE];
+	int nbytes = 0;
+	unsigned char *dataptr = data;
+	const int rc = control_request(&req, &nbytes, &dataptr, USB_REQUEST_TIMEOUT);
+	if (rc == 0 && nbytes > 0) {
+		ttbox_usbproxy::mouse_control_set_report_descriptor(
+			iface_num, data, static_cast<uint32_t>(nbytes));
+		mark_hid_report_descriptor_ready(iface_num);
+		printf("hid-layout worker: iface %u class fetch %d bytes\n",
+		       iface_num, nbytes);
+		return true;
+	}
+	printf("hid-layout worker: iface %u class fetch failed rc=%d (won't retry: quirk firmware may wedge on this request)\n",
+	       iface_num, rc);
+	return false;
+}
+
+static pthread_t hid_layout_worker_tid;
+static std::atomic<bool> hid_layout_worker_started{false};
+// 每接口 class 请求尝试计数（bit 位）与连续无进展轮数（worker 私有语义）。
+static std::atomic<uint32_t> hid_class_attempts{0};
+static std::atomic<uint32_t> hid_stall_rounds{0};
+
+static void* hid_layout_worker(void* arg __attribute__((unused)))
+{
+	printf("hid-layout worker: started (retry 500ms, fail-open after 10 stall rounds)\n");
+	uint32_t last_expected = 0;
+	while (!please_stop_ep0) {
+		if (!enable_mouse_control || synthetic_mode)
+			return nullptr;  // 无需布局学习
+		const uint32_t expected =
+			hid_expected_interfaces.load(std::memory_order_acquire);
+		if (expected != last_expected) {
+			last_expected = expected;
+			hid_stall_rounds.store(0, std::memory_order_release);
+		}
+		const uint32_t ready =
+			hid_ready_interfaces.load(std::memory_order_acquire);
+		if (!expected || (ready & expected) == expected) {
+			hid_stall_rounds.store(0, std::memory_order_release);
+			usleep(500 * 1000);
+			continue;
+		}
+
+		bool progressed = false;
+		for (uint8_t iface = 0; iface < 32; ++iface) {
+			const uint32_t bit = 1u << iface;
+			if (!(expected & bit) || (ready & bit))
+				continue;
+			const uint8_t* desc = nullptr;
+			uint32_t desc_len = 0;
+			const ttbox_usbproxy::HidLayoutAction act =
+				ttbox_usbproxy::hid_layout_decide(
+					/*iface_ready=*/false,
+					ttbox_usbproxy::hidraw_get(iface, &desc, &desc_len),
+					hid_class_attempts.load(std::memory_order_relaxed) & bit,
+					hid_stall_rounds.load(std::memory_order_relaxed));
+			switch (act) {
+			case ttbox_usbproxy::HidLayoutAction::kFeedPrefetch:
+				ttbox_usbproxy::mouse_control_set_report_descriptor(
+					iface, desc, desc_len);
+				mark_hid_report_descriptor_ready(iface);
+				printf("hid-layout worker: iface %u fed from kernel hidraw cache (%u bytes)\n",
+				       iface, desc_len);
+				progressed = true;
+				break;
+			case ttbox_usbproxy::HidLayoutAction::kTryClassRequest:
+				hid_class_attempts.fetch_or(bit, std::memory_order_relaxed);
+				progressed = active_fetch_one_interface(iface);
+				break;
+			case ttbox_usbproxy::HidLayoutAction::kFailOpen:
+				printf("hid-layout worker: iface %u descriptor unknown after %u stall rounds — FAIL-OPEN: physical passthrough resumes unmodified, AI injection stays disabled for it\n",
+				       iface,
+				       hid_stall_rounds.load(std::memory_order_relaxed));
+				mark_hid_report_descriptor_ready(iface);
+				progressed = true;
+				break;
+			case ttbox_usbproxy::HidLayoutAction::kWait:
+				break;
+			}
+		}
+		if (progressed)
+			hid_stall_rounds.store(0, std::memory_order_release);
+		else
+			hid_stall_rounds.fetch_add(1, std::memory_order_relaxed);
+		usleep(500 * 1000);
+	}
+	printf("hid-layout worker: stopped\n");
+	return nullptr;
+}
+
+static void start_hid_layout_worker()
 {
 	if (!enable_mouse_control || synthetic_mode)
 		return;
-	if (config_index < 0 || config_index >= host_device_desc.device.bNumConfigurations)
-		return;
-	struct raw_gadget_config *config = &host_device_desc.configs[config_index];
-	for (int i = 0; i < config->config.bNumInterfaces; ++i) {
-		struct raw_gadget_altsetting *alt = &config->interfaces[i].altsettings[0];
-		if (alt->interface.bInterfaceClass != USB_CLASS_HID)
-			continue;
-		const uint8_t iface_num = alt->interface.bInterfaceNumber;
-		const uint32_t bit = interface_bit(iface_num);
-		if (bit && (hid_ready_interfaces.load(std::memory_order_acquire) & bit))
-			continue;  // 嗅探路径已经拿到，不重复拉
-
-		struct usb_ctrlrequest req = {};
-		req.bRequestType = USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE;
-		req.bRequest = USB_REQ_GET_DESCRIPTOR;
-		req.wValue = static_cast<uint16_t>(HID_DT_REPORT << 8);
-		req.wIndex = iface_num;
-		req.wLength = MAX_TRANSFER_SIZE;
-
-		unsigned char data[MAX_TRANSFER_SIZE];
-		int nbytes = 0;
-		unsigned char *dataptr = data;
-		const int rc = control_request(&req, &nbytes, &dataptr, USB_REQUEST_TIMEOUT);
-		if (rc == 0 && nbytes > 0) {
-			ttbox_usbproxy::mouse_control_set_report_descriptor(
-				iface_num, data, static_cast<uint32_t>(nbytes));
-			mark_hid_report_descriptor_ready(iface_num);
-			printf("ep0: active fetch: iface %u report descriptor %d bytes\n",
-			       iface_num, nbytes);
-		} else {
-			printf("ep0: active fetch: iface %u report descriptor failed rc=%d\n",
-			       iface_num, rc);
-		}
+	if (hid_layout_worker_started.exchange(true))
+		return;  // 只启动一次，常驻直到退出
+	if (pthread_create(&hid_layout_worker_tid, nullptr,
+			   hid_layout_worker, nullptr) != 0) {
+		hid_layout_worker_started.store(false, std::memory_order_release);
+		printf("hid-layout worker: pthread_create failed, fall back to sniff path only\n");
 	}
 }
 
@@ -1654,9 +1732,11 @@ void ep0_loop(int fd) {
 
 					set_configuration_done_once = true;
 
-					// 主动补拉还没嗅探到的 HID 报告描述符（见函数头注释）：
-					// 布局学习不再单点依赖「主机来要」。
-					active_fetch_hid_report_descriptors(desired_config);
+					// ★ 1.5.57：布局学习兜底改由后台 worker 完成
+					//（hidraw 抄底 → 至多 1 次 class 请求 → fail-open）。
+					// 严禁在 ep0 热路径同步发设备控制请求——quirk 固件
+					// 超时会打满 ep0，电脑枚举失败（1.5.56 事故根因）。
+					start_hid_layout_worker();
 				}
 			else if ((event.ctrl.bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD &&
 					event.ctrl.bRequest == USB_REQ_SET_INTERFACE) {
