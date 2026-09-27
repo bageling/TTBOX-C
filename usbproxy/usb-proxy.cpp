@@ -29,7 +29,12 @@ std::string mouse_event_socket = "/run/ttbox-mouse-passthrough/event.sock";
 
 bool customized_config_enabled = false;
 std::string customized_config_file = "config.json";
-bool reset_device_before_proxy = true;
+// 1.5.61：认领前**不再**无条件 USB reset。
+//   quirk 固件（Nearlink/星闪接收器一族）连一次 usb reset 都扛不住 ⇒ 设备直接掉总线
+//   （日志特征：libusb_reset_device() failed: Entity not found，之后 lsusb 里再也看不到它），
+//   只能拔插。1.5.58 起描述符已经改走内核 hidraw 缓存，这个 reset 已无存在理由。
+//   需要旧行为时用 --enable_customized_config + config.json 里置 true（或加新开关）。
+bool reset_device_before_proxy = false;
 bool bmaxpacketsize0_must_greater_than_64 = true;
 bool auto_remap_endpoints = false;
 bool hid_passthrough_compat = false;

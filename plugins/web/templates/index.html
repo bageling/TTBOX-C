@@ -2600,6 +2600,12 @@ html[data-theme="light"] .danger-button:disabled {
     var(--surface-strong);
 }
 
+/* 1.5.61：导入事务未完成（模型还没装进库）的卡片置灰，点了会提示而不是报错 */
+.model-card.is-importing {
+  opacity: 0.55;
+  filter: grayscale(0.5);
+}
+
 .model-card-top {
   display: grid;
   gap: 9px;
@@ -11043,12 +11049,19 @@ function renderModelCards(models, selectedModelId) {
   }
   visibleModels.forEach((model) => {
     const isSelected = model.id === selectedModelId;
+    const isImporting = model.importing === true;
     const card = document.createElement("article");
-    card.className = `model-card${isSelected ? " is-active" : ""}`;
+    card.className = `model-card${isSelected ? " is-active" : ""}${isImporting ? " is-importing" : ""}`;
     card.dataset.modelId = model.id;
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     const switchModel = () => runUiAction(async () => {
+      // 1.5.61：模型还在导入（装进模型库）过程中，切过去会因为模型文件还没落到位
+      // 而失败。这里直接拦住并提示，不让它发出请求。
+      if (isImporting) {
+        showToast("这个模型还在导入中，请等导入完成后再切换", true);
+        return;
+      }
       if (model.id === ((state.config && state.config.model_id) || "")) {
         return;
       }

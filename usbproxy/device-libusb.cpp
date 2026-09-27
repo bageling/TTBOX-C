@@ -221,6 +221,9 @@ int connect_device(int vendor_id, int product_id) {
 					libusb_strerror((libusb_error)result));
 			return result;
 		}
+	} else {
+		// 1.5.61 起默认跳过：quirk 固件扛不住 usb reset（见 usb-proxy.cpp 注释）。
+		printf("claim: skip reset before proxy (quirk 友好，1.5.61 默认)\n");
 	}
 
 	//check that device is responsive

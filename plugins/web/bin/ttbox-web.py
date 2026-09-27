@@ -1791,6 +1791,9 @@ def _models_view(ml_data: dict) -> list:
             'class_count': mm.get('class_count', 0),
             'class_names': mm.get('class_names') or [],
             'rknn_concurrency': _effective_rknn_concurrency(mm),
+            # ★ 1.5.61：正在导入事务里的模型（staging 已建、installed 未建）不可切换，
+            #   前端据此把卡片置灰并拦截点击，避免用户看到列表就点、吃到 MODEL_NOT_FOUND。
+            'importing': _is_importing(mm.get('model_id') or ''),
         })
     return [_merge_model_ui_meta(m) for m in models]
 
@@ -3385,23 +3388,28 @@ def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str,
         incoming_rknn.write_bytes(rknn_out.read_bytes())
         import hashlib as _hashlib
         _sha = _hashlib.sha256(incoming_rknn.read_bytes()).hexdigest()
-        r1 = ipc_request('MODEL_IMPORT', {'src_path': str(incoming_rknn),
-                                          'model_id': model_id, 'label': label,
-                                          'source_format': 'onnx', 'sha256': _sha}, timeout=30)
-        if r1.get('status') != 0:
-            _CONVERT_STATE.update(state='failed', error=r1.get('error', '入库失败'),
-                                  finished_at=time.time())
-            return
-        r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id}, timeout=120)
-        if r2.get('status') != 0:
-            _CONVERT_STATE.update(state='failed', error=r2.get('error', 'RKNN 校验失败'),
-                                  finished_at=time.time())
-            return
-        r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id}, timeout=30)
-        if r3.get('status') != 0:
-            _CONVERT_STATE.update(state='failed', error=r3.get('error', '安装失败'),
-                                  finished_at=time.time())
-            return
+        # ★ 1.5.61：ONNX 转换入库同样是「三步导入事务」，也要登记（见 _begin_import 注释）。
+        _begin_import(model_id)
+        try:
+            r1 = ipc_request('MODEL_IMPORT', {'src_path': str(incoming_rknn),
+                                              'model_id': model_id, 'label': label,
+                                              'source_format': 'onnx', 'sha256': _sha}, timeout=30)
+            if r1.get('status') != 0:
+                _CONVERT_STATE.update(state='failed', error=r1.get('error', '入库失败'),
+                                      finished_at=time.time())
+                return
+            r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id}, timeout=120)
+            if r2.get('status') != 0:
+                _CONVERT_STATE.update(state='failed', error=r2.get('error', 'RKNN 校验失败'),
+                                      finished_at=time.time())
+                return
+            r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id}, timeout=30)
+            if r3.get('status') != 0:
+                _CONVERT_STATE.update(state='failed', error=r3.get('error', '安装失败'),
+                                      finished_at=time.time())
+                return
+        finally:
+            _end_import(model_id)
         if extra_meta:
             try:
                 _write_model_ui_meta(model_id, extra_meta)
@@ -3490,6 +3498,48 @@ def model_device_code():
     }})
 
 
+# ── 模型导入事务锁（1.5.61：修 "上传后立刻切换 → MODEL_NOT_FOUND"）──────────
+# 背景：Core 的 IPC 是「每连接一线程」，导入链 IMPORT→VALIDATE→INSTALL 三次 IPC
+#   之间是锁空闲窗口。此刻到达的 MODEL_ACTIVATE 会抢在 INSTALL 前面跑，而
+#   installed/<id> 还没建出来（staging 不在 ModelRegistry 的搜索路径里）⇒
+#   必然回裸 MODEL_NOT_FOUND。过一会再点又好了——就是用户看到的现象。
+# 修法：web 侧把「正在导入」的 model_id 登记进事件表；/api/models/select 命中时
+#   有界等待导入结束再 ACTIVATE（不报错）。**不能**在 Core 的 activate 里重试——
+#   activate 与 install 共用 registry mutex_，重试期间持锁会把 install 挡在外面。
+_MODEL_IMPORT_EVENTS: dict = {}
+_MODEL_IMPORT_EVENTS_LOCK = threading.Lock()
+
+
+def _begin_import(model_id: str):
+    with _MODEL_IMPORT_EVENTS_LOCK:
+        ev = _MODEL_IMPORT_EVENTS.get(model_id)
+        if ev is None:
+            ev = threading.Event()
+            _MODEL_IMPORT_EVENTS[model_id] = ev
+        return ev
+
+
+def _end_import(model_id: str):
+    with _MODEL_IMPORT_EVENTS_LOCK:
+        ev = _MODEL_IMPORT_EVENTS.pop(model_id, None)
+    if ev is not None:
+        ev.set()
+
+
+def _is_importing(model_id: str) -> bool:
+    with _MODEL_IMPORT_EVENTS_LOCK:
+        return model_id in _MODEL_IMPORT_EVENTS
+
+
+def _wait_import_done(model_id: str, timeout: float) -> bool:
+    """等该模型的导入事务结束。未在导入中 ⇒ 立返 True；超时 ⇒ False。"""
+    with _MODEL_IMPORT_EVENTS_LOCK:
+        ev = _MODEL_IMPORT_EVENTS.get(model_id)
+    if ev is None:
+        return True
+    return ev.wait(timeout)
+
+
 @app.post('/api/models/import')
 def import_model():
     f = request.files.get('file')
@@ -3517,20 +3567,25 @@ def import_model():
     f.save(str(dst))
     import hashlib as _hashlib
     _sha = _hashlib.sha256(dst.read_bytes()).hexdigest()
-    r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': label,
-                                      'source_format': 'onnx' if src_ext == '.onnx' else 'rknn',
-                                      'sha256': _sha})
-    if r1.get('status') != 0:
-        dst.unlink(missing_ok=True)
-        return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
-    # ★ 超时分级（api_v1.py 表）：模型加载可到分钟级，默认 5s 会把"正在加载"误判成
-    #   "Core 挂了"，操作者会反复重试。VALIDATE/ACTIVATE ≥120s、INSTALL 60s。
-    r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id}, timeout=120)
-    if r2.get('status') != 0:
-        return jsonify({'ok': False, 'error': r2.get('error', '校验失败')})
-    r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id}, timeout=60)
-    if r3.get('status') != 0:
-        return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
+    # ★ 1.5.61：登记导入事务（切换请求撞进来前先等这个事务结束，见上方注释）。
+    _begin_import(model_id)
+    try:
+        r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': label,
+                                          'source_format': 'onnx' if src_ext == '.onnx' else 'rknn',
+                                          'sha256': _sha})
+        if r1.get('status') != 0:
+            dst.unlink(missing_ok=True)
+            return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
+        # ★ 超时分级（api_v1.py 表）：模型加载可到分钟级，默认 5s 会把"正在加载"误判成
+        #   "Core 挂了"，操作者会反复重试。VALIDATE/ACTIVATE ≥120s、INSTALL 60s。
+        r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id}, timeout=120)
+        if r2.get('status') != 0:
+            return jsonify({'ok': False, 'error': r2.get('error', '校验失败')})
+        r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id}, timeout=60)
+        if r3.get('status') != 0:
+            return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
+    finally:
+        _end_import(model_id)
     ui_meta = {}
     if class_names:
         ui_meta['class_names'] = class_names
@@ -3568,6 +3623,12 @@ def select_model():
     model_id = str(body.get('model_id') or '').strip()
     if not model_id:
         return jsonify({'ok': False, 'error': 'missing field: model_id'}), 400
+    # ★ 1.5.61：该模型若正在导入（IMPORT→VALIDATE→INSTALL 三步事务未完成），先等它装完
+    #   再激活。否则 ACTIVATE 会抢在 INSTALL 前面跑，installed/<id> 还没建 ⇒ 裸
+    #   MODEL_NOT_FOUND（用户视角：上传后立刻切换报错，过一会再点又好了）。
+    if not _wait_import_done(model_id, timeout=90.0):
+        return jsonify({'ok': False,
+                        'error': f'模型 {model_id} 还在导入中，请等导入完成后再切换'}), 409
     # ★ 同 api_v1 超时分级：MODEL_ACTIVATE 要加载并跑通 RKNN，板端实测分钟级，默认 5s 必误判。
     response = ipc_request('MODEL_ACTIVATE', {'model_id': model_id}, timeout=120)
     if response.get('status') != 0:
