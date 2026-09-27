@@ -751,6 +751,18 @@ void mouse_control_set_report_descriptor(uint8_t interface_number,
         il.desc.layout_count == parsed.layout_count && il.desc.uses_report_ids == parsed.uses_report_ids) {
         return;  // 同一份描述符重复回调：不重复解析、不重复打日志
     }
+    // ★ 2026-09-27（1.5.59）：绝不让"垃圾描述符"冲掉一份已可用的布局。
+    //   1.5.58 板端实测：ep0 走内核缓存分支时，io.data 被未初始化缓冲覆盖，
+    //   上一秒刚解析好（X@bit8/16 Y@bit24/16）的接口 2 立刻被重喂成乱码，
+    //   布局清零 ⇒ merge_ok=0、AI 注入静默失效，而日志只表现为"无布局"。
+    //   判据：新描述符合不出任何可用报告、而旧布局本来可用 ⇒ 视为脏数据，原样保留。
+    if (!(ok && parsed.usable()) && il.ready && il.usable) {
+        fprintf(stderr,
+                "[mouse_control][LAYOUT] 接口 %u：新描述符解析不出可用报告，"
+                "保留已解析的布局（疑似脏数据，忽略本次）\n",
+                interface_number);
+        return;
+    }
     il.ready = true;
     il.desc = parsed;
     il.usable = ok && parsed.usable();

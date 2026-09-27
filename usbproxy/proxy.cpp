@@ -1626,11 +1626,16 @@ void ep0_loop(int fd) {
 			result = served_from_hidraw_cache ? 0 :
 				control_request(&event.ctrl, &nbytes, &control_data, USB_REQUEST_TIMEOUT);
 			if (result == 0) {
-				// nbytes 可超过 MAX_TRANSFER_SIZE（大 config 描述符）⇒ 钳到栈缓冲内
-				const int copy_len =
-					nbytes > MAX_TRANSFER_SIZE ? MAX_TRANSFER_SIZE : nbytes;
-				memcpy(&io.data[0], control_data, copy_len);
-				io.inner.length = copy_len;
+				// nbytes 可超过 MAX_TRANSFER_SIZE（大 config 描述符）⇒ 钳到栈缓冲内。
+				// ★ 走缓存分支时**绝不能再从 control_data 拷**：它是 new[] 出来的
+				// 未初始化缓冲，拷进去会把刚写好的描述符覆盖成堆垃圾（1.5.58 板端
+				// 实测：喂给 mouse_control 的描述符变成乱码 ⇒ 布局被冲掉、注入失效）。
+				if (!served_from_hidraw_cache) {
+					const int copy_len =
+						nbytes > MAX_TRANSFER_SIZE ? MAX_TRANSFER_SIZE : nbytes;
+					memcpy(&io.data[0], control_data, copy_len);
+					io.inner.length = copy_len;
+				}
 
 				if (injection_enabled) {
 					injection(event, io, injection_flags);
