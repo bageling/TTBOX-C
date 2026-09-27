@@ -178,6 +178,32 @@ find_mouse()
 	return 1
 }
 
+# 1.5.62：降级合成后继续盯物理鼠标，一旦出现就重启本服务，自动切回物理透传。
+# 为什么需要：quirk 鼠标被打掉后重新枚举很慢（板端实测 12:34 掉线、13:44 才回来），
+# 服务恰好在这段空窗里启动就会永久停在合成模式，用户看到的就是「鼠标不动」。
+# 冷却 90s：设备反复上下线时不会打成重启循环（unit 限流 5 次/300s，90s 冷却只可能 3 次）。
+mouse_auto_recover()
+{
+	[ "${USB_PROXY_MOUSE_AUTO_RECOVER:-1}" = "1" ] || return 0
+	unit=${USB_PROXY_SERVICE_NAME:-ttbox-usbproxy}
+	stamp=/run/ttbox-usbproxy-auto-recover.stamp
+	(
+		rounds=0
+		while [ "$rounds" -lt 720 ]; do
+			sleep 5
+			rounds=$((rounds + 1))
+			ids2=$(find_mouse 2>/dev/null) || continue
+			now=$(date +%s)
+			last=$(cat "$stamp" 2>/dev/null || printf '0')
+			[ $((now - last)) -ge 90 ] || continue
+			printf '%s\n' "$now" >"$stamp" 2>/dev/null
+			printf '[auto-recover] 检测到物理鼠标 %s，重启 %s 切回物理透传\n' "$ids2" "$unit"
+			systemctl restart "$unit"
+			exit 0
+		done
+	) &
+}
+
 # 等待期诊断表：卡在"等鼠标"时，一眼看出是"没插"还是"插了但被判成非鼠标"。
 mouse_scan_report()
 {
@@ -235,14 +261,17 @@ if [ "$USB_PROXY_MODE" != "synthetic" ]; then
 	# 1.5.26(c)-2（并入 T1.07 版，2026-09-22）：full 模式找物理鼠标加超时降级。旧写法（含 09-21 发布的
 	# T1.07 版）是无限死等——非鼠标环境 = usb-proxy 永不启动、电脑侧看不到鼠标。
 	# 现在超时后降级 synthetic：AI 注入可用、物理透传不可用，插回鼠标 restart 即恢复。
-	MOUSE_WAIT=${USB_PROXY_MOUSE_WAIT_SECONDS:-30}
+	# 1.5.62：30s → 90s。30s 太短：quirk 鼠标重新枚举常要 40s 以上，
+	# 服务一错过窗口就永久降级，看着就像「鼠标坏了」。
+	MOUSE_WAIT=${USB_PROXY_MOUSE_WAIT_SECONDS:-90}
 	_waited=0
 	while ! ids=$(find_mouse); do
 		ids=""
 		if [ "$_waited" -ge "$MOUSE_WAIT" ]; then
 			printf 'WARN: %ss 内未找到物理 HID 鼠标，降级为合成鼠标模式。\n' "$MOUSE_WAIT" >&2
 			printf '      合成模式下 AI 注入可用、物理鼠标透传不可用。\n' >&2
-			printf '      插上 USB 鼠标后 systemctl restart ttbox-usbproxy 即可恢复物理透传。\n' >&2
+			printf '      已开启自动接管：物理鼠标一插上/一回来会自动重启本服务切回物理透传。\n' >&2
+			mouse_auto_recover
 			USB_PROXY_MODE=synthetic
 			break
 		fi
