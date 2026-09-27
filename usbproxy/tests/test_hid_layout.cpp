@@ -378,6 +378,13 @@ static void test_hid_layout_decide() {
     // 无进展满 10 轮（×500ms ≈ 5s）→ fail-open：开门保物理透传。
     CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 1, 10) == A::kFailOpen);
     CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 1, 50) == A::kFailOpen);
+
+    // ★ 1.5.58：class 请求默认禁（会把 quirk 固件打死）⇒ 没缓存时**立刻** fail-open，
+    //   不等 5s、更不问设备。透传优先于 AI 注入。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 0, 0, false) == A::kFailOpen);
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, false, 0, 9, false) == A::kFailOpen);
+    // 有缓存时无论允许与否都走缓存（零 USB 请求，最安全）。
+    CHECK(ttbox_usbproxy::hid_layout_decide(false, true, 0, 0, false) == A::kFeedPrefetch);
 }
 
 int main() {

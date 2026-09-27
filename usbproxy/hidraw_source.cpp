@@ -81,10 +81,10 @@ uint32_t read_hidraw_cached(const char* node, uint8_t* out, uint32_t cap)
 	return got;
 }
 
-// 从 hidraw 的 device 链接解析出 (usb接口号, usb设备sysfs目录, 接口目录名)。
-// realpath(...) → .../usb3/3-1/3-1:1.2/0003:373B:10C9.0020
-//   = usb设备目录 / 接口目录 / HID设备目录
-// hidraw 的 device 链接指向 HID 设备目录，向上两层分别是接口目录和 usb 设备目录。
+// 判断一条 hidraw 是否属于目标 USB 设备，并解出它挂在哪个接口上。
+// 做法：从 realpath(…/device) 逐级向上找名字里含 ":1.<数字>" 的接口目录分量，
+// 它的父亲就是 USB 设备目录。比原先"硬上两层"稳：不同内核的子目录层级不同，
+// 之前那版因而在板端一个都没匹配上（1.5.57 日志 prefetch 0/3）。
 bool resolve_hidraw_iface(const char* sysfs_link, uint8_t* iface_num,
 			  char* usb_dev_dir, size_t usb_dev_dir_cap,
 			  char* usb_iface_name, size_t usb_iface_name_cap)
@@ -93,26 +93,38 @@ bool resolve_hidraw_iface(const char* sysfs_link, uint8_t* iface_num,
 	if (!realpath(sysfs_link, real))
 		return false;
 
-	// 分层拷贝，避免 dirname() 改写原串。
-	char hid_dir[PATH_MAX], iface_dir[PATH_MAX], dev_dir[PATH_MAX];
-	snprintf(hid_dir, sizeof(hid_dir), "%s", real);
-	snprintf(iface_dir, sizeof(iface_dir), "%s", dirname(hid_dir));
-	snprintf(dev_dir, sizeof(dev_dir), "%s", dirname(iface_dir));
-	if (strcmp(dev_dir, "/") == 0 || strcmp(dev_dir, ".") == 0)
-		return false;
-
-	const char* iface_name = basename(iface_dir);   // "3-1:1.2"
-	const char* colon = strrchr(iface_name, ':');
-	if (!colon || strncmp(colon, ":1.", 3) != 0)
-		return false;
-	const int n = atoi(colon + 3);
-	if (n < 0 || n >= kHidRawMaxIfaces)
-		return false;
-	*iface_num = static_cast<uint8_t>(n);
-
-	snprintf(usb_iface_name, usb_iface_name_cap, "%s", iface_name);
-	snprintf(usb_dev_dir, usb_dev_dir_cap, "%s", dev_dir);
-	return true;
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s", real);
+	for (;;) {
+		char cur[PATH_MAX];
+		snprintf(cur, sizeof(cur), "%s", path);
+		const char* name = basename(cur);
+		const char* colon = strstr(name, ":1.");
+		if (colon) {
+			bool all_digits = true;
+			for (const char* p = colon + 3; *p; ++p) {
+				if (*p < '0' || *p > '9') { all_digits = false; break; }
+			}
+			if (all_digits && *(colon + 3)) {
+				const int n = atoi(colon + 3);
+				if (n >= 0 && n < kHidRawMaxIfaces) {
+					*iface_num = static_cast<uint8_t>(n);
+					snprintf(usb_iface_name, usb_iface_name_cap, "%s", name);
+					char parent[PATH_MAX];
+					snprintf(parent, sizeof(parent), "%s", path);
+					snprintf(usb_dev_dir, usb_dev_dir_cap, "%s", dirname(parent));
+					return true;
+				}
+			}
+		}
+		// 往上走一层
+		char parent[PATH_MAX];
+		snprintf(parent, sizeof(parent), "%s", path);
+		dirname(parent);
+		if (strcmp(parent, path) == 0)
+			return false;
+		snprintf(path, sizeof(path), "%s", parent);
+	}
 }
 
 int read_sysfs_int(const char* dir, const char* name)
@@ -124,6 +136,20 @@ int read_sysfs_int(const char* dir, const char* name)
 		return -1;
 	int v = -1;
 	if (fscanf(f, "%d", &v) != 1)
+		v = -1;
+	fclose(f);
+	return v;
+}
+
+int read_sysfs_hex16(const char* dir, const char* name)
+{
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	FILE* f = fopen(path, "r");
+	if (!f)
+		return -1;
+	int v = -1;
+	if (fscanf(f, "%x", &v) != 1)
 		v = -1;
 	fclose(f);
 	return v;
@@ -141,7 +167,8 @@ int write_sysfs(const char* path, const char* value)
 
 }  // namespace
 
-int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr)
+int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr,
+                                uint16_t vendor, uint16_t product)
 {
 	int got = 0;
 	DIR* d = opendir("/sys/class/hidraw");
@@ -161,8 +188,15 @@ int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr)
 					  sizeof(dev_dir), iface_name,
 					  sizeof(iface_name)))
 			continue;
-		if (read_sysfs_int(dev_dir, "busnum") != bus ||
-		    read_sysfs_int(dev_dir, "devnum") != addr)
+		// 归属判定：优先 bus/devnum；读不到（或地址已变）时退化为 VID:PID。
+		const int b = read_sysfs_int(dev_dir, "busnum");
+		const int a = read_sysfs_int(dev_dir, "devnum");
+		const int v = read_sysfs_hex16(dev_dir, "idVendor");
+		const int p = read_sysfs_hex16(dev_dir, "idProduct");
+		const bool by_addr = (b >= 0 && a >= 0) && (b == bus && a == addr);
+		const bool by_id = (v >= 0 && p >= 0) &&
+				   (v == vendor && p == product);
+		if (!by_addr && !by_id)
 			continue;  // 别人的设备
 		if (g_cache[iface].valid)
 			continue;  // 已经有了
@@ -181,53 +215,54 @@ int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr)
 	return got;
 }
 
-int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr)
+int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr,
+                              uint16_t vendor, uint16_t product)
 {
+	(void)bus; (void)addr;
 	// 记下现有 hidraw 节点，rebind 后「新出现的」才属于本次绑定。
 	snapshot_known_hidraw();
 
-	// 找到目标设备（bus/addr 匹配）的所有 USB 接口目录。
-	char iface_names[kHidRawMaxIfaces][128];
-	int iface_nums[kHidRawMaxIfaces];
-	int found = 0;
+	// 找目标 USB 设备目录（按 VID:PID；同型号视为等价，描述符本就是同一份）。
+	char dev_name[128] = "";
 	DIR* d = opendir("/sys/bus/usb/devices");
 	if (!d)
 		return 0;
 	struct dirent* e;
-	while ((e = readdir(d)) != nullptr && found < kHidRawMaxIfaces) {
-		const char* colon = strrchr(e->d_name, ':');
-		if (!colon || strncmp(colon, ":1.", 3) != 0)
-			continue;
+	while ((e = readdir(d)) != nullptr) {
+		if (e->d_name[0] == '.' || strchr(e->d_name, ':'))
+			continue;  // 接口目录形如 3-1:1.2，跳过
 		char path[PATH_MAX];
 		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s",
 			 e->d_name);
-		char dev_dir[PATH_MAX];
-		snprintf(dev_dir, sizeof(dev_dir), "%s", path);
-		char* slash = strrchr(dev_dir, '/');
-		if (!slash)
+		if (read_sysfs_hex16(path, "idVendor") != vendor ||
+		    read_sysfs_hex16(path, "idProduct") != product)
 			continue;
-		*slash = '\0';
-		if (read_sysfs_int(dev_dir, "busnum") != bus ||
-		    read_sysfs_int(dev_dir, "devnum") != addr)
-			continue;
-		const int n = atoi(colon + 3);
-		if (n < 0 || n >= kHidRawMaxIfaces || g_cache[n].valid)
-			continue;
-		snprintf(iface_names[found], sizeof(iface_names[0]), "%s",
-			 e->d_name);
-		iface_nums[found] = n;
-		++found;
+		snprintf(dev_name, sizeof(dev_name), "%s", e->d_name);
+		break;
 	}
 	closedir(d);
+	if (!dev_name[0]) {
+		printf("hidraw: rebind skipped (target device dir not found)\n");
+		return 0;
+	}
 
 	int got = 0;
-	for (int i = 0; i < found; ++i) {
+	for (int ifn_expected = 0; ifn_expected < kHidRawMaxIfaces; ++ifn_expected) {
+		if (g_cache[ifn_expected].valid)
+			continue;
+		char iface_name[160];
+		snprintf(iface_name, sizeof(iface_name), "%s:1.%d", dev_name, ifn_expected);
+		char iface_path[PATH_MAX];
+		snprintf(iface_path, sizeof(iface_path),
+			 "/sys/bus/usb/devices/%s", iface_name);
+		if (read_sysfs_int(iface_path, "bInterfaceClass") != 0x03)
+			continue;  // 非 HID 接口（也可能不存在）
 		// 短暂绑回 usbhid：内核在「正常枚举上下文」里重新读报告描述符，
 		// quirk 固件只认这一口。读完立刻解绑（后面 usb-proxy 自己 detach/claim）。
 		if (write_sysfs("/sys/bus/usb/drivers/usbhid/bind",
-				iface_names[i]) != 0) {
-			printf("hidraw: rebind %s failed (usbhid unavailable?)\n",
-			       iface_names[i]);
+				iface_name) != 0) {
+			printf("hidraw: rebind %s failed (already bound or usbhid unavailable?)\n",
+			       iface_name);
 			continue;
 		}
 		// 轮询等新 hidraw 节点出现（最多 1s）。
@@ -255,9 +290,8 @@ int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr)
 							  sizeof(dd), iname,
 							  sizeof(iname)))
 					continue;
-				if (ifn ==
-					    static_cast<uint8_t>(iface_nums[i]) &&
-				    strcmp(iname, iface_names[i]) == 0) {
+				if (ifn == static_cast<uint8_t>(ifn_expected) &&
+				    strcmp(iname, iface_name) == 0) {
 					snprintf(new_node, sizeof(new_node),
 						 "%s", he->d_name);
 					break;
@@ -269,20 +303,19 @@ int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr)
 		}
 		if (new_node[0]) {
 			const uint32_t len = read_hidraw_cached(
-				new_node, g_cache[iface_nums[i]].data,
-				sizeof(g_cache[iface_nums[i]].data));
+				new_node, g_cache[ifn_expected].data,
+				sizeof(g_cache[ifn_expected].data));
 			if (len > 0) {
-				g_cache[iface_nums[i]].valid = true;
-				g_cache[iface_nums[i]].len = len;
+				g_cache[ifn_expected].valid = true;
+				g_cache[ifn_expected].len = len;
 				++got;
-				printf("hidraw: rebind %s -> iface %u report descriptor %u bytes\n",
-				       iface_names[i], iface_nums[i], len);
+				printf("hidraw: rebind %s -> iface %d report descriptor %u bytes\n",
+				       iface_name, ifn_expected, len);
 			}
 		}
 		// 无论成败都解绑，交还给 usb-proxy 的 detach/claim 流程。
 		char unbind_value[128];
-		snprintf(unbind_value, sizeof(unbind_value), "%s",
-			 iface_names[i]);
+		snprintf(unbind_value, sizeof(unbind_value), "%s", iface_name);
 		write_sysfs("/sys/bus/usb/drivers/usbhid/unbind",
 			    unbind_value);
 	}
@@ -306,12 +339,15 @@ void hidraw_clear()
 }
 
 HidLayoutAction hid_layout_decide(bool iface_ready, bool prefetch_available,
-                                  uint32_t class_attempts, uint32_t stall_rounds)
+                                  uint32_t class_attempts, uint32_t stall_rounds,
+                                  bool class_fetch_allowed)
 {
 	if (iface_ready)
 		return HidLayoutAction::kWait;
 	if (prefetch_available)
 		return HidLayoutAction::kFeedPrefetch;
+	if (!class_fetch_allowed)
+		return HidLayoutAction::kFailOpen;  // 不许问设备 ⇒ 立刻保透传
 	if (class_attempts == 0)
 		return HidLayoutAction::kTryClassRequest;
 	if (stall_rounds >= 10)

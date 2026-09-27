@@ -33,6 +33,8 @@ bool reset_device_before_proxy = true;
 bool bmaxpacketsize0_must_greater_than_64 = true;
 bool auto_remap_endpoints = false;
 bool hid_passthrough_compat = false;
+// 1.5.58：默认**不**向设备发 class GET_DESCRIPTOR(Report)（见 --allow_class_descriptor_fetch）。
+bool allow_class_descriptor_fetch = false;
 bool set_config_ack_before_configure = false;
 int iso_batch_size = ISO_BATCH_SIZE_DEFAULT;
 enum usb_device_speed device_speed = USB_SPEED_HIGH;
@@ -495,6 +497,7 @@ int main(int argc, char **argv)
 		{"mouse_control_cmd_socket", required_argument, &lopt, 15},
 		{"mouse_control_event_socket", required_argument, &lopt, 16},
 		{"synthetic_mouse", no_argument, &lopt, 17},
+		{"allow_class_descriptor_fetch", no_argument, &lopt, 18},
 		{0, 0, 0, 0}
 	};
 	while ((opt = getopt_long(argc, argv, optstring, long_options, &loidx)) != -1) {
@@ -569,6 +572,12 @@ int main(int argc, char **argv)
 	case 17:
 		synthetic_mode = true;
 		printf("Synthetic mouse mode enabled\n");
+		break;
+	case 18:
+		// 显式开启「向设备索要 report descriptor」。默认关：实测会把 quirk 固件
+		//（Compx Nearlink Dongle）打死 ⇒ 透传全断，代价远大于 AI 注入。
+		allow_class_descriptor_fetch = true;
+		printf("Class GET_DESCRIPTOR(Report) fetch ENABLED (may wedge quirk firmware)\n");
 		break;
 
 	default:

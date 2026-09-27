@@ -193,11 +193,15 @@ int connect_device(int vendor_id, int product_id) {
 				}
 			}
 		}
-		const int got = ttbox_usbproxy::hidraw_prefetch_descriptors(bus, addr);
+		const int got = ttbox_usbproxy::hidraw_prefetch_descriptors(
+			bus, addr, device_device_desc.idVendor,
+			device_device_desc.idProduct);
 		printf("hidraw: prefetch %d/%d HID report descriptors for %d:%d (pre-detach)\n",
 			got, hid_total, bus, addr);
 		if (got < hid_total) {
-			const int got2 = ttbox_usbproxy::hidraw_refetch_via_rebind(bus, addr);
+			const int got2 = ttbox_usbproxy::hidraw_refetch_via_rebind(
+				bus, addr, device_device_desc.idVendor,
+				device_device_desc.idProduct);
 			printf("hidraw: rebind refetch +%d (total %d/%d)\n",
 				got2, got + got2, hid_total);
 		}

@@ -40,6 +40,9 @@ extern bool auto_remap_endpoints;
 // 定义在 usb-proxy.cpp（A-PATH-5 同族：跨编译单元全局，仅读）
 extern bool enable_mouse_control;
 extern bool synthetic_mode;
+// 1.5.58：是否允许 usb-proxy 自行向设备发 class GET_DESCRIPTOR(Report)。
+// 默认 false —— quirk 固件会被这条请求打死（→ 透传全断），只有命令行显式开才试。
+extern bool allow_class_descriptor_fetch;
 
 static std::atomic<uint32_t> hid_ready_interfaces{0};
 static std::atomic<uint32_t> hid_expected_interfaces{0};
@@ -202,6 +205,10 @@ static void* hid_layout_worker(void* arg __attribute__((unused)))
 					/*iface_ready=*/false,
 					ttbox_usbproxy::hidraw_get(iface, &desc, &desc_len),
 					hid_class_attempts.load(std::memory_order_relaxed) & bit,
+					// 默认禁止：私自向设备索要报告描述符可能直接打死 quirk 固件
+					//（本 dongle 实测：一次就把整设备打掉总线）。没有 hidraw 缓存时
+					// 直接 fail-open 保物理透传。
+					allow_class_descriptor_fetch,
 					hid_stall_rounds.load(std::memory_order_relaxed));
 			switch (act) {
 			case ttbox_usbproxy::HidLayoutAction::kFeedPrefetch:
@@ -1593,7 +1600,31 @@ void ep0_loop(int fd) {
 
 		int rv = -1;
 		if (event.ctrl.bRequestType & USB_DIR_IN) {
-			result = control_request(&event.ctrl, &nbytes, &control_data, USB_REQUEST_TIMEOUT);
+			// ── 2026-09-27（1.5.58）：HID 报告描述符若我们已有内核缓存，直接答主机 ──
+			// 背景：quirk 固件（Compx Nearlink Dongle 373b:10c9 板端实测）对 usbfs
+			// 上下文的 GET_DESCRIPTOR(Report) 不应答、且会被该请求打死（整设备掉总线，
+			// 只能拔插；一次 usb reset 也会打掉）。主机每次枚举都会来要这三份描述符
+			// ⇒ 每次都会伤害设备。已有缓存就绝不转发，原样抄给主机即可（缓存来自
+			// 内核 probe，是同一份字节）。
+			bool served_from_hidraw_cache = false;
+			if (is_hid_report_descriptor_request(&event.ctrl)) {
+				const uint8_t* cached = nullptr;
+				uint32_t cached_len = 0;
+				const uint8_t hid_iface = event.ctrl.wIndex & 0xff;
+				if (ttbox_usbproxy::hidraw_get(hid_iface, &cached, &cached_len)) {
+					const uint16_t want = event.ctrl.wLength;
+					const uint32_t give =
+						(cached_len < want) ? cached_len : want;
+					memcpy(&io.data[0], cached, give);
+					io.inner.length = give;
+					nbytes = static_cast<int>(give);
+					served_from_hidraw_cache = true;
+					printf("ep0: HID report descriptor iface %u served from kernel cache (%u bytes, asked %u)\n",
+						hid_iface, cached_len, want);
+				}
+			}
+			result = served_from_hidraw_cache ? 0 :
+				control_request(&event.ctrl, &nbytes, &control_data, USB_REQUEST_TIMEOUT);
 			if (result == 0) {
 				// nbytes 可超过 MAX_TRANSFER_SIZE（大 config 描述符）⇒ 钳到栈缓冲内
 				const int copy_len =

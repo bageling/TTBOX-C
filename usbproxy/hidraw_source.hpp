@@ -27,13 +27,16 @@ namespace ttbox_usbproxy {
 // 每个 USB 设备最多几个 HID 接口参与布局学习（与 mouse_control 的接口上限一致）。
 static const int kHidRawMaxIfaces = 8;
 
-// 在 detach 内核驱动【之前】调用：扫描 /sys/class/hidraw，把属于 (bus,addr)
-// 这台设备的 hidraw 描述符抄进缓存。返回成功读到的接口数。
-int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr);
+// 在 detach 内核驱动【之前】调用：扫描 /sys/class/hidraw，把属于这台设备的 hidraw
+// 描述符抄进缓存。bus/addr 优先精确匹配；读不到（部分 sysfs 不暴露）或地址变了时
+// 退化为 VID:PID 匹配（同型号描述符本来就是同一份，误配无害）。返回读到的接口数。
+int hidraw_prefetch_descriptors(uint8_t bus, uint8_t addr,
+                                uint16_t vendor, uint16_t product);
 
 // hidraw 已消失（重启未重插）时的兜底：把 (bus,addr) 设备的 HID 接口短暂绑回
 // usbhid，等内核枚举出 hidraw、读到缓存描述符后再解绑。返回新读到的接口数。
-int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr);
+int hidraw_refetch_via_rebind(uint8_t bus, uint8_t addr,
+                                uint16_t vendor, uint16_t product);
 
 // 取某接口的缓存描述符；没有该接口的缓存返回 false。
 bool hidraw_get(uint8_t iface, const uint8_t** data, uint32_t* len);
@@ -43,7 +46,7 @@ void hidraw_clear();
 
 // ── worker 的决策函数（纯函数，单测钉行为）────────────────────────────────
 // 输入：该接口是否已就绪 / 是否有 hidraw 缓存 / 该接口 class 请求已试过几次 /
-//       连续无进展轮数。输出：这轮该做什么。
+//       连续无进展轮数 / 是否允许发 class 请求。输出：这轮该做什么。
 enum class HidLayoutAction {
 	kFeedPrefetch,    // 用 hidraw 缓存喂 mouse_control（零 USB 请求）
 	kTryClassRequest, // 试一次 class 请求（每接口全程至多 1 次）
@@ -54,9 +57,13 @@ enum class HidLayoutAction {
 //   · 已就绪 → kWait；
 //   · 有 hidraw 缓存 → 永远 kFeedPrefetch；
 //   · 没缓存且 class 请求没试过 → kTryClassRequest（只此一次，quirk 固件禁不起反复打）；
+//   · class_fetch_allowed=false（1.5.58 起**默认关**，命令行才可开）且没缓存 →
+//     直接 kFailOpen：宁可放弃 AI 注入，也绝不拿物理鼠标冒险去问设备
+//     （本 dongle 实测会被这条请求打死 ⇒ 透传全断）；
 //   · 无进展轮数达到阈值（10 轮 × 500ms = 5s）→ kFailOpen，物理鼠标先用起来。
 HidLayoutAction hid_layout_decide(bool iface_ready, bool prefetch_available,
-                                  uint32_t class_attempts, uint32_t stall_rounds);
+                                  uint32_t class_attempts, uint32_t stall_rounds,
+                                  bool class_fetch_allowed = true);
 
 }  // namespace ttbox_usbproxy
 
