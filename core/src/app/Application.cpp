@@ -1931,6 +1931,17 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
         }
         return true;  // 幂等：运行态与配置均已确认一致
     }
+    // ★ 无画面预检：见 has_capture_signal 注释。HDMI 没接/信号源没开时，下面的
+    //   switch_active_model_runtime 必然在首帧门槛超时（5s），而回滚路径要走同一条门槛，
+    //   实测整个请求 ~10.7s 才返回一个看不出真因的失败。这里提前 200ms 判定并直接拒绝；
+    //   此刻**尚未改动 registry 与 runtime**，调用方无需回滚，状态零副作用。
+    if (!has_capture_signal()) {
+        if (error) {
+            *error = "未检测到画面输入（HDMI 无信号或信号源未输出）：采集持续 0 帧，"
+                     "无法验证新模型，本次切换未执行。请先点亮信号源再试。";
+        }
+        return false;
+    }
     if (!model_management_->registry().activate(model_id, error)) {
         return false;  // 激活校验失败：active 未变，无需回滚
     }
@@ -1975,12 +1986,14 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
         // 切换失败：回滚 active 到旧模型，恢复旧模型运行
         std::string switch_error = error && !error->empty() ? *error : "切换失败";
         std::string rb_error;
+        bool rb_capture_missing = false;
         if (!previous_active.empty()) {
             model_management_->registry().activate(previous_active, &rb_error);
         } else {
             model_management_->registry().deactivate(&rb_error);
         }
-        if (!previous_active.empty() && switch_active_model_runtime(previous_active, &rb_error)) {
+        if (!previous_active.empty() &&
+            switch_active_model_runtime(previous_active, &rb_error, &rb_capture_missing)) {
             if (error) *error = "模型切换失败已回滚到 " + previous_active + ": " + switch_error;
         } else if (previous_active.empty()) {
             core_runtime_->stop();
@@ -1988,6 +2001,13 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
             running_model_id_.clear();
             want_runtime_running_.store(false);
             if (error) *error = "模型切换失败，已恢复为未选择模型状态: " + switch_error;
+        } else if (rb_capture_missing) {
+            // ★ 旧模型也只是"没画面可验证"，而注册表与配置都已回到旧模型 ⇒ 这不是回滚失败。
+            //   报"回滚失败"会让操作者以为设备状态坏了，实际只需点亮信号源。
+            if (error) {
+                *error = "模型切换失败（无画面输入，无法验证新模型）；已回滚到 " +
+                         previous_active + "，接入信号源后会自动恢复运行。原因: " + switch_error;
+            }
         } else {
             // 旧模型也起不来：让主循环 2s 自动重试拉起（want 仍为 true）
             if (error) {
@@ -2087,8 +2107,33 @@ bool Application::try_resume_from_degraded(std::string* error) {
     return true;
 }
 
+// 无画面预检：采集在跑却在 probe_ms 内一帧都收不到 ⇒ 一定没有画面输入。
+// 背景：模型切换末尾有"首帧门槛"（等 model_ready，最多 5s），而 model_ready 要求至少
+//   成功推理过一次（CoreRuntime::model_ready = inference_ok>0 && decode_ok>0）⇒ 必须有帧。
+//   HDMI 没信号时这道门槛必然超时，且**回滚路径会再走一次同一门槛**，实测整个
+//   /api/models/select 请求耗时 ~10.7s（新模型 5s + 回滚旧模型 5s）才返回，
+//   用户拿到的是"切换失败且回滚失败"这种看不出真正原因的错误。
+// 这里用短采样把"没画面"从"模型有问题"里分出来，让调用方能提前拒绝、给可操作文案。
+// 采集未启动（capture 为空或未 running）时没有判据 ⇒ 返回 true，交给首帧门槛兜底。
+bool Application::has_capture_signal(int probe_ms) const {
+    if (!core_runtime_ || !core_runtime_->capture() || !core_runtime_->capture()->running()) {
+        return true;
+    }
+    const uint64_t baseline = core_runtime_->capture()->metrics().capture_frames.load();
+    const int steps = probe_ms < 50 ? 1 : (probe_ms / 50);
+    for (int i = 0; i < steps; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (core_runtime_->capture()->metrics().capture_frames.load() != baseline) {
+            return true;  // 有新帧 ⇒ 画面在
+        }
+    }
+    return false;
+}
+
 bool Application::switch_active_model_runtime(const std::string& new_model_id,
-                                              std::string* error) {
+                                              std::string* error,
+                                              bool* capture_missing) {
+    if (capture_missing) *capture_missing = false;
     if (!core_runtime_ || !model_management_) {
         if (error) *error = "core_runtime 或模型仓库未初始化";
         return false;
@@ -2148,6 +2193,8 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
 
     // 5) 首帧门槛：等待真实推理+Decode 成功（最多 5s），通过才提交 running_model_id
     constexpr int kWaitFramesMs = 5000;
+    const uint64_t gate_frames_begin = core_runtime_->capture()
+        ? core_runtime_->capture()->metrics().capture_frames.load() : 0;
     for (int waited = 0; waited < kWaitFramesMs; waited += 50) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         if (core_runtime_->model_ready()) {
@@ -2161,7 +2208,18 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
             return false;
         }
     }
-    if (error) *error = "新模型 5s 内未完成首次真实推理（首帧门槛未通过）";
+    // 超时：把"没有画面"与"模型本身有问题"分开——两者对操作者的处置完全不同，
+    //   混成一句话会让用户以为模型库坏了（实际只需点亮信号源）。
+    const uint64_t gate_frames_end = core_runtime_->capture()
+        ? core_runtime_->capture()->metrics().capture_frames.load() : 0;
+    const bool no_frame_input = (gate_frames_end == gate_frames_begin);
+    if (capture_missing) *capture_missing = no_frame_input;
+    if (error) {
+        *error = no_frame_input
+                     ? "未检测到画面输入（HDMI 无信号或信号源未输出）："
+                       "5s 内采集 0 帧，无法验证新模型是否可用"
+                     : "新模型 5s 内未完成首次真实推理（首帧门槛未通过）";
+    }
     return false;
 }
 
@@ -2187,7 +2245,16 @@ bool Application::handle_model_set_concurrency(const std::string& model_id, int 
     // 当前运行的是该模型时，立即重建 worker 池使并发生效；否则下次启动该模型时生效。
     if (core_runtime_ && core_runtime_->running() && running_model_id_ == model_id) {
         std::string switch_error;
-        if (!switch_active_model_runtime(model_id, &switch_error)) {
+        bool rebuild_capture_missing = false;
+        if (!switch_active_model_runtime(model_id, &switch_error, &rebuild_capture_missing)) {
+            if (rebuild_capture_missing) {
+                // 并发数已落盘；只是当前没画面、无法验证重建后的首帧 ⇒ 有信号后主循环会自动拉起。
+                if (error) {
+                    *error = "并发数已保存；当前无画面输入，运行时重建将在信号恢复后自动生效。原因: " +
+                             switch_error;
+                }
+                return false;
+            }
             if (error) *error = "并发已保存，但运行时重建失败: " + switch_error;
             return false;
         }

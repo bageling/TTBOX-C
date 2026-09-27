@@ -88,7 +88,15 @@ private:
     // 模型热切换：stop → 用新 active 模型重建 Worker 参数 → start。
     // 返回 true = 新模型已加载且完成首次真实推理（running_model_id 已提交）。
     // 返回 false = 新模型加载/首帧失败，已回滚 active 到旧模型并恢复其运行。
-    bool switch_active_model_runtime(const std::string& new_model_id, std::string* error);
+    // capture_missing（可选出参）：true 表示失败原因是**采集侧一帧都没进来**
+    //   （HDMI 无信号 / 信号源未输出），而不是模型本身有问题。调用方据此给可操作文案，
+    //   并且回滚时不再把"旧模型同样没画面可验证"误报成回滚失败。
+    bool switch_active_model_runtime(const std::string& new_model_id, std::string* error,
+                                     bool* capture_missing = nullptr);
+
+    // 无画面预检：采集在跑却在 probe_ms 内一帧都收不到 ⇒ 判定没有画面输入。
+    // 采集未启动（capture 为空或未 running）时无判据 ⇒ 返回 true 不拦截。
+    bool has_capture_signal(int probe_ms = 200) const;
 
     // T02 启动死锁修复：从"待配置"降级态重建 CoreRuntime（调用方须持生命周期锁）。
     // 未选模型/参数缺失时进程不退出，由本方法在 MODEL_ACTIVATE 或主循环重试时拉起。
