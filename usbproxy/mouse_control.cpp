@@ -563,10 +563,8 @@ static int injector_start();
 static void injector_stop();
 
 int mouse_control_start(const std::string& cmd_socket,
-                        const std::string& event_socket,
-                        bool synthetic) {
+                        const std::string& event_socket) {
     if (g_srv.running.load()) return 0;
-    g_state.synthetic_mode.store(synthetic);
     g_state.mouse_control_enabled.store(true);
 
     g_srv.cmd_listen_fd = create_listen_socket(cmd_socket.c_str());
@@ -608,8 +606,8 @@ int mouse_control_start(const std::string& cmd_socket,
         fprintf(stderr, "mouse_control: 注入节拍线程创建失败，mouse_control 未启动\n");
         return -1;
     }
-    printf("mouse_control: cmd=%s event=%s synthetic=%d 注入节拍=%dus\n",
-           cmd_socket.c_str(), event_socket.c_str(), synthetic ? 1 : 0, kInjectPeriodUs);
+    printf("mouse_control: cmd=%s event=%s 注入节拍=%dus\n",
+           cmd_socket.c_str(), event_socket.c_str(), kInjectPeriodUs);
     return 0;
 }
 
@@ -869,8 +867,6 @@ static void* inject_loop(void*) {
             continue;
         }
         if (!g_state.mouse_control_enabled.load()) continue;
-        // synthetic 模式由 usb-proxy 自己的合成注入器发报告，这里不重复投递
-        if (g_state.synthetic_mode.load()) continue;
         const int iface = g_state.inject_iface.load();
         if (iface < 0) continue;
 
@@ -1072,28 +1068,5 @@ void mouse_control_notify_physical_report(uint8_t interface_number,
     }
 }
 
-// synthetic 模式：从挂起位移构造合成 HID 报告
-// boot 鼠标布局(与 gadget-config.json 描述符一致, 无 report_id):
-// [0]=buttons u8, [1]=X int8, [2]=Y int8, [3]=wheel int8
-int mouse_control_build_synthetic_report(uint8_t* out, uint32_t cap) {
-    int32_t dx = g_state.pending_dx.exchange(0);
-    int32_t dy = g_state.pending_dy.exchange(0);
-    int32_t wheel = g_state.pending_wheel.exchange(0);
-    if (dx == 0 && dy == 0 && wheel == 0) return 0;
-    if (cap < 4) return 0;
-    std::memset(out, 0, 4);
-    out[0] = g_state.button_mask.load();
-    auto put_i8 = [&](int off, int32_t v) {
-        if (v < -128) v = -128;
-        if (v > 127) v = 127;
-        out[off] = static_cast<uint8_t>(static_cast<int8_t>(v));
-    };
-    put_i8(1, dx);
-    put_i8(2, dy);
-    put_i8(3, wheel);
-    g_state.merge_count.fetch_add(1);
-    g_state.last_move_ts_us.store(now_us());
-    return 4;
-}
 
 }  // namespace ttbox_usbproxy

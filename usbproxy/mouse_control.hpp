@@ -66,7 +66,7 @@ struct GadgetConfig {
     uint8_t usb_max_power = 250;
     uint8_t hid_protocol = 2;       // boot
     uint8_t hid_subclass = 1;
-    uint8_t hid_report_length = 4;  // synthetic 基本报告
+    uint8_t hid_report_length = 4;  // 基本报告长度（boot 鼠标布局）
     uint8_t hid_interval = 1;
     std::string manufacturer = "Corsair";
     std::string product = "Corsair USB Optical Mouse";
@@ -112,7 +112,6 @@ struct MouseControlState {
 
     // 运行时开关
     std::atomic<bool> mouse_control_enabled{false};
-    std::atomic<bool> synthetic_mode{false};
 
     // ── 物理报告布局（每接口一份，从描述符解析）──
     //
@@ -158,8 +157,7 @@ extern GadgetConfig g_gadget_config;
 // ── 接口 ──
 // 启动 cmd.sock/event.sock 服务（独立线程）。返回 0 成功。
 int mouse_control_start(const std::string& cmd_socket,
-                        const std::string& event_socket,
-                        bool synthetic);
+                        const std::string& event_socket);
 void mouse_control_stop();
 
 // 将当前 g_gadget_config 持久化到 gadget-config.json（重启后生效）
@@ -186,9 +184,5 @@ bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_
 // 物理报告解析：按该接口解析出的 buttons 字段更新按钮掩码 + 通知订阅者。
 void mouse_control_notify_physical_report(uint8_t interface_number,
                                           const uint8_t* data, uint32_t len);
-
-// synthetic 模式：从挂起位移构造一个合成 HID 报告。
-// 返回报告长度（>0 表示有数据要发）。
-int mouse_control_build_synthetic_report(uint8_t* out, uint32_t cap);
 
 }  // namespace ttbox_usbproxy

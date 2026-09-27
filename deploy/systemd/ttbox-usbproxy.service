@@ -16,8 +16,10 @@ Group=ttbox
 WorkingDirectory=/opt/ttbox/current/usbproxy
 Environment=USB_PROXY_DEVICE=fc000000.usb
 Environment=USB_PROXY_DRIVER=dwc3-gadget
-Environment=USB_PROXY_MODE=full
 Environment=USB_PROXY_SOCKET_DIR=/run/ttbox-mouse-passthrough
+# 1.5.62：合成模式已删除，找不到物理鼠标就一直等（脚本默认无限等待）。
+# 默认 TimeoutStartSec（90s）会把"还在等鼠标"误判成启动失败并杀掉服务 ⇒ 显式关掉。
+TimeoutStartSec=0
 RuntimeDirectory=ttbox-mouse-passthrough
 RuntimeDirectoryMode=0750
 # T1.04（DEP-02）启动链路非致命化：下面这条是【可选】步骤（压制板端其它 USB 透传服务，

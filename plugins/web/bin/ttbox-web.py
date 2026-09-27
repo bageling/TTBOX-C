@@ -5018,11 +5018,10 @@ def get_mouse_hardware():
             'config_source': 'sysfs_usb_mouse' if connected else 'default',
             'connected': connected,
             'mode': requested_mode,
-            # 2026-09-22：真值与请求值分开报。effective_mode 是进程实际在跑的模式，
-            # mode_degraded=True 表示「单元要 full、实际跑 synthetic」（没插物理鼠标）。
+            # effective_mode 是进程实际在跑的模式（读不到进程 = 没在透传）。
+            # mode_degraded：1.5.62 删除合成模式后恒为 False；保留键以免老面板取不到。
             'effective_mode': effective_mode,
-            'mode_degraded': bool(
-                requested_mode == 'full_passthrough' and effective_mode == 'synthetic'),
+            'mode_degraded': False,
             'physical_mouse': physical,
             'service_active': service_active,
             'service_active_text': 'active' if service_active else 'inactive',
@@ -5151,7 +5150,11 @@ def _usbproxy_config_for_form(cfg: dict) -> dict:
 
 
 def _usbproxy_unit_mode() -> str:
-    """usb-proxy 实际透传模式 —— 真源是 systemd 单元的 Environment=USB_PROXY_MODE。"""
+    """usb-proxy 请求的透传模式 —— 读 systemd 单元的 Environment=USB_PROXY_MODE。
+
+    1.5.62 起单元里已不再设置这一项（合成模式删除，只有物理透传一种模式）；
+    这里仍保留读取，只是为了让历史 drop-in（10-mode.conf）残留时不被误判。
+    """
     out = _run_quiet(['systemctl', 'show', '-p', 'Environment', 'ttbox-usbproxy'])
     for token in out.replace('"', ' ').split():
         if token.startswith('USB_PROXY_MODE='):
@@ -5160,12 +5163,10 @@ def _usbproxy_unit_mode() -> str:
 
 
 def _usbproxy_effective_mode() -> str:
-    """usb-proxy 进程**实际**跑的模式：命令行含 `--synthetic_mouse` 即合成。
+    """usb-proxy 进程**实际**跑的模式（1.5.62 起只有物理透传一种）。
 
-    为什么必须有这个（2026-09-22）：单元里的 USB_PROXY_MODE 只是「请求值」。
-    启动脚本在没有物理鼠标时会自行降级合成（run-ttbox-usb-proxy.sh 的 30s 超时分支），
-    单元里却仍写着 full ⇒ 只看单元会把「已降级」说成「完整透传」。
-    读不到进程返回 ''（不编造）。
+    1.5.62 删除了合成模式：命令行带 --vendor_id 才是真在透传物理鼠标。
+    没找到物理鼠标时进程不会起来（启动脚本一直等），读不到就返回 ''（不编造）。
     """
     try:
         for pid in os.listdir('/proc'):
@@ -5178,8 +5179,6 @@ def _usbproxy_effective_mode() -> str:
                 continue
             if 'usb-proxy' not in cmd:
                 continue
-            if '--synthetic_mouse' in cmd:
-                return 'synthetic'
             if '--vendor_id' in cmd:
                 return 'full_passthrough'
     except Exception:

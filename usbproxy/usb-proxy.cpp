@@ -7,7 +7,6 @@
 #include "proxy.h"
 #include "misc.h"
 #include "mouse_control.hpp"
-#include "synthetic.h"
 
 int verbose_level = 0;
 bool please_stop_ep0 = false;
@@ -23,7 +22,6 @@ Json::Value injection_config;
 //   Paths.hpp::kMouseCmdSocketDefault / kMouseEventSocketDefault（及 web paths.py）逐字符相等；
 //   由 scripts/ttbox_conventions_gate.sh 同值断言防漂移（登记表见 docs/protocols/config-path-env-registry.md）。
 bool enable_mouse_control = false;
-bool synthetic_mode = false;
 std::string mouse_cmd_socket = "/run/ttbox-mouse-passthrough/cmd.sock";
 std::string mouse_event_socket = "/run/ttbox-mouse-passthrough/event.sock";
 
@@ -501,7 +499,6 @@ int main(int argc, char **argv)
 		{"enable_mouse_control", no_argument, &lopt, 14},
 		{"mouse_control_cmd_socket", required_argument, &lopt, 15},
 		{"mouse_control_event_socket", required_argument, &lopt, 16},
-		{"synthetic_mouse", no_argument, &lopt, 17},
 		{"allow_class_descriptor_fetch", no_argument, &lopt, 18},
 		{0, 0, 0, 0}
 	};
@@ -573,10 +570,6 @@ int main(int argc, char **argv)
 	case 16:
 		mouse_event_socket = optarg;
 		enable_mouse_control = true;
-		break;
-	case 17:
-		synthetic_mode = true;
-		printf("Synthetic mouse mode enabled\n");
 		break;
 	case 18:
 		// 显式开启「向设备索要 report descriptor」。默认关：实测会把 quirk 固件
@@ -650,7 +643,7 @@ int main(int argc, char **argv)
 	// 启动 mouse_control 通讯层（自研 cmd.sock/event.sock）
 	if (enable_mouse_control) {
 		if (ttbox_usbproxy::mouse_control_start(
-				mouse_cmd_socket, mouse_event_socket, synthetic_mode) != 0) {
+				mouse_cmd_socket, mouse_event_socket) != 0) {
 			fprintf(stderr, "mouse_control_start failed\n");
 			return 1;
 		}
@@ -659,21 +652,12 @@ int main(int argc, char **argv)
 	// 锁住地址空间：转发路径上一次换页就够丢一帧（USB_PROXY_MLOCK=0 可关）。
 	usbproxy_mlockall();
 
-	if (synthetic_mode) {
-		// ── synthetic 模式：无物理鼠标，使用 gadget-config.json 描述符 ──
-		if (setup_synthetic_gadget_desc() != 0) {
-			fprintf(stderr, "setup_synthetic_gadget_desc failed\n");
-			return 1;
-		}
-	} else {
-		while (connect_device(vendor_id, product_id)) {
-			sleep(1);
-		}
-		printf("Device opened successfully\n");
+	while (connect_device(vendor_id, product_id)) {
+		sleep(1);
 	}
+	printf("Device opened successfully\n");
 
-	// Detect physical device speed（synthetic 模式跳过 libusb 检测）。
-	if (!synthetic_mode) {
+	// Detect physical device speed（物理鼠标必接，直接问 libusb）。
 		int libusb_speed = libusb_get_device_speed(libusb_get_device(dev_handle));
 		switch (libusb_speed) {
 		case LIBUSB_SPEED_LOW:
@@ -698,13 +682,8 @@ int main(int argc, char **argv)
 			printf("Device speed: Unknown, defaulting to High Speed\n");
 			break;
 		}
-	} else {
-		device_speed = USB_SPEED_HIGH;
-		printf("Synthetic mode: gadget speed High Speed\n");
-	}
 
-	if (!synthetic_mode)
-		setup_host_usb_desc();
+	setup_host_usb_desc();
 	printf("Setup USB config successfully\n");
 
 	int fd = usb_raw_open();
@@ -718,14 +697,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (synthetic_mode)
-		synthetic_ep0_loop(fd);
-	else
-		ep0_loop(fd);
+	ep0_loop(fd);
 
 	close(fd);
 
-	if (!synthetic_mode) {
 		int bNumConfigurations = device_device_desc.bNumConfigurations;
 		for (int i = 0; i < bNumConfigurations; i++) {
 			int bNumInterfaces = device_config_desc[i]->bNumInterfaces;
@@ -750,7 +725,6 @@ int main(int argc, char **argv)
 			pthread_join(hotplug_monitor_thread, NULL)) {
 			fprintf(stderr, "Error join hotplug_monitor_thread\n");
 		}
-	}
 
 	return 0;
 }

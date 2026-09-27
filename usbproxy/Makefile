@@ -38,7 +38,6 @@ SRCS := \
 	hid_report_layout.cpp \
 	hidraw_source.cpp \
 	inject_clock.cpp \
-	synthetic.cpp \
 	device-libusb.cpp \
 	host-raw-gadget.cpp \
 	misc.cpp

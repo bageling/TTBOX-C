@@ -20,7 +20,6 @@ USB_PROXY_DEVICE=${USB_PROXY_DEVICE:-fc000000.usb}
 USB_PROXY_DRIVER=${USB_PROXY_DRIVER:-dwc3-gadget}
 USB_PROXY_WAIT_SECONDS=${USB_PROXY_WAIT_SECONDS:-1}
 USB_PROXY_EXTRA_ARGS=${USB_PROXY_EXTRA_ARGS:-}
-USB_PROXY_MODE=${USB_PROXY_MODE:-full}   # full | synthetic
 USB_PROXY_SOCKET_DIR=${USB_PROXY_SOCKET_DIR:-/run/ttbox-mouse-passthrough}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -178,32 +177,6 @@ find_mouse()
 	return 1
 }
 
-# 1.5.62：降级合成后继续盯物理鼠标，一旦出现就重启本服务，自动切回物理透传。
-# 为什么需要：quirk 鼠标被打掉后重新枚举很慢（板端实测 12:34 掉线、13:44 才回来），
-# 服务恰好在这段空窗里启动就会永久停在合成模式，用户看到的就是「鼠标不动」。
-# 冷却 90s：设备反复上下线时不会打成重启循环（unit 限流 5 次/300s，90s 冷却只可能 3 次）。
-mouse_auto_recover()
-{
-	[ "${USB_PROXY_MOUSE_AUTO_RECOVER:-1}" = "1" ] || return 0
-	unit=${USB_PROXY_SERVICE_NAME:-ttbox-usbproxy}
-	stamp=/run/ttbox-usbproxy-auto-recover.stamp
-	(
-		rounds=0
-		while [ "$rounds" -lt 720 ]; do
-			sleep 5
-			rounds=$((rounds + 1))
-			ids2=$(find_mouse 2>/dev/null) || continue
-			now=$(date +%s)
-			last=$(cat "$stamp" 2>/dev/null || printf '0')
-			[ $((now - last)) -ge 90 ] || continue
-			printf '%s\n' "$now" >"$stamp" 2>/dev/null
-			printf '[auto-recover] 检测到物理鼠标 %s，重启 %s 切回物理透传\n' "$ids2" "$unit"
-			systemctl restart "$unit"
-			exit 0
-		done
-	) &
-}
-
 # 等待期诊断表：卡在"等鼠标"时，一眼看出是"没插"还是"插了但被判成非鼠标"。
 mouse_scan_report()
 {
@@ -256,49 +229,37 @@ ARGS="--device=$USB_PROXY_DEVICE --driver=$USB_PROXY_DRIVER"
 ARGS="$ARGS --mouse_control_cmd_socket=$USB_PROXY_SOCKET_DIR/cmd.sock"
 ARGS="$ARGS --mouse_control_event_socket=$USB_PROXY_SOCKET_DIR/event.sock"
 
-ids=""
-if [ "$USB_PROXY_MODE" != "synthetic" ]; then
-	# 1.5.26(c)-2（并入 T1.07 版，2026-09-22）：full 模式找物理鼠标加超时降级。旧写法（含 09-21 发布的
-	# T1.07 版）是无限死等——非鼠标环境 = usb-proxy 永不启动、电脑侧看不到鼠标。
-	# 现在超时后降级 synthetic：AI 注入可用、物理透传不可用，插回鼠标 restart 即恢复。
-	# 1.5.62：30s → 90s。30s 太短：quirk 鼠标重新枚举常要 40s 以上，
-	# 服务一错过窗口就永久降级，看着就像「鼠标坏了」。
-	MOUSE_WAIT=${USB_PROXY_MOUSE_WAIT_SECONDS:-90}
-	_waited=0
-	while ! ids=$(find_mouse); do
-		ids=""
-		if [ "$_waited" -ge "$MOUSE_WAIT" ]; then
-			printf 'WARN: %ss 内未找到物理 HID 鼠标，降级为合成鼠标模式。\n' "$MOUSE_WAIT" >&2
-			printf '      合成模式下 AI 注入可用、物理鼠标透传不可用。\n' >&2
-			printf '      已开启自动接管：物理鼠标一插上/一回来会自动重启本服务切回物理透传。\n' >&2
-			mouse_auto_recover
-			USB_PROXY_MODE=synthetic
-			break
-		fi
-		printf 'Waiting for a USB HID mouse on the Orange Pi side... (%ss/%ss)\n' \
-			"$_waited" "$MOUSE_WAIT"
-		# 每 10 次（默认 10s）打一张全量接口表：
-		# 区分「没插鼠标」与「插了但被判成非鼠标」——后者是旧实现的经典故障形态。
-		if [ "$((_waited % 10))" = 0 ]; then
-			mouse_scan_report
-		fi
-		sleep "$USB_PROXY_WAIT_SECONDS"
-		_waited=$((_waited + USB_PROXY_WAIT_SECONDS))
-	done
-fi
+# 1.5.62：**合成模式已删除**。没有物理鼠标就一直等，不再伪造虚拟鼠标。
+#   USB_PROXY_MOUSE_WAIT_SECONDS=0（默认）= 无限等待（unit 已设 TimeoutStartSec=0，
+#   不会因启动慢被 systemd 杀掉）；设成正整数则超时退出，交 systemd 重启再等一轮。
+MOUSE_WAIT=${USB_PROXY_MOUSE_WAIT_SECONDS:-0}
+_waited=0
+while ! ids=$(find_mouse); do
+	ids=""
+	if [ "$MOUSE_WAIT" -gt 0 ] && [ "$_waited" -ge "$MOUSE_WAIT" ]; then
+		printf 'Stopped: %ss 内未找到物理 HID 鼠标。\n' "$MOUSE_WAIT" >&2
+		printf '        本版本没有合成模式，必须接物理鼠标才能透传。查：\n' >&2
+		printf '          lsusb ; journalctl -u ttbox-usbproxy -n 50\n' >&2
+		exit 1
+	fi
+	printf 'Waiting for a USB HID mouse on the Orange Pi side... (%ss/%ss)\n' \
+		"$_waited" "$MOUSE_WAIT"
+	# 每 10 次（默认 10s）打一张全量接口表：
+	# 区分「没插鼠标」与「插了但被判成非鼠标」——后者是旧实现的经典故障形态。
+	if [ "$((_waited % 10))" = 0 ]; then
+		mouse_scan_report
+	fi
+	sleep "$USB_PROXY_WAIT_SECONDS"
+	_waited=$((_waited + USB_PROXY_WAIT_SECONDS))
+done
 
-if [ "$USB_PROXY_MODE" = "synthetic" ]; then
-	printf 'TTBOX usb-proxy synthetic mode\n'
-	ARGS="$ARGS --synthetic_mouse --enable_mouse_control"
-else
-	set -- $ids
-	vendor_id=$1
-	product_id=$2
-	rule=${3:-?}
+set -- $ids
+vendor_id=$1
+product_id=$2
+rule=${3:-?}
 
-	printf 'Using USB mouse %s:%s (matched by %s)\n' "$vendor_id" "$product_id" "$rule"
-	ARGS="$ARGS --vendor_id=$vendor_id --product_id=$product_id --hid_passthrough_compat --enable_mouse_control"
-fi
+printf 'Using USB mouse %s:%s (matched by %s)\n' "$vendor_id" "$product_id" "$rule"
+ARGS="$ARGS --vendor_id=$vendor_id --product_id=$product_id --hid_passthrough_compat --enable_mouse_control"
 
 # shellcheck disable=SC2086
 exec "$USB_PROXY_BIN" $ARGS $USB_PROXY_EXTRA_ARGS

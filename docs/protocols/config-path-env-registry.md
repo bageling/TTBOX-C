@@ -86,16 +86,13 @@
 | `TTBOX_PREVIEW_URL` | URL | `http://127.0.0.1:8001` | `ttbox-web.service` | RUNTIME |
 | `USB_PROXY_DEVICE` | 设备名 | `fc000000.usb` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_DRIVER` | 驱动名 | `dwc3-gadget` | `run-ttbox-usb-proxy.sh` | RUNTIME |
-| `USB_PROXY_MODE` | 枚举 | `full`（`full`\|`synthetic`） | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_SOCKET_DIR` | 路径 | `/run/ttbox-mouse-passthrough` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_WAIT_SECONDS` | 秒 | `1` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_BIN` | 路径 | `<usbproxy 目录>/usb-proxy` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_EXTRA_ARGS` | 字符串 | 空 | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_LIBDIR` | 路径 | `<usbproxy 目录>/lib` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_UDC_WAIT_SECONDS` | 秒 | `60` | `run-ttbox-usb-proxy.sh` | RUNTIME |
-| `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `90`（1.5.62 起；旧值 30 太短，quirk 鼠标重枚举要 40s+） | `run-ttbox-usb-proxy.sh` | RUNTIME |
-| `USB_PROXY_MOUSE_AUTO_RECOVER` | 开关 | `1`（降级合成后继续盯物理鼠标，出现即重启本服务接管） | `run-ttbox-usb-proxy.sh` | RUNTIME |
-| `USB_PROXY_SERVICE_NAME` | 服务名 | `ttbox-usbproxy`（自动接管要重启的 unit） | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `0`=无限等待（1.5.62 起；合成模式已删除，找不到物理鼠标就一直等） | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_MLOCK` | 开关 | `1`（`0`=关） | `usbproxy/misc.cpp`（`mlockall`，转发路径防换页） | RUNTIME |
 | `USB_PROXY_ENDPOINT_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用） | `usbproxy/proxy.cpp` 端点读/写线程 | RUNTIME |
 | `USB_PROXY_EP0_RT_PRIORITY` | SCHED_FIFO 优先级 | `65`（`0`=不启用） | `usbproxy/proxy.cpp` `ep0_loop` | RUNTIME |

@@ -11,7 +11,6 @@
 #include "proxy.h"
 #include "misc.h"
 #include "mouse_control.hpp"
-#include "synthetic.h"
 #include "hidraw_source.hpp"
 
 #ifdef HAVE_LUA
@@ -39,7 +38,6 @@ extern "C" {
 extern bool auto_remap_endpoints;
 // 定义在 usb-proxy.cpp（A-PATH-5 同族：跨编译单元全局，仅读）
 extern bool enable_mouse_control;
-extern bool synthetic_mode;
 // 1.5.58：是否允许 usb-proxy 自行向设备发 class GET_DESCRIPTOR(Report)。
 // 默认 false —— quirk 固件会被这条请求打死（→ 透传全断），只有命令行显式开才试。
 extern bool allow_class_descriptor_fetch;
@@ -177,7 +175,7 @@ static void* hid_layout_worker(void* arg __attribute__((unused)))
 	printf("hid-layout worker: started (retry 500ms, fail-open after 10 stall rounds)\n");
 	uint32_t last_expected = 0;
 	while (!please_stop_ep0) {
-		if (!enable_mouse_control || synthetic_mode)
+		if (!enable_mouse_control)
 			return nullptr;  // 无需布局学习
 		const uint32_t expected =
 			hid_expected_interfaces.load(std::memory_order_acquire);
@@ -246,7 +244,7 @@ static void* hid_layout_worker(void* arg __attribute__((unused)))
 
 static void start_hid_layout_worker()
 {
-	if (!enable_mouse_control || synthetic_mode)
+	if (!enable_mouse_control)
 		return;
 	if (hid_layout_worker_started.exchange(true))
 		return;  // 只启动一次，常驻直到退出

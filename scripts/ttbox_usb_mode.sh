@@ -1,23 +1,19 @@
 #!/bin/sh
-# ttbox_usb_mode.sh — USB 鼠标透传模式的【运维入口】（show | set full | set synthetic）
+# ttbox_usb_mode.sh — USB 鼠标透传模式的【运维入口】（show | set full）
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# 为何存在（2026-09-22 业主定案）：
-#   模式的真源是 systemd 单元的 `Environment=USB_PROXY_MODE=full|synthetic`，
-#   而面板（ttbox-web，ttbox 身份）**没有 root**，改不了单元 —— 原来面板上那个
-#   「完整透传 / 合成模式」单选点了必然失败（PUT /api/hardware/mouse/mode 恒返回
-#   ok:false），激活向导也因为这个 ok:false 在 82% 处抛错。面板已改为**只读展示**，
-#   切换统一走本脚本（唯一入口），不再有人手改单元文件。
+# 1.5.62：合成模式已删除（业主 09-27 定案）。
+#   usb-proxy 现在只有一条路——接物理鼠标做完整透传；找不到物理鼠标就一直等，
+#   不再伪造一个虚拟鼠标。`USB_PROXY_MODE` 环境变量随之废弃：单元里已不再设置，
+#   旧的 drop-in（ttbox-usbproxy.service.d/10-mode.conf）若是残留也会被忽略。
 #
-# 为什么用 drop-in 而不是改单元本体：
-#   `deploy/systemd/ttbox-usbproxy.service` 会被发布/安装流程覆盖写回，
-#   手改的那一行会静默丢失。drop-in（*.service.d/10-mode.conf）是独立文件、
-#   优先级高于单元本体，且发布流程不动它 ⇒ 用户的选择留得住。
+# 为什么还要这个脚本：
+#   `show` 是排障第一手——一眼看出 usb-proxy 进程到底在不在、是不是在等鼠标；
+#   `set full` 用来清掉历史 drop-in，避免旧配置让人误以为还有两种模式。
 #
 # 用法：
-#   ttbox_usb_mode.sh show                 # 打印「单元请求值」与「进程实际值」
-#   sudo ttbox_usb_mode.sh set full        # 完整透传（需盒子插物理 USB 鼠标）
-#   sudo ttbox_usb_mode.sh set synthetic   # 合成模式（不需要外接鼠标）
+#   ttbox_usb_mode.sh show              # 打印当前模式 + 进程实际状态
+#   sudo ttbox_usb_mode.sh set full     # 回到唯一模式（清掉历史 drop-in 并重启服务）
 #
 # 退出码：0 成功；1 用法/参数错；2 需要 root；3 systemctl 操作失败
 set -eu
@@ -29,39 +25,23 @@ DROPIN_DIR="$UNITS_DIR/$UNIT.service.d"
 DROPIN="$DROPIN_DIR/10-mode.conf"
 # 自测钩子：放行非 root 写入（仅离线夹具；生产不得设置）。
 TEST_MODE=${TTBOX_USB_MODE_TEST:-}
+# 1.5.62 起只有这一种模式（合成模式已删除）。
+ONLY_MODE=full
 
 usage()
 {
-	cat <<'EOF'
+	cat <<EOF
 用法:
-  ttbox_usb_mode.sh show
-  sudo ttbox_usb_mode.sh set full|synthetic
+  $0 show
+  sudo $0 set full
 
-说明: full=完整透传(盒子需插物理 USB 鼠标)；synthetic=合成模式(不需要外接鼠标)。
-      show 会同时打印「单元请求值」与「进程实际值」——两者不一致时说明已自动降级。
+说明: 1.5.62 起只有【物理透传】一种模式（合成模式已删除）。
+      盒子必须插物理 USB 鼠标；没插时 usb-proxy 会一直等，不会伪造虚拟鼠标。
+      show 会打印进程实际在跑的模式，以及是否在等鼠标。
 EOF
 }
 
-unit_mode()
-{
-	if [ "$SYSTEMD" = "0" ]; then
-		# 自测模式：直接读 drop-in，不碰 systemctl
-		[ -f "$DROPIN" ] && sed -n 's/^Environment=USB_PROXY_MODE=//p' "$DROPIN" | tail -1
-		return 0
-	fi
-	out=$(systemctl show -p Environment "$UNIT" 2>/dev/null || true)
-	for token in $out; do
-		case "$token" in
-		USB_PROXY_MODE=*)
-			printf '%s\n' "${token#USB_PROXY_MODE=}"
-			return 0
-			;;
-		esac
-	done
-	return 0
-}
-
-# 进程实际跑的模式：命令行带 --synthetic_mouse 即合成（与 web 端同一判据）。
+# 进程实际跑的模式：命令行带 --vendor_id 即物理透传（与 web 端同一判据）。
 effective_mode()
 {
 	for d in /proc/[0-9]*; do
@@ -72,8 +52,7 @@ effective_mode()
 		*) continue ;;
 		esac
 		case "$cmd" in
-		*--synthetic_mouse*) printf 'synthetic\n'; return 0 ;;
-		*--vendor_id*)       printf 'full_passthrough\n'; return 0 ;;
+		*--vendor_id*) printf 'full_passthrough\n'; return 0 ;;
 		esac
 	done
 	return 0
@@ -81,17 +60,15 @@ effective_mode()
 
 do_show()
 {
-	req=$(unit_mode)
 	eff=$(effective_mode)
-	printf '单元请求值: %s\n' "${req:-<未设置>}"
-	printf '进程实际值: %s\n' "${eff:-<未运行>}"
-	if [ -n "$req" ] && [ -n "$eff" ]; then
-		case "$req:$eff" in
-		full:synthetic)
-			printf '注意: 已降级——单元要完整透传，但盒子上没找到物理 USB 鼠标。\n'
-			printf '      插上鼠标后重启: sudo systemctl restart %s\n' "$UNIT"
-			;;
-		esac
+	printf '模式(唯一): %s\n' "$ONLY_MODE"
+	printf '进程实际值: %s\n' "${eff:-<未运行或在等鼠标>}"
+	if [ -f "$DROPIN" ]; then
+		printf '注意: 存在历史 drop-in %s（1.5.62 起 USB_PROXY_MODE 已废弃、会被忽略）。\n' "$DROPIN"
+		printf '      清理: sudo %s set full\n' "$0"
+	fi
+	if [ -z "$eff" ]; then
+		printf '排查: lsusb | grep -i mouse ; journalctl -u %s -n 50\n' "$UNIT"
 	fi
 }
 
@@ -99,27 +76,31 @@ do_set()
 {
 	mode=$1
 	case "$mode" in
-	full|synthetic) ;;
+	full) ;;
+	synthetic)
+		printf '合成模式已在 1.5.62 删除：没有物理鼠标时不再伪造虚拟鼠标。\n' >&2
+		printf '本版本只有 full（物理透传）一种模式。\n' >&2
+		exit 1
+		;;
 	*)
-		printf '模式必须是 full 或 synthetic（收到: %s）\n' "$mode" >&2
+		printf '模式必须是 full（收到: %s）\n' "$mode" >&2
 		exit 1
 		;;
 	esac
 
 	if [ "$(id -u)" != "0" ] && [ -z "$TEST_MODE" ]; then
-		printf '需要 root：改 systemd 单元需写 %s 并重启 %s\n' "$DROPIN_DIR" "$UNIT" >&2
+		printf '需要 root：清理 drop-in 需写 %s 并重启 %s\n' "$DROPIN_DIR" "$UNIT" >&2
 		printf '  sudo %s set %s\n' "$0" "$mode" >&2
 		exit 2
 	fi
 
-	mkdir -p "$DROPIN_DIR"
-	cat > "$DROPIN" <<EOF
-# 由 scripts/ttbox_usb_mode.sh 写入（USB 鼠标透传模式）。
-# 请勿手改单元本体 deploy/systemd/$UNIT.service —— 它会被发布流程覆盖。
-[Service]
-Environment=USB_PROXY_MODE=$mode
-EOF
-	printf '已写入 %s (USB_PROXY_MODE=%s)\n' "$DROPIN" "$mode"
+	# 唯一模式 ⇒ drop-in 没有存在意义，删掉即可（幂等）。
+	if [ -f "$DROPIN" ]; then
+		rm -f "$DROPIN"
+		printf '已删除历史 drop-in %s\n' "$DROPIN"
+	else
+		printf '无需清理：%s 不存在（已是唯一模式 full）\n' "$DROPIN"
+	fi
 
 	if [ "$SYSTEMD" = "0" ]; then
 		printf '[自测] TTBOX_SYSTEMD=0，跳过 daemon-reload/restart\n'
