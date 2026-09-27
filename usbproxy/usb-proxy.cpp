@@ -413,9 +413,12 @@ int setup_host_usb_desc() {
 					//
 					// 中断端点与等时端点同样适用（批量端点不用 bInterval，跳过）。
 					// 旧代码只换算了 ISO，中断端点漏掉 ⇒ 满速鼠标在高速侧被当成 8kHz。
+					// 2026-09-27：低速一并纳入 —— 低速 bInterval 单位同样是毫秒
+					// （大量廉价 2.4G 无线接收器是 Low Speed），此前漏换算同病。
 					uint8_t xfer_type = temp_endpoint.bmAttributes &
 							USB_ENDPOINT_XFERTYPE_MASK;
-					if (device_speed == USB_SPEED_FULL &&
+					if ((device_speed == USB_SPEED_FULL ||
+					     device_speed == USB_SPEED_LOW) &&
 					    (xfer_type == USB_ENDPOINT_XFER_ISOC ||
 					     xfer_type == USB_ENDPOINT_XFER_INT)) {
 						uint8_t fs_interval = temp_endpoint.bInterval;

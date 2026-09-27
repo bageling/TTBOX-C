@@ -67,21 +67,22 @@ struct HidMouseDescriptor {
 // 返回 false = 畸形/越界/没有任何我们认识的用法 ⇒ 调用方**必须**按不可用处理。
 bool hid_parse_report_descriptor(const uint8_t* desc, size_t len, HidMouseDescriptor* out);
 
-// 读取字段值（bit_size ∈ {8,16,32} 且 bit_offset 为 8 的倍数；否则返回 false）。
+// 读取字段值（bit_size ∈ {8,12,16,32}；2026-09-27 起支持 12 位与非字节对齐 ——
+// 罗技系游戏鼠标的 X/Y 常为 12 位且跨字节，旧实现直接拒 ⇒ 该鼠标注入/热键全废）。
 // report/report_len 指向**报告数据起点**（若该报告有 report_id，调用方需自行 +1）。
 bool hid_field_read_signed(const uint8_t* report, size_t report_len,
                            const HidField& f, int32_t* out);
 
-// 写入字段值（越界、位宽不支持、非字节对齐一律拒写并返回 false）。
+// 写入字段值（位宽/越界拒写；写法 = 位窗口 RMW，同字节里相邻字段位原样保留）。
 bool hid_field_write_signed(uint8_t* report, size_t report_len,
                             const HidField& f, int32_t value);
 
-// 读取位掩码（buttons 用；1~16 位，字节对齐）。
+// 读取位掩码（buttons 用；1~16 位，支持非对齐 —— 位窗口读）。
 bool hid_field_read_mask(const uint8_t* report, size_t report_len,
                          const HidField& f, uint32_t* out);
 
-// 写入位掩码（buttons 用；只取 mask 的低 bit_size 位，其余位保持原样）。
-// 越界、位宽不支持（>16）、非字节对齐一律拒写并返回 false。
+// 写入位掩码（buttons 用；只取 mask 的低 bit_size 位，字段外的位保持原样）。
+// 越界、位宽不支持（>16）一律拒写并返回 false。
 bool hid_field_write_mask(uint8_t* report, size_t report_len,
                           const HidField& f, uint32_t mask);
 

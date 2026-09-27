@@ -249,12 +249,20 @@ static void test_field_primitives() {
     CHECK(!hid_field_read_signed(small, 2, f16, &v));
     CHECK(!hid_field_write_signed(small, 2, f16, 42));
 
-    // 非字节对齐 / 非法位宽：一律拒
-    HidField misaligned{true, 3, 8, true};
-    CHECK(!hid_field_is_safe(misaligned));
-    CHECK(!hid_field_write_signed(small, 2, misaligned, 1));
+    // 非法位宽：一律拒（5 位 signed 字段不安全）
     HidField weird{true, 0, 5, true};
     CHECK(!hid_field_is_safe(weird));
+
+    // 非字节对齐 8 位：2026-09-27 起支持（位窗口 RMW，邻居位必须原样保留）
+    HidField misaligned{true, 3, 8, true};
+    CHECK(hid_field_is_safe(misaligned));
+    uint8_t rm[3] = {0xFF, 0xFF, 0xFF};
+    CHECK(hid_field_write_signed(rm, 3, misaligned, 1));
+    // 流 bit3=1、bit4..10=0；其余位保持 1 ⇒ byte0=0x0F、byte1=0xF8、byte2 不动
+    CHECK(rm[0] == 0x0F);
+    CHECK(rm[1] == 0xF8);
+    CHECK(rm[2] == 0xFF);
+    CHECK(hid_field_read_signed(rm, 3, misaligned, &v) && v == 1);
 
     // 饱和钳制：int8 写 300 → 127，写 -300 → -128
     uint8_t r[1] = {0};
@@ -263,6 +271,14 @@ static void test_field_primitives() {
     CHECK(hid_field_write_signed(r, 1, f8, -300) && r[0] == 0x80);
     int32_t back = 0;
     CHECK(hid_field_read_signed(r, 1, f8, &back) && back == -128);
+
+    // 12 位饱和钳制：写 3000 → 2047，写 -3000 → -2048
+    HidField f12{true, 8, 12, true};
+    uint8_t r12[3] = {0, 0, 0};
+    CHECK(hid_field_write_signed(r12, 3, f12, 3000));
+    CHECK(hid_field_read_signed(r12, 3, f12, &back) && back == 2047);
+    CHECK(hid_field_write_signed(r12, 3, f12, -3000));
+    CHECK(hid_field_read_signed(r12, 3, f12, &back) && back == -2048);
 
     // 16 位往返（f16 从 bit8 起 ⇒ 要 3 字节才放得下，2 字节时上面已断言被拒）
     uint8_t r2[3] = {0, 0, 0};
@@ -281,6 +297,61 @@ static void test_field_primitives() {
     CHECK(!hid_fields_overlap_bytes(a, HidField{}));
 }
 
+// ── 用例 8：12 位 X/Y 鼠标（罗技 G 系形状，2026-09-27 修复「有些鼠标不识别」）──
+// buttons@0/5bit、pad3、X@bit8/12bit（跨 byte1..2）、Y@bit20/12bit（跨 byte2..3、
+// 非字节对齐）、wheel@bit32/8bit。旧实现 is_safe 拒 12 位 ⇒ 该类鼠标注入/热键全废。
+static const char* kLogitech12BitDescHex =
+    "05 01 09 02 a1 01 09 01 a1 00"
+    "05 09 19 01 29 05 15 00 25 01 95 05 75 01 81 02"
+    "95 01 75 03 81 01"
+    "05 01 09 30 09 31 16 01 f8 26 ff 07 75 0c 95 02 81 06"
+    "09 38 15 81 25 7f 75 08 95 01 81 06"
+    "c0 c0";
+
+static void test_logitech_12bit_desc() {
+    std::printf("\n[8] 12 位 X/Y 鼠标（罗技 G 系形状：X@8/12bit 跨字节，Y@20/12bit 非对齐）\n");
+    HidMouseDescriptor desc = parse_or_die("logitech-12bit", kLogitech12BitDescHex);
+    CHECK(desc.uses_report_ids == false);
+    const HidReportLayout* l = desc.xy_layout();
+    CHECK(l != nullptr);
+    if (l == nullptr) return;
+    dump_layout(*l);
+    CHECK(l->buttons.present && l->buttons.bit_offset == 0 && l->buttons.bit_size == 5);
+    CHECK(l->x.present && l->x.bit_offset == 8 && l->x.bit_size == 12 && l->x.is_signed);
+    CHECK(l->y.present && l->y.bit_offset == 20 && l->y.bit_size == 12 && l->y.is_signed);
+    CHECK(l->wheel.present && l->wheel.bit_offset == 32 && l->wheel.bit_size == 8);
+    CHECK(l->total_bytes() == 5);
+    CHECK(desc.usable());
+    // X/Y 与 buttons/wheel 字节区间不重叠（安全闸要放行）
+    CHECK(!hid_fields_overlap_bytes(l->x, l->buttons));
+    CHECK(!hid_fields_overlap_bytes(l->y, l->buttons));
+    CHECK(!hid_fields_overlap_bytes(l->x, l->wheel));
+    CHECK(!hid_fields_overlap_bytes(l->y, l->wheel));
+
+    // 注入路径全链路：写按键 + X + Y + wheel，读回应一致
+    uint8_t rep[5] = {0, 0, 0, 0, 0};
+    CHECK(hid_field_write_mask(rep, 5, l->buttons, 0x17));
+    CHECK(hid_field_write_signed(rep, 5, l->x, 100));
+    CHECK(hid_field_write_signed(rep, 5, l->y, -33));
+    CHECK(hid_field_write_signed(rep, 5, l->wheel, -1));
+    int32_t xv = 0, yv = 0, wv = 0;
+    uint32_t bv = 0;
+    CHECK(hid_field_read_mask(rep, 5, l->buttons, &bv) && bv == 0x17);
+    CHECK(hid_field_read_signed(rep, 5, l->x, &xv) && xv == 100);
+    CHECK(hid_field_read_signed(rep, 5, l->y, &yv) && yv == -33);
+    CHECK(hid_field_read_signed(rep, 5, l->wheel, &wv) && wv == -1);
+    // X 与 Y 共享 byte2：写 X 不得破坏 Y（-33 的 12 位补码 = 0xFDF）
+    CHECK(hid_field_write_signed(rep, 5, l->x, -1));
+    CHECK(hid_field_read_signed(rep, 5, l->x, &xv) && xv == -1);
+    CHECK(hid_field_read_signed(rep, 5, l->y, &yv) && yv == -33);
+    CHECK(hid_field_read_mask(rep, 5, l->buttons, &bv) && bv == 0x17);
+    // 字节层面的直观校验：X=-1 ⇒ bit8..19 全 1；Y=-33 ⇒ bit20..31 = 0xFDF
+    CHECK(rep[1] == 0xFF);            // X 低 8 位
+    CHECK(rep[2] == 0xFF);            // X 高 4 位(bit16..19=1) + Y 低 4 位(bit20..23=0xF)
+    CHECK(rep[3] == 0xFD);            // Y 高 8 位 = 0xFD
+    CHECK(rep[4] == 0xFF);            // wheel=-1
+}
+
 int main() {
     std::printf("=== hid_report_layout 自测（CHECK 计数，非裸 assert）===\n");
     test_synthetic_gadget_desc();
@@ -290,6 +361,7 @@ int main() {
     test_boot_mouse();
     test_bad_descriptors();
     test_field_primitives();
+    test_logitech_12bit_desc();
 
     std::printf("\n=== 结果：%d 项检查，%d 项失败 ===\n", g_checks, g_failures);
     if (g_failures == 0) std::printf("PASSED\n");

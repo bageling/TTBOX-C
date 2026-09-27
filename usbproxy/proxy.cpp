@@ -36,6 +36,9 @@ extern "C" {
 #define HID_DT_REPORT			0x22
 
 extern bool auto_remap_endpoints;
+// 定义在 usb-proxy.cpp（A-PATH-5 同族：跨编译单元全局，仅读）
+extern bool enable_mouse_control;
+extern bool synthetic_mode;
 
 static std::atomic<uint32_t> hid_ready_interfaces{0};
 static std::atomic<uint32_t> hid_expected_interfaces{0};
@@ -120,6 +123,53 @@ static bool is_hid_report_descriptor_request(const struct usb_ctrlrequest *ctrl)
 	       (ctrl->bRequestType & USB_RECIP_MASK) == USB_RECIP_INTERFACE &&
 	       ctrl->bRequest == USB_REQ_GET_DESCRIPTOR &&
 	       (ctrl->wValue >> 8) == HID_DT_REPORT;
+}
+
+// ── 2026-09-27：报告描述符「主动拉取」兜底（用户反馈「有些鼠标不识别」）──
+// 依赖说明：此前布局学习只发生在「主机来要描述符」的嗅探路径上（ep0 转发顺带解析）。
+// 若主机枚举时跳过 GET_DESCRIPTOR(Report)（系统描述符缓存 / 私有协议栈 / 复用旧实例），
+// mouse_control 永远拿不到布局 ⇒ fail-closed = 该鼠标按键门与注入全废，用户视角就是
+// 「盒子不识别这只鼠标」（鼠标本身照常透传）。这里在 SET_CONFIGURATION 落定后，
+// 对还没就绪的 HID 接口**直接向物理设备**发一次 GET_DESCRIPTOR(Report) 补课，
+// 让布局学习不再依赖主机的行为。
+static void active_fetch_hid_report_descriptors(int config_index)
+{
+	if (!enable_mouse_control || synthetic_mode)
+		return;
+	if (config_index < 0 || config_index >= host_device_desc.device.bNumConfigurations)
+		return;
+	struct raw_gadget_config *config = &host_device_desc.configs[config_index];
+	for (int i = 0; i < config->config.bNumInterfaces; ++i) {
+		struct raw_gadget_altsetting *alt = &config->interfaces[i].altsettings[0];
+		if (alt->interface.bInterfaceClass != USB_CLASS_HID)
+			continue;
+		const uint8_t iface_num = alt->interface.bInterfaceNumber;
+		const uint32_t bit = interface_bit(iface_num);
+		if (bit && (hid_ready_interfaces.load(std::memory_order_acquire) & bit))
+			continue;  // 嗅探路径已经拿到，不重复拉
+
+		struct usb_ctrlrequest req = {};
+		req.bRequestType = USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE;
+		req.bRequest = USB_REQ_GET_DESCRIPTOR;
+		req.wValue = static_cast<uint16_t>(HID_DT_REPORT << 8);
+		req.wIndex = iface_num;
+		req.wLength = MAX_TRANSFER_SIZE;
+
+		unsigned char data[MAX_TRANSFER_SIZE];
+		int nbytes = 0;
+		unsigned char *dataptr = data;
+		const int rc = control_request(&req, &nbytes, &dataptr, USB_REQUEST_TIMEOUT);
+		if (rc == 0 && nbytes > 0) {
+			ttbox_usbproxy::mouse_control_set_report_descriptor(
+				iface_num, data, static_cast<uint32_t>(nbytes));
+			mark_hid_report_descriptor_ready(iface_num);
+			printf("ep0: active fetch: iface %u report descriptor %d bytes\n",
+			       iface_num, nbytes);
+		} else {
+			printf("ep0: active fetch: iface %u report descriptor failed rc=%d\n",
+			       iface_num, rc);
+		}
+	}
 }
 
 static void log_ep0_ack_failed(int rv)
@@ -1603,6 +1653,10 @@ void ep0_loop(int fd) {
 				}
 
 					set_configuration_done_once = true;
+
+					// 主动补拉还没嗅探到的 HID 报告描述符（见函数头注释）：
+					// 布局学习不再单点依赖「主机来要」。
+					active_fetch_hid_report_descriptors(desired_config);
 				}
 			else if ((event.ctrl.bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD &&
 					event.ctrl.bRequest == USB_REQ_SET_INTERFACE) {

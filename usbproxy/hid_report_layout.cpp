@@ -259,47 +259,81 @@ bool hid_parse_report_descriptor(const uint8_t* desc, size_t len, HidMouseDescri
 
 bool hid_field_is_safe(const HidField& f) {
     if (!f.present || f.bit_offset < 0) return false;
-    if (f.bit_offset % 8 != 0) return false;
-    return f.bit_size == 8 || f.bit_size == 16 || f.bit_size == 32;
+    // 2026-09-27：放开两处限制（用户反馈「有些鼠标不识别」的主力成因）：
+    //   ① bit_size 增加 **12** —— 罗技 G 系等大量游戏鼠标的 X/Y 是 12 位；
+    //   ② 不再要求 bit_offset 字节对齐 —— 12 位 X/Y 几乎必然跨字节
+    //      （buttons 5bit + pad 3bit 后 X@bit8..19、Y@bit20..31）。
+    // 读写实现已改为通用位窗口（RMW），对齐/非对齐同一条路。
+    return f.bit_size == 8 || f.bit_size == 12 || f.bit_size == 16 || f.bit_size == 32;
 }
+
+namespace {
+
+// 覆盖 [bit_offset, bit_offset+bit_size) 的字节窗口：首字节下标与窗口字节数。
+// HID 位序为小端（bit0 = 报告首字节的 bit0），窗口内 bit_offset%8 是字段 LSB。
+inline size_t field_first_byte(const HidField& f) { return static_cast<size_t>(f.bit_offset / 8); }
+inline size_t field_span_bytes(const HidField& f) {
+    return static_cast<size_t>((f.bit_offset % 8 + f.bit_size + 7) / 8);
+}
+inline uint64_t field_bit_mask(int bit_size) {
+    return (bit_size >= 64) ? ~0ull : ((1ull << bit_size) - 1ull);
+}
+
+}  // namespace
 
 bool hid_field_read_signed(const uint8_t* report, size_t report_len,
                            const HidField& f, int32_t* out) {
     if (report == nullptr || out == nullptr || !hid_field_is_safe(f)) return false;
-    const size_t byte_off = static_cast<size_t>(f.bit_offset / 8);
-    const size_t nbytes = static_cast<size_t>(f.bit_size / 8);
-    if (byte_off + nbytes > report_len) return false;
+    const size_t first = field_first_byte(f);
+    const size_t span = field_span_bytes(f);
+    if (first + span > report_len) return false;
 
-    uint32_t raw = 0;
-    for (size_t k = 0; k < nbytes; ++k) {
-        raw |= static_cast<uint32_t>(report[byte_off + k]) << (8 * k);
+    uint64_t window = 0;
+    for (size_t k = 0; k < span; ++k) {
+        window |= static_cast<uint64_t>(report[first + k]) << (8 * k);
     }
-    const uint32_t shift = 32u - 8u * static_cast<uint32_t>(nbytes);
-    *out = static_cast<int32_t>(raw << shift) >> shift;
+    uint64_t raw = (window >> (f.bit_offset % 8)) & field_bit_mask(f.bit_size);
+    if (f.is_signed) {
+        // 符号扩展：把字段的最高位顶到 int64 的符号位再算术右移。
+        const int sh = 64 - f.bit_size;
+        *out = static_cast<int32_t>(static_cast<int64_t>(raw << sh) >> sh);
+    } else {
+        *out = static_cast<int32_t>(raw);
+    }
     return true;
 }
 
 bool hid_field_write_signed(uint8_t* report, size_t report_len,
                             const HidField& f, int32_t value) {
     if (report == nullptr || !hid_field_is_safe(f)) return false;
-    const size_t byte_off = static_cast<size_t>(f.bit_offset / 8);
-    const size_t nbytes = static_cast<size_t>(f.bit_size / 8);
-    if (byte_off + nbytes > report_len) return false;
+    const size_t first = field_first_byte(f);
+    const size_t span = field_span_bytes(f);
+    if (first + span > report_len) return false;
 
     // 按位宽做饱和钳制（写不进去的空间宁可钳，不要回绕成反向巨量）
-    int32_t lo = 0;
-    int32_t hi = 0;
-    switch (nbytes) {
-        case 1: lo = -128; hi = 127; break;
-        case 2: lo = -32768; hi = 32767; break;
+    int64_t lo = 0;
+    int64_t hi = 0;
+    switch (f.bit_size) {
+        case 8:  lo = -128; hi = 127; break;
+        case 12: lo = -2048; hi = 2047; break;
+        case 16: lo = -32768; hi = 32767; break;
         default: lo = INT32_MIN; hi = INT32_MAX; break;
     }
-    if (value < lo) value = lo;
-    if (value > hi) value = hi;
+    if (value < lo) value = static_cast<int32_t>(lo);
+    if (value > hi) value = static_cast<int32_t>(hi);
 
-    const uint32_t raw = static_cast<uint32_t>(value);
-    for (size_t k = 0; k < nbytes; ++k) {
-        report[byte_off + k] = static_cast<uint8_t>((raw >> (8 * k)) & 0xFF);
+    // 读-改-写窗口字节：字段自己的位被替换，**同字节里别的字段（buttons/Y/…）原样保留**。
+    // 字节对齐时窗口 == 字段自己的字节，与旧的整字节写结果一致。
+    const uint64_t mask = field_bit_mask(f.bit_size);
+    const int lsb = f.bit_offset % 8;
+    uint64_t window = 0;
+    for (size_t k = 0; k < span; ++k) {
+        window |= static_cast<uint64_t>(report[first + k]) << (8 * k);
+    }
+    window &= ~(mask << lsb);
+    window |= (static_cast<uint64_t>(static_cast<uint32_t>(value)) & mask) << lsb;
+    for (size_t k = 0; k < span; ++k) {
+        report[first + k] = static_cast<uint8_t>((window >> (8 * k)) & 0xFF);
     }
     return true;
 }
@@ -308,40 +342,39 @@ bool hid_field_read_mask(const uint8_t* report, size_t report_len,
                          const HidField& f, uint32_t* out) {
     if (report == nullptr || out == nullptr) return false;
     if (!f.present || f.bit_offset < 0) return false;
-    if (f.bit_offset % 8 != 0) return false;
     if (f.bit_size <= 0 || f.bit_size > 16) return false;
-    const size_t byte_off = static_cast<size_t>(f.bit_offset / 8);
-    const size_t nbytes = static_cast<size_t>((f.bit_size + 7) / 8);
-    if (byte_off + nbytes > report_len) return false;
+    const size_t first = field_first_byte(f);
+    const size_t span = field_span_bytes(f);
+    if (first + span > report_len) return false;
 
-    uint32_t raw = 0;
-    for (size_t k = 0; k < nbytes; ++k) {
-        raw |= static_cast<uint32_t>(report[byte_off + k]) << (8 * k);
+    uint64_t window = 0;
+    for (size_t k = 0; k < span; ++k) {
+        window |= static_cast<uint64_t>(report[first + k]) << (8 * k);
     }
-    const uint32_t mask = (f.bit_size >= 32) ? 0xFFFFFFFFu
-                                             : ((1u << f.bit_size) - 1u);
-    *out = raw & mask;
+    *out = static_cast<uint32_t>((window >> (f.bit_offset % 8)) & field_bit_mask(f.bit_size));
     return true;
 }
 
 bool hid_field_write_mask(uint8_t* report, size_t report_len,
-                          const HidField& f, uint32_t mask) {
+                          const HidField& f, uint32_t mask_value) {
     if (report == nullptr) return false;
     if (!f.present || f.bit_offset < 0) return false;
-    if (f.bit_offset % 8 != 0) return false;
     if (f.bit_size <= 0 || f.bit_size > 16) return false;
-    const size_t byte_off = static_cast<size_t>(f.bit_offset / 8);
-    const size_t nbytes = static_cast<size_t>((f.bit_size + 7) / 8);
-    if (byte_off + nbytes > report_len) return false;
+    const size_t first = field_first_byte(f);
+    const size_t span = field_span_bytes(f);
+    if (first + span > report_len) return false;
 
-    const uint32_t bits = (f.bit_size >= 32) ? 0xFFFFFFFFu : ((1u << f.bit_size) - 1u);
-    const uint32_t value = mask & bits;
-    for (size_t k = 0; k < nbytes; ++k) {
-        // 与 hid_field_read_mask 完全对称：小端、按字节拼装，未覆盖的高位保持原值。
-        const uint32_t byte_mask_bits = bits >> (8 * k);
-        const uint32_t keep = ~(byte_mask_bits & 0xFFu);
-        const uint32_t want = (value >> (8 * k)) & 0xFFu;
-        report[byte_off + k] = static_cast<uint8_t>((report[byte_off + k] & keep) | want);
+    const uint64_t mask = field_bit_mask(f.bit_size);
+    const int lsb = f.bit_offset % 8;
+    // 与 hid_field_read_mask 完全对称：小端、位窗口 RMW，字段外的位保持原值。
+    uint64_t window = 0;
+    for (size_t k = 0; k < span; ++k) {
+        window |= static_cast<uint64_t>(report[first + k]) << (8 * k);
+    }
+    window &= ~(mask << lsb);
+    window |= (static_cast<uint64_t>(mask_value) & mask) << lsb;
+    for (size_t k = 0; k < span; ++k) {
+        report[first + k] = static_cast<uint8_t>((window >> (8 * k)) & 0xFF);
     }
     return true;
 }
