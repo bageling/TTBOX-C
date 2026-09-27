@@ -6145,6 +6145,14 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <button id="checkUpdateButton" class="ghost-button" type="button">检查更新</button>
                 <button id="installUpdateButton" class="danger-button" type="button" disabled>安装更新</button>
               </div>
+              <!-- 2026-09-27 业主令：手动链接更新。分发服务器域名被宽带侧过滤时，
+                   可粘贴 https 直链（含 IP 直链）手动下载更新包浇筑；后端复用
+                   /api/update/install 单一实现点（仅接受 https，签旁车校验不变）。 -->
+              <div class="hardware-actions">
+                <input id="customOtaUrlInput" class="value-input" type="url" inputmode="url"
+                       placeholder="粘贴 https 更新包直链（手动更新）" autocomplete="off" spellcheck="false">
+                <button id="installCustomUrlButton" class="ghost-button" type="button">从链接更新</button>
+              </div>
               <!-- 2026-09-20 业主定案：更新卡片只留一套 UI。原「版本两行 summary」删除，
                    版本信息并入这个常驻详情面板（标签+进度+消息），不再两套来回变换。 -->
               <div id="updateProgressPanel" class="update-progress-panel is-idle">
@@ -13452,6 +13460,53 @@ function bindEvents() {
     const result = await checkUpdate();
     renderUpdateResult(result);
     showToast(result.update_available ? "发现可用更新" : "当前已是最新");
+  }));
+
+  // ── 手动链接更新（2026-09-27）：任意 https 直链走 /api/update/install，
+  //    与「安装更新」共用进度轮询/状态渲染；version 留空由更新器自包内解析。
+  on("installCustomUrlButton", "click", () => runUiAction(async () => {
+    const input = $("customOtaUrlInput");
+    const url = ((input && input.value) || "").trim();
+    if (!url) {
+      throw new Error("请先粘贴更新包 https 直链");
+    }
+    if (!/^https:\/\//i.test(url)) {
+      throw new Error("仅支持 https 链接");
+    }
+    const confirmed = window.confirm(
+      "将从该链接下载更新包并安装，安装会重启本地服务，过程中页面会短暂断开。确认现在安装？");
+    if (!confirmed) {
+      return;
+    }
+    renderUpdateStatus({
+      status: "running",
+      stage: "submit",
+      message: "正在提交自定义链接更新任务",
+      progress: 1,
+      version: "",
+    });
+    // 与 installUpdatePlan 同口径：running 渲染之后上闩，避免空窗期进度条闪动。
+    state.updateSessionDeadline = Date.now() + UPDATE_SESSION_TIMEOUT_MS;
+    startUpdateStatusPolling();
+    try {
+      await api("/api/update/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    } catch (error) {
+      stopUpdateStatusPolling();
+      renderUpdateStatus({
+        status: "failed",
+        stage: "failed",
+        message: "更新失败",
+        progress: 100,
+        version: "",
+        error: error.message || String(error),
+      });
+      throw error;
+    }
+    showToast("更新任务已启动");
   }));
 
   // ── 自动标定（/api/control/calibration）────────────────────────────

@@ -6,10 +6,13 @@
 # ★ 分发服务器地址（单点纪律）：OTA_SERVER_URL 写死在这里，必须与
 #   plugins/web/bin/ttbox-web.py 的 OTA_SERVER_URL **同值**——改一处必须同步改另一处；
 #   `ttbox.sh doctor` 会比对两处是否漂移。
-#   正式服务器（2026-09-26 起）：cctv2.top，**阿里云 47.104.18.178 安全组直通**，
-#   HTTPS 主入口 10086（旧七牛 38.127.133.6 与 NAT 10015/10046 映射已随机器作废）。
-#   地址必须带端口（不带端口的 https://cctv2.top/… 不通）。
-OTA_SERVER_URL="https://cctv2.top:10086/ota"
+#   正式服务器（2026-09-27 起）：**IP 直连** https://47.104.18.178:10086/ota。
+#   2026-09-27 实锤：业主移动宽带按「域名家族+IP」过滤 cctv2.top/xiaotian.help
+#   （80 端口回 ICP 拦截页、TLS 全端口掐真域名 SNI），域名访问必须等 ICP 备案通过；
+#   IP 直连不发 SNI 可绕过。服务器侧已有 LE IP 证书（shortlived，acme.sh 自动续），
+#   nginx 10086 default_server 块接管无 SNI 握手。备案通过后可切回域名。
+#   地址必须带端口。
+OTA_SERVER_URL="https://47.104.18.178:10086/ota"
 
 set -euo pipefail
 
