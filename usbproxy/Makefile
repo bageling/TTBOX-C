@@ -68,7 +68,7 @@ LUA_INCDIR ?= /usr/include/lua5.4
 # ---- 编译 / 链接参数 -----------------------------------------------------------
 CXXSTD    ?= -std=c++17
 # ★ 硬门禁（item 6）：`OPT` 是**外部可覆盖**变量，**不得**含 `-DNDEBUG`。
-#   usbproxy 的断言（synthetic.cpp / proxy.cpp 的防御性检查）是**运行期安全网**；一旦
+#   usbproxy 的断言（proxy.cpp 的防御性检查）是**运行期安全网**；一旦
 #   `-DNDEBUG` 把它们编译掉，非法/越界输入会被静默放过 —— 即"绿灯下的失效"。
 #   Release 交付靠 `-O2`/`-O3` 优化即可，**绝不**用 `-DNDEBUG` 抹断言。
 #   纯注释拦不住 `make OPT='-O3 -DNDEBUG'`，故落成 `$(error)` **真门禁** —— 与测试 TU 的
