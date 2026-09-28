@@ -75,8 +75,9 @@ def test_lead_blocks_map_into_nested_objects():
 def test_humanize_and_small_modules_map():
     mod = _load()
     prof = mod.web_body_to_profile(_body(
-        humanize_enabled=True, humanize_smooth_factor=0.35, humanize_accuracy_sim_direction=2,
-        humanize_speed_fluctuation_enabled=True, humanize_speed_fluctuation_intensity=0.25,
+        humanize_enabled=True, humanize_smooth_factor=0.35,
+        accuracy_sim_enabled=True, accuracy_sim_direction=2,
+        speed_fluctuation_enabled=True, speed_fluctuation_intensity=0.25,
         anti_overshoot_enabled=True, anti_overshoot_inner_frames=4,
         speed_adaptive_kp_enabled=True, speed_adaptive_kp_move_mult=1.8,
         global_wave_enabled=True, global_wave_freq=1.7,
@@ -84,9 +85,14 @@ def test_humanize_and_small_modules_map():
     m = prof['mouse']
     assert m['humanize']['enabled'] is True
     assert abs(m['humanize']['smooth_factor'] - 0.35) < 1e-9
-    assert m['humanize']['accuracy_sim_direction'] == 2
-    assert m['humanize']['speed_fluctuation_enabled'] is True
-    assert abs(m['humanize']['speed_fluctuation_intensity'] - 0.25) < 1e-9
+    # ★ 2026-09-29：speed_fluctuation / accuracy_sim 已拆成**独立段**（键名不再带 humanize_
+    #   前缀），搬运目标也从 mouse.humanize.* 改成 mouse.speed_fluctuation.* /
+    #   mouse.accuracy_sim.*。此前那 8 个扁平键 Core 一个都不认 ⇒ 面板上「速度波动」
+    #   「精度模拟」两组控件是假开关（调了存不到 core 读的位置）。
+    assert m['accuracy_sim']['enabled'] is True
+    assert m['accuracy_sim']['direction'] == 2
+    assert m['speed_fluctuation']['enabled'] is True
+    assert abs(m['speed_fluctuation']['intensity'] - 0.25) < 1e-9
     assert m['anti_overshoot']['inner_frames'] == 4
     assert abs(m['speed_adaptive_kp']['move_mult'] - 1.8) < 1e-9
     assert abs(m['global_wave']['freq'] - 1.7) < 1e-9

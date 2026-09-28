@@ -78,9 +78,7 @@ public:
         fire_press_ms_ = 0.0f;
         target_lost_ms_ = 0.0f;
         recoil_ramp_ = 0.0f;
-        recoil_x_jitter_phase_ = 0.0f;
         recoil_residual_y_ = 0.0f;
-        recoil_residual_x_ = 0.0f;
         had_target_ = false;
         // BB 三段查表引擎状态
         bb_clock_ms_ = 0.0f;
@@ -109,9 +107,7 @@ private:
     float fire_press_ms_ = 0.0f;      // 本次按住持续时长（ms，松开清零）
     float target_lost_ms_ = 0.0f;     // 目标丢失持续时长（ms，重新见目标清零）
     float recoil_ramp_ = 0.0f;        // 缓入缓出系数 [0,1]
-    float recoil_x_jitter_phase_ = 0.0f;  // X 微动相位（rad）
     float recoil_residual_y_ = 0.0f;  // Y 亚像素残差（count）
-    float recoil_residual_x_ = 0.0f;  // X 亚像素残差（count）
     bool had_target_ = false;         // 是否曾经见过目标（丢失窗口仅对曾见目标生效）
     bool active_ = false;             // 本帧是否激活压枪
 
@@ -188,15 +184,11 @@ inline RecoilController::RecoilDelta RecoilController::update(
     const float base_count = rate_px_per_s * dt / ppc;
     const float ramp_count = base_count * recoil_ramp_;
 
-    // ---- X 轴微动（拟人）：相位推进 + 幅度随 ramp ----
-    if (cfg.humanize_enabled && cfg.humanize_jitter_px > 0.0f) {
-        recoil_x_jitter_phase_ += dt * cfg.humanize_jitter_frequency * 6.2832f;
-        const float jitter_count =
-            (cfg.humanize_jitter_px * recoil_ramp_ / ppc) * std::sin(recoil_x_jitter_phase_);
-        recoil_residual_x_ += jitter_count;
-        out.x = recoil_residual_x_;
-        recoil_residual_x_ = 0.0f;
-    }
+    // ---- X 轴微动：★ 2026-09-29 已删 ----
+    //   原实现在压枪时叠加固定频率正弦 X 微动（humanize_jitter_px，默认 0.25px、
+    //   8Hz），属 7 套重复抖动机制之一 ⇒ 按业主「合不了就删」口径删除。
+    //   humanize_jitter_px / humanize_jitter_frequency 字段保留在结构体里（老配置可解析），
+    //   本模块不再消费。out.x 保持默认 0。
 
     // ---- Y 残差累计（与 PID remainder 同域，不丢精度）----
     recoil_residual_y_ += ramp_count;
@@ -265,10 +257,10 @@ inline RecoilController::BbOutput RecoilController::update_bb(
         float v = bb.preset_vert[idx][seg - 1] * bb.global_vert;
         float h = bb.preset_horiz[idx][seg - 1] * bb.global_horiz;
 
-        // [9] 水平漂移正弦
-        if (bb.drift_enabled) {
-            h += std::sin(6.2831853f * (bb_clock_ms_ * 0.001f) * bb.drift_freq) * bb.drift_amplitude;
-        }
+        // [9] 水平漂移正弦：★ 2026-09-29 已删
+        //   原实现叠加固定频率正弦水平漂移（drift_amplitude 0.20、drift_freq），
+        //   属 7 套重复抖动机制之一 ⇒ 删除。drift_enabled / drift_amplitude /
+        //   drift_freq 字段保留在结构体里，本模块不再消费。
 
         // Y 路屏蔽（进阶压枪）
         if (bb.y_suppress_enabled) v *= bb.y_suppress_strength;

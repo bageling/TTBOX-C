@@ -11,7 +11,7 @@
 //   Case8  hotkey_mode=all：需双键同时按下
 //   Case9  亚像素残差累计：低速压枪小数不丢（多帧累加输出）
 //   Case10 缓入缓出 ramp：首帧输出 < 稳态输出
-//   Case11 humanize X 微动：启用时 X 有输出，禁用时 X=0
+//   Case11 X 轴微动已删除：jitter_px 不再被消费，X 恒为 0
 #include <cstdio>
 #include <cmath>
 
@@ -42,7 +42,7 @@ RecoilConfig make_cfg() {
     c.speed = 1.0f;
     c.humanize_enabled = true;
     c.humanize_curve_strength = 1.0f;   // 快速 ramp（便于测试）
-    c.humanize_jitter_px = 0.0f;        // 测试 Y 时关掉 X 微动
+    c.humanize_jitter_px = 0.0f;        // 字段保留兼容老配置；X 微动已于 2026-09-29 删除
     c.humanize_jitter_frequency = 8.0f;
     return c;
 }
@@ -211,20 +211,22 @@ void test_ramp() {
     check(steady > 0.0f, "稳态输出 > 0");
 }
 
-// Case11: humanize X 微动
+// Case11: X 轴微动已删除（2026-09-29）
+//   旧实现：压枪时叠加固定 8Hz 正弦 X 微动（humanize_jitter_px，默认 0.25px）。
+//   该段属 TTBOX 自研的 4 套固定正弦抖动之一，非 BB 来源，已整段删除。
+//   现在的判据：**即使显式给非零 jitter_px，X 也必须恒为 0**（锁死删除行为）。
 void test_jitter() {
-    std::printf("[Case11] humanize X 微动：启用有 X 输出，禁用 X=0\n");
-    // 启用
+    std::printf("[Case11] X 轴微动已删除：给非零 jitter_px，X 仍恒为 0\n");
     RecoilController rc;
     RecoilConfig cfg = make_cfg();
-    cfg.humanize_jitter_px = 0.25f;
+    cfg.humanize_jitter_px = 0.25f;   // 字段仍在，但不再有消费点
     float x_sum = 0.0f;
     for (int i = 0; i < 60; ++i) {
         const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
         x_sum += d.x;
     }
-    check(x_sum != 0.0f, "启用时 X 有微动输出");
-    // 禁用
+    check(x_sum == 0.0f, "jitter_px=0.25 时 X 仍为 0（抖动已删除）");
+    // 默认档复核
     RecoilController rc2;
     RecoilConfig cfg2 = make_cfg();
     cfg2.humanize_jitter_px = 0.0f;
@@ -233,7 +235,7 @@ void test_jitter() {
         const auto d = rc2.update(0x01, true, cfg2, kDtMs, kPpc);
         x_sum2 += d.x;
     }
-    check(x_sum2 == 0.0f, "禁用时 X 无输出");
+    check(x_sum2 == 0.0f, "jitter_px=0 时 X 为 0");
 }
 
 }  // namespace

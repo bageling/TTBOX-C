@@ -5544,14 +5544,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 </article>
                 <article class="module-tile">
                   <div class="module-title">
-                    <strong>水平漂移 / Y 路屏蔽</strong>
-                    <label class="switch"><input id="recoil_bb_drift_enabled" data-config type="checkbox"><span></span></label>
+                    <strong>Y 路屏蔽</strong>
                   </div>
                   <div class="assist-section-body">
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">漂移幅度 px<input id="recoil_bb_drift_amplitude" data-config type="number" min="0" step="0.05"><span class="field-hint">水平方向叠加的正弦抖动，模拟枪口左右摆。</span></label>
-                      <label class="field">漂移频率 Hz<input id="recoil_bb_drift_freq" data-config type="number" min="0" step="0.1"></label>
-                    </div>
                     <div class="check-field">
                       <label class="check-line"><input id="recoil_bb_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路下压</label>
                       <span class="field-hint">按下面的乘子削弱垂直下压；0 为完全屏蔽（只做水平修正）。</span>
@@ -5786,7 +5781,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <div class="assist-section-body">
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">曲线强度<input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭。</span></label>
-                      <label class="field">随机抖动 px<input id="controller_pull_curve_jitter_px" data-config type="number" min="0" max="12" step="0.1"><span class="field-hint">只在拉枪期间加入；0 为关闭。</span></label>
                       <label class="field">启用距离 px<input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过它才启用；锁定后自动停止。</span></label>
                     </div>
                   </div>
@@ -6554,7 +6548,6 @@ const NUMERIC_RANGE_LIMITS = {
   controller_smooth: [0, 9999],
   controller_output_deadzone: [0, 20],
   controller_pull_curve_strength: [0, 2],
-  controller_pull_curve_jitter_px: [0, 12],
   controller_pull_curve_min_distance: [0, 1280],
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
@@ -6595,7 +6588,6 @@ const CONTROLLER_DEFAULTS = {
   output_deadzone: 1,
   pull_curve_enabled: true,
   pull_curve_strength: 0.8,
-  pull_curve_jitter_px: 3,
   pull_curve_min_distance: 80,
   aim_reference_offset_x: 0,
   aim_reference_offset_y: 0,
@@ -6614,6 +6606,9 @@ const CONTROLLER_DEFAULTS = {
 //   前后端同源，注释会让解析直接炸（2026-09-26 实测）。要注释就写在本注释块里。
 //   bezier（2026-09-26 接线）只列 warp_error 真正读到的字段：generation / segments
 //   属于 path1/path2 拆点列那套，主链不用，刻意不进表（不进面板）。
+//   注：speed_fluctuation / accuracy_sim 按 BB 927 原版是**独立开关**，不归 humanize.enabled
+//   管（原版 main.lua:5943 / :6445 各自独立判断）⇒ 拆成独立段，面板也不再挂在拟人化卡片下。
+//   这两行说明原本写在表体里，2026-09-29 移出 —— 表内注释会让上面的同步用例直接炸。
 // ---------------------------------------------------------------------------
 const BB_CTRL_MODULES = [
   ["lead1", [
@@ -6657,15 +6652,12 @@ const BB_CTRL_MODULES = [
     ["delay_ms", "n", 0.0],
     ["delay_random_ms", "n", 0.0],
   ]],
-  // BB 927 原版：这两个是**独立开关**，不归 humanize.enabled 管
-  //（原版 main.lua:5943 / :6445 各自独立判断）⇒ 拆成独立段，面板也不再挂在拟人化卡片下。
   ["speed_fluctuation", [
     ["enabled", "b", false],
     ["start_speed", "n", 0.8],
     ["accel_ratio", "n", 0.2],
     ["decel_ratio", "n", 0.2],
     ["intensity", "n", 0.15],
-    ["total_distance_px", "n", 452.5],
   ]],
   ["accuracy_sim", [
     ["enabled", "b", false],
@@ -6792,9 +6784,6 @@ const BB_CTRL_MODULES = [
     ["smooth", "n", 0.9],
     ["distance_limit", "n", 80.0],
     ["no_target_always", "b", false],
-    ["drift_enabled", "b", false],
-    ["drift_amplitude", "n", 0.2],
-    ["drift_freq", "n", 1.0],
     ["y_suppress_enabled", "b", false],
     ["y_suppress_strength", "n", 0.0],
     ["max_down_distance", "n", 0.0],
@@ -9610,7 +9599,6 @@ function populateForm(config) {
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
-  setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px ?? CONTROLLER_DEFAULTS.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
   setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
   setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
@@ -9648,7 +9636,6 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_output_deadzone", controller.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
-  setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
 }
@@ -9757,7 +9744,6 @@ const ASSIST_SECTION_EXTRA_DEFAULTS = {
   "assist-section-lead": () => ({
     controller_pull_curve_enabled: CONTROLLER_DEFAULTS.pull_curve_enabled,
     controller_pull_curve_strength: CONTROLLER_DEFAULTS.pull_curve_strength,
-    controller_pull_curve_jitter_px: CONTROLLER_DEFAULTS.pull_curve_jitter_px,
     controller_pull_curve_min_distance: CONTROLLER_DEFAULTS.pull_curve_min_distance,
   }),
 };
@@ -9859,7 +9845,6 @@ function collectConfig() {
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
-        pull_curve_jitter_px: getNumber("controller_pull_curve_jitter_px", CONTROLLER_DEFAULTS.pull_curve_jitter_px),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),

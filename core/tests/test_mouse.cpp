@@ -14,7 +14,6 @@
 #include "mouse/ContinuousLead.hpp"
 #include "mouse/Deadzone.hpp"
 #include "mouse/FovAngle.hpp"
-#include "mouse/Humanize.hpp"
 #include "mouse/MotionMerge.hpp"
 #include "mouse/MouseRouter.hpp"
 #include "mouse/MouseTypes.hpp"
@@ -598,7 +597,8 @@ TEST(mouse_router_parse_logitech_layout) {
 }
 
 // ---------------------------------------------------------------------------
-// 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）/ Humanize（拟人）
+// 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）
+// 注：Humanize（拟人微动）已于 2026-09-29 删除，见本文件下方说明。
 // ---------------------------------------------------------------------------
 TEST(mouse_pull_curve_activates_only_beyond_min_distance) {
     aim::PullCurveConfig cfg;  // enabled=true min_distance=80 strength=0.8
@@ -632,21 +632,9 @@ TEST(mouse_continuous_lead_needs_accumulated_distance) {
     cl.reset();
 }
 
-TEST(mouse_humanize_adds_jitter_only_when_enabled) {
-    aim::HumanizeConfig cfg;  // enabled=true jitter_px=0.25
-    aim::Humanize hz;
-    float x = 0.0f, y = 0.0f;
-    hz.apply(&x, &y, 4.0f, cfg);
-    // 抖动幅度 ≤ jitter_px（0.25）
-    CHECK(std::fabs(x) <= 0.26f);
-    CHECK(std::fabs(y) <= 0.26f);
-    // 关闭：不抖动
-    cfg.enabled = false;
-    x = 0.0f; y = 0.0f;
-    hz.apply(&x, &y, 4.0f, cfg);
-    CHECK_EQ(x, 0.0f);
-    CHECK_EQ(y, 0.0f);
-}
+// 2026-09-29：Humanize（固定正弦 X 微动）整模块已删除 —— 它属于 TTBOX 自研的 4 套
+// 固定正弦抖动之一，非 BB 来源。对应用例 `mouse_humanize_adds_jitter_only_when_enabled`
+// 一并移除。HumanizeConfig 结构体保留（老配置仍可解析，字段不再被消费）。
 
 // ---------------------------------------------------------------------------
 // RuntimeProfile mouse 段序列化（对齐参数/自适应死区/拉枪插件）

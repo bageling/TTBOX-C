@@ -859,12 +859,22 @@ CTRL_BLOCKS = [
         ('enabled', 'b', False), ('smooth_factor', 'n', 0.0), ('overshoot', 'n', 0.0),
         ('brake_distance', 'n', 0.0), ('noise_sigma', 'n', 0.2), ('delay_ms', 'n', 0.0),
         ('delay_random_ms', 'n', 0.0),
-        ('speed_fluctuation_enabled', 'b', False), ('speed_fluctuation_start_speed', 'n', 0.80),
-        ('speed_fluctuation_accel_ratio', 'n', 0.20),
-        ('speed_fluctuation_decel_ratio', 'n', 0.20),
-        ('speed_fluctuation_intensity', 'n', 0.15),
-        ('accuracy_sim_enabled', 'b', False), ('accuracy_sim_perfect_rate', 'n', 90.0),
-        ('accuracy_sim_offset_strength', 'n', 0.50), ('accuracy_sim_direction', 'i', 0),
+    ]),
+    # ★ 2026-09-29 修正：speed_fluctuation / accuracy_sim 原本以**扁平键**挂在 humanize 段里
+    #   （'speed_fluctuation_enabled' …）⇒ 实际键名成了 humanize_speed_fluctuation_enabled，
+    #   而面板 2026-09-28 已把这两组拆成独立卡片，控件 id 是 speed_fluctuation_enabled。
+    #   两边键名对不上 ⇒ 面板上「速度波动」「精度模拟」调了存不下去（假开关）；
+    #   即便存下去也落在 mouse.humanize.* 里，而 Core 读的是 mouse.speed_fluctuation.* /
+    #   mouse.accuracy_sim.*（2026-09-28 已拆成独立段，RuntimeProfile.cpp:1300-1315）。
+    #   现在后端也拆成独立段，core / 面板表 / 后端表 三处口径才真正一致。
+    #   total_distance_px 不进表：BB 原版是几何常量（sqrt(Centre²+Centre²)），面板无控件。
+    ('speed_fluctuation', 'speed_fluctuation', [
+        ('enabled', 'b', False), ('start_speed', 'n', 0.80), ('accel_ratio', 'n', 0.20),
+        ('decel_ratio', 'n', 0.20), ('intensity', 'n', 0.15),
+    ]),
+    ('accuracy_sim', 'accuracy_sim', [
+        ('enabled', 'b', False), ('perfect_rate', 'n', 90.0),
+        ('offset_strength', 'n', 0.50), ('direction', 'i', 0),
     ]),
     ('anti_overshoot', 'anti_overshoot', [
         ('enabled', 'b', False), ('outer_distance', 'n', 20.0), ('outer_strength', 'n', 50.0),
@@ -937,11 +947,13 @@ CTRL_BLOCKS = [
 
 # 压枪三段查表：标量走 CTRL_BLOCKS 的写法，三个数组单独搬运
 # （Core 侧 from_json 直接读 JSON 嵌套数组，见 RuntimeProfile.cpp read_table3x3）。
+# ★ 2026-09-29：drift_enabled / drift_amplitude / drift_freq 三项已从本表撤下。
+#   那三个键对应的固定正弦水平漂移属 TTBOX 自研的 4 套重复抖动之一，core 侧实现已删，
+#   字段保留只为老配置可解析。面板不再暴露，免得留一个调了没反应的假开关。
 CTRL_RECOIL_BB_FIELDS = [
     ('enabled', 'b', False), ('preset', 'i', 1), ('global_vert', 'n', 0.5),
     ('global_horiz', 'n', 0.5), ('delay_ms', 'n', 50.0), ('smooth', 'n', 0.90),
     ('distance_limit', 'n', 80.0), ('no_target_always', 'b', False),
-    ('drift_enabled', 'b', False), ('drift_amplitude', 'n', 0.20), ('drift_freq', 'n', 1.0),
     ('y_suppress_enabled', 'b', False), ('y_suppress_strength', 'n', 0.0),
     ('max_down_distance', 'n', 0.0), ('adv_mult', 'n', 0.9),
 ]
@@ -1292,7 +1304,6 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     if ctrl.get('pull_curve_enabled') is not None:
         pull_curve['enabled'] = bool(ctrl['pull_curve_enabled'])
     for yk, tk in [('pull_curve_strength', 'strength'),
-                   ('pull_curve_jitter_px', 'jitter_px'),
                    ('pull_curve_min_distance', 'min_distance')]:
         if ctrl.get(yk) is not None:
             pull_curve[tk] = ctrl[yk]
@@ -1362,6 +1373,9 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
         recoil['hotkey2'] = _hotkey_to_bits(rk['hotkey2'], 0)
     if rk.get('hotkey_mode') is not None:
         recoil['hotkey_mode'] = 2 if str(rk['hotkey_mode']) == 'all' else 1
+    # 2026-09-29：humanize_jitter_px / humanize_jitter_frequency 已撤下（对应压枪的
+    #   固定正弦 X 微动，core 侧实现已删）。humanize_curve_strength 保留 —— 它是
+    #   「缓入缓出拆步」比例，RecoilController 仍在消费（recoil_ramp_ 的爬升速率）。
     for yk, tk in [('only_when_target_visible', 'only_when_target_visible'),
                    ('target_lost_release_ms', 'target_lost_release_ms'),
                    ('trigger_delay_enabled', 'trigger_delay_enabled'),
@@ -1369,9 +1383,7 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
                    ('strength', 'strength'),
                    ('speed', 'speed'),
                    ('humanize_enabled', 'humanize_enabled'),
-                   ('humanize_curve_strength', 'humanize_curve_strength'),
-                   ('humanize_jitter_px', 'humanize_jitter_px'),
-                   ('humanize_jitter_frequency', 'humanize_jitter_frequency')]:
+                   ('humanize_curve_strength', 'humanize_curve_strength')]:
         if rk.get(yk) is not None:
             recoil[tk] = rk[yk]
     if recoil:
@@ -1713,7 +1725,6 @@ def profile_to_web(prof: dict) -> dict:
         'aim_reference_offset_y': mouse.get('aim_offset_y'),
         'pull_curve_enabled': pc.get('enabled', True),
         'pull_curve_strength': pc.get('strength', 0.8),
-        'pull_curve_jitter_px': pc.get('jitter_px', 3.0),
         'pull_curve_min_distance': pc.get('min_distance', 80),
         # 持续提前量：默认一律"关"与 Core 侧安全默认一致（未显式开启 ⇒ 输出链不变）。
         'continuous_lead_enabled': lead.get('enabled', False),
@@ -1724,8 +1735,6 @@ def profile_to_web(prof: dict) -> dict:
         'continuous_lead_near_disable_ratio': lead.get('near_disable_ratio', 0.66),
         'humanize_enabled': hz.get('enabled', True),
         'humanize_curve_strength': hz.get('curve_strength', 0.45),
-        'humanize_jitter_px': hz.get('jitter_px', 0.25),
-        'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
         'personal_trajectory_enabled': personal_traj.get('enabled', False),
         'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
         'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),

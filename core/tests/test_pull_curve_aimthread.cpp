@@ -97,7 +97,7 @@ struct TestCtx {
         // 拉枪曲线配置
         profile->mouse.pull_curve.enabled = pull_enabled;
         profile->mouse.pull_curve.strength = 0.8f;
-        profile->mouse.pull_curve.jitter_px = 0.0f;   // 关抖动，输出确定
+        profile->mouse.pull_curve.jitter_px = 0.0f;   // 抖动已于 2026-09-29 删除（字段保留），显式置 0 保持基线可预期
         profile->mouse.pull_curve.min_distance = 80.0f;
         config.update(profile);
     }
