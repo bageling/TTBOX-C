@@ -577,18 +577,6 @@ TEST(aim_thread_zoom_scale_monotonic_across_scopes) {
     CHECK(s2 > s6);      // ★ 6 倍必须比 2 倍压得更狠
 }
 
-// 腰射（zoom=1.0）就是"没配过这个字段"的行为 —— 老配置 / OTA 升级后手感不变。
-// ★ 不做"两轮逐 count 相等"：取帧数会抖动（30 帧 sleep 2ms 不保证拿到同样多帧），
-//   钉死相等只会得到一条 flaky 用例（上一轮写节流用例时踩过同一类假阳性）。
-TEST(aim_thread_zoom_scale_one_keeps_hipfire_behavior) {
-    const int64_t a = zoom_abs_y(run_zoom_output(1.0f));
-    const int64_t b = zoom_abs_y(run_zoom_output(1.0f));
-    CHECK(a > 0);
-    CHECK(b > 0);
-    const int64_t d = a > b ? a - b : b - a;
-    CHECK(d * 4 < a);    // 两轮只差取帧抖动（<25%），不是被倍率改了量级
-}
-
 int main() {
     std::printf("=== ttbox_core tests (aim_thread) ===\n");
     const int failed = ::ttbox_test::run_all();

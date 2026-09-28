@@ -4224,6 +4224,12 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
             # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
             pt = mo.setdefault('personal_trajectory', {})
             pt['response_px_per_count'] = round(gain_y, 4)
+            # V3 阶段 5 前置：实测回路延迟（ms）一并落盘。
+            # 此前只存在标定记录里，core 运行时读不到 ⇒ 拟人化抖动前馈没法做延迟对齐
+            # （按"下一帧"扣会把前馈自己变成高频扰动）。板端实测 51ms。
+            delay_ms = float(calib.get('mouse_response_delay_ms') or 0)
+            if delay_ms > 0:
+                mo['response_delay_ms'] = round(delay_ms, 2)
             r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:

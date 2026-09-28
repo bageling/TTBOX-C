@@ -454,6 +454,7 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.lost_grace_ms = 78.0f;
     p.mouse.gain_x_px_per_count = 0.42f;   // 自动标定产物（px/count）必须落盘生效
     p.mouse.gain_y_px_per_count = 0.71f;
+    p.mouse.response_delay_ms = 51.0f;   // V3 阶段5 前置：实测回路延迟（板端 51ms）
     p.mouse.aim_point.aim_offset_x = 12.0f;
     p.mouse.fov_mode = true;
     p.mouse.hfov = 90.0f;
@@ -477,6 +478,7 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.lost_grace_ms == 78.0f);
     CHECK(q.mouse.gain_x_px_per_count == 0.42f);
     CHECK(q.mouse.gain_y_px_per_count == 0.71f);
+    CHECK(q.mouse.response_delay_ms == 51.0f);   // ★ 延迟必须落盘，否则前馈没得对齐
     CHECK(q.mouse.aim_point.aim_offset_x == 12.0f);
     CHECK(q.mouse.fov_mode);
     CHECK(q.mouse.hfov == 90.0f);

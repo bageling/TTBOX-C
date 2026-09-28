@@ -819,6 +819,8 @@ JsonValue RuntimeProfile::to_json() const {
     // 与拟人化（response_px_per_count 同语义）都依赖此值，标定后必须落盘生效。
     m.set("gain_x_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_x_px_per_count)));
     m.set("gain_y_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_y_px_per_count)));
+    // V3 阶段 5 前置：实测回路延迟（ms）。0 = 未标定。
+    m.set("response_delay_ms", JsonValue::number(static_cast<double>(mouse.response_delay_ms)));
     JsonValue cos = JsonValue::array();
     for (const auto& c : mouse.aim_point.class_offsets) {
         JsonValue o = JsonValue::object();
@@ -1269,6 +1271,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));
         p.mouse.gain_x_px_per_count = static_cast<float>(obj_num(*m, "gain_x_px_per_count", 0.65));
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
+        // V3 阶段 5 前置：实测回路延迟（ms）。老配置没有这个键 ⇒ 0（未标定）。
+        p.mouse.response_delay_ms = static_cast<float>(obj_num(*m, "response_delay_ms", 0.0));
         if (const JsonValue* co = m->find("class_offsets"); co && co->is_array()) {
             for (const auto& e : co->as_array()) {
                 if (!e.is_object()) continue;

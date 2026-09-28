@@ -604,6 +604,12 @@ struct MouseProfile {
     // 输出换算：count = kp×err / gain（px → count 正确换算，防单位错乱过冲）。
     float gain_x_px_per_count = 0.65f;          // X 轴（标定测得；默认 0.65 近似）
     float gain_y_px_per_count = 0.65f;          // Y 轴
+    // V3 阶段 5 前置（2026-09-28）：实测**回路延迟**（注入 count → 画面真的动了的毫秒数）。
+    // 板端实测 51ms（≈7.3 帧 @144fps）。0 = 还没标过。
+    // 为什么必须进配置：拟人化抖动是"自己发出的扰动"，要按这个延迟把它从误差里
+    // 扣回去；扣错帧数（比如按"下一帧"扣）前馈自己就变成高频扰动，反而更抖。
+    // ★ 此前只活在标定记录里（面板 mouse_response_delay_ms），core 运行时拿不到。
+    float response_delay_ms = 0.0f;
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
     // controller 公式（kp×rate×err + predict×vel）与输出链参数
