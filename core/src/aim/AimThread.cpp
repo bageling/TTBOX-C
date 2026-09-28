@@ -752,8 +752,6 @@ void AimThread::loop() {
                 // ★ speed_fluctuation / accuracy_sim 两个"附加项"本期只提供模块与配置键、
                 //   **未接线**（默认关 ⇒ 无影响）；等面板那批确认取值口径后再接。
                 if (humanize_cfg.enabled) {
-                    const int16_t pre_hx = move_x;   // 整形前的量化输出（前馈增量基准）
-                    const int16_t pre_hy = move_y;
                     float hx = static_cast<float>(move_x);
                     float hy = static_cast<float>(move_y);
                     HumanizeShaper::Context hctx;
@@ -761,12 +759,12 @@ void AimThread::loop() {
                     hctx.now_ms = now_ms32;
                     hctx.aiming = true;
                     humanize_shaper_.apply(&hx, &hy, humanize_cfg, hctx);
-                    // ★ V3 阶段 5：把本帧注入的**随机抖动**（不是整条整形量）登记进前馈缓冲。
-                    //   "注入量"取整形后的增量，因为 move_x 是 int16 —— 高斯噪声不足 1 count
-                    //   时会被截断成 0，但噪声在浮点域是累积的（低通+噪声会跨帧留痕）；
-                    //   这里记浮点增量，前馈才对得上"实际想抖多少"。
+                    // ★ V3 阶段 5：只登记**高斯噪声**这一项随机抖动。
+                    //   低通/反应延迟/过冲/制动都是"故意要走（或不走）的一段"，
+                    //   扣掉会让 PID 以为还没到位 ⇒ 过冲。噪声才是该被 PID 忽略的部分。
                     if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
-                        jitter_ff_.push(hx - static_cast<float>(pre_hx), hy - static_cast<float>(pre_hy));
+                        jitter_ff_.push(humanize_shaper_.last_jitter_x(),
+                                        humanize_shaper_.last_jitter_y());
                     }
                     move_x = static_cast<int16_t>(std::clamp(hx, kHidMin, kHidMax));
                     move_y = static_cast<int16_t>(std::clamp(hy, kHidMin, kHidMax));
