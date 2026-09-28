@@ -6497,6 +6497,9 @@ const AIM_PROFILE_AXIS_OFFSET_MIN = 0;
 const AIM_PROFILE_AXIS_OFFSET_MAX = 1;
 const AIM_PROFILE_FOV_SCALE_MIN = 0.1;
 const AIM_PROFILE_FOV_SCALE_MAX = 1;
+// V3 阶段 2：倍镜真实放大倍率。1 = 腰射（不折算误差），上限 20 覆盖到 15 倍镜。
+const AIM_PROFILE_ZOOM_SCALE_MIN = 1;
+const AIM_PROFILE_ZOOM_SCALE_MAX = 20;
 // 总览「FOV 半径」= 内接圆倍率，下限与后端 FOV_FACTOR_MIN（ttbox-web.py）保持一致：
 // 倍率 0 会让 core 的 fov.radius=0 撞上「必须在 (0,1]」校验，整个保存失败。
 const OVERVIEW_FOV_FACTOR_MIN = 0.1;
@@ -6529,6 +6532,7 @@ const NUMERIC_RANGE_LIMITS = {
   sens: [0, 5],
   aim_profile_sensitivity: [0.1, 3],
   aim_profile_fov_scale: [AIM_PROFILE_FOV_SCALE_MIN, AIM_PROFILE_FOV_SCALE_MAX],
+  aim_profile_zoom_scale: [AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX],
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
@@ -8751,6 +8755,16 @@ function aimProfileFovScale(profile) {
   );
 }
 
+// V3 阶段 2：倍镜真实放大倍率（core 拿它当 PID 误差的分母）。1 = 腰射。
+function aimProfileZoomScale(profile) {
+  const value = Number(profile && profile.zoom_scale !== undefined ? profile.zoom_scale : 1);
+  return clamp(
+    Number.isFinite(value) ? value : 1,
+    AIM_PROFILE_ZOOM_SCALE_MIN,
+    AIM_PROFILE_ZOOM_SCALE_MAX
+  );
+}
+
 function profileTemplate(profile, index) {
   const classCount = currentModelClassCount();
   const classNames = currentModelClassNames();
@@ -8759,6 +8773,7 @@ function profileTemplate(profile, index) {
   const offsetY = aimProfileOffsetY(profile).toFixed(2);
   const sensitivity = clamp(Number(profile && profile.sensitivity !== undefined ? profile.sensitivity : 1), 0.1, 3).toFixed(2);
   const fovScale = aimProfileFovScale(profile).toFixed(2);
+  const zoomScale = aimProfileZoomScale(profile).toFixed(2);
   const classPickers = Array.from({ length: classCount }, (_, classId) => {
     const checked = mask & (1 << classId) ? "checked" : "";
     const className = classDisplayName(classId, classNames);
@@ -8842,6 +8857,14 @@ function profileTemplate(profile, index) {
         </div>
         <input class="aim-profile-fov-scale-range" type="range" min="0.1" max="1" step="0.01" value="${fovScale}">
         <span class="field-hint">在总览 FOV 半径上再乘这个倍率，只对本组热键生效。</span>
+      </div>
+      <div class="slider-field span-all">
+        <div class="label-row">
+          <label>倍镜倍率</label>
+          <input class="aim-profile-zoom-scale value-input" type="number" min="1" max="20" step="0.01" autocomplete="off" value="${zoomScale}">
+        </div>
+        <input class="aim-profile-zoom-scale-range" type="range" min="1" max="20" step="0.01" value="${zoomScale}">
+        <span class="field-hint">开镜时画面被放大几倍（腰射填 1）。填了之后高倍镜不再过冲，灵敏度沿用腰射标定值即可。实测这套镜子：2 倍≈2.87、4 倍≈5.79、6 倍≈8.67。</span>
       </div>
       <div class="aim-profile-axis-grid span-all">
         <div class="slider-field aim-profile-axis-field">
@@ -9101,6 +9124,8 @@ function bindAimProfileCard(card, profile) {
   bindProfileNumberRange(card, ".aim-profile-offset-y", ".aim-profile-offset-y-range", 0.5, 0, 1);
   bindProfileNumberRange(card, ".aim-profile-sensitivity", ".aim-profile-sensitivity-range", 1, 0.1, 3);
   bindProfileNumberRange(card, ".aim-profile-fov-scale", ".aim-profile-fov-scale-range", 1, 0.1, 1);
+  bindProfileNumberRange(card, ".aim-profile-zoom-scale", ".aim-profile-zoom-scale-range", 1, AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX);
+  bindProfileNumberRange(card, ".aim-profile-zoom-scale", ".aim-profile-zoom-scale-range", 1, AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX);
 
   card.querySelectorAll(".aim-profile-class").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
@@ -9239,6 +9264,7 @@ function renderAimProfiles(profiles) {
       offset_y: defaultAimProfileOffsetY(),
       sensitivity: 1,
       fov_scale: 1,
+      zoom_scale: 1,
     }];
   safeProfiles.forEach((profile) => addAimProfileCard(profile, false));
   state.aimClassRenderSignature = currentModelClassRenderSignature();
@@ -9277,6 +9303,7 @@ function collectAimProfiles() {
       class_offsets: [],
       sensitivity: 1,
       fov_scale: 1,
+      zoom_scale: 1,
     }];
   }
   const profiles = Array.from(editor.querySelectorAll(".aim-profile-card")).map((card) => {
@@ -9315,6 +9342,7 @@ function collectAimProfiles() {
       fov_scale: aimProfileFovScale({
         fov_scale: card.querySelector(".aim-profile-fov-scale").value || 1,
       }),
+      zoom_scale: clamp(Number(card.querySelector(".aim-profile-zoom-scale").value || 1), AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX),
     };
   });
 
@@ -9327,6 +9355,7 @@ function collectAimProfiles() {
       class_offsets: [],
       sensitivity: 1,
       fov_scale: 1,
+      zoom_scale: 1,
     }];
   }
   return profiles;
@@ -9821,7 +9850,7 @@ function collectConfig() {
 
 function hasInvalidConfigInput() {
   const fields = Array.from(document.querySelectorAll(
-    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale"
+    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale, .aim-profile-zoom-scale"
   ));
   return fields.some((field) => {
     const value = field.value.trim();
@@ -13893,6 +13922,7 @@ function bindEvents() {
       offset_y: defaultAimProfileOffsetY(),
       sensitivity: 1,
       fov_scale: 1,
+      zoom_scale: 1,
     });
   });
 

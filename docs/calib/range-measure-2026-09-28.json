@@ -1,0 +1,82 @@
+{
+  "schema": "ttbox.calib-range.v1",
+  "captured_at": "2026-09-28",
+  "site": "游戏训练场",
+  "target_class_id": 5,
+  "tool": "core/tools/calib/sample_box.py",
+
+  "_readme": [
+    "本档案是 V3 阶段 1 的实测产物：同一靶位、依次开镜，读检测框像素高度。",
+    "★ 比值法：box_h_scope / box_h_hip = f_scope / f_hip，靶子实际高度与距离在除法里全部约掉",
+    "  ⇒ 修倍镜**不需要知道靶子有多高**，也不需要知道绝对焦距（常数并入 kp）。",
+    "★ 读取链路：AimThread.cpp:791 取 selected.box，:207 注释确认与 capture 同一套 1:1 像素；",
+    "  :839 用 One-Euro 平滑框（压制 y1 抖动）⇒ 静止靶读数极稳（stdev 0.04px）。",
+    "★ 纯观测，不注入鼠标位移 ⇒ 标定过程不需要按热键。"
+  ],
+
+  "method": {
+    "formula_zoom": "zoom_scope = box_h_scope / box_h_hip （同一靶位同一距离）",
+    "formula_f": "f = box_h * d / h （h 未知时不可用；修倍镜不必用）",
+    "hf_product_note": "仅靠框高只能得到 h*f 的乘积，无法分离；本例 20m 处 h*f = 84.55*20 = 1691",
+    "distance_label_caveat": "场地距离标记不可信：标注 30m 反推实际约 33.4m（=84.55/50.69*20）。比值法不受影响。"
+  },
+
+  "measurements": [
+    {"state": "hip",  "scope_label": "腰射", "distance_label_m": 20, "box_h_px": 84.55, "box_w_px": 25.26, "stdev_px": 0.04, "samples": 102, "note": "基线"},
+    {"state": "2x",   "scope_label": "2倍镜", "distance_label_m": 20, "box_h_px": 242.88, "box_w_px": 70.35, "stdev_px": 1.04, "samples": 101, "note": "同靶位"},
+    {"state": "4x",   "scope_label": "4倍镜", "distance_label_m": 20, "box_h_px": 489.09, "box_w_px": 132.36, "stdev_px": 6.23, "samples": 101, "note": "同靶位"},
+    {"state": "6x",   "scope_label": "6倍镜", "distance_label_m": 30, "box_h_px": 439.76, "box_w_px": 121.43, "stdev_px": 6.12, "samples": 102, "note": "20m 处超出画面，退到 30m 才框完整"},
+    {"state": "hip",  "scope_label": "腰射", "distance_label_m": 30, "box_h_px": 50.69, "box_w_px": 15.78, "stdev_px": 0.18, "samples": 83, "note": "与上一行同一位置，作 6 倍的分母；调低置信度后才出框"}
+  ],
+
+  "derived_zoom": {
+    "_note": "真实倍率 = 实测框高比。三组 ÷标称 高度一致 ⇒ 规律可信。",
+    "hip": {"zoom": 1.000, "label": 1, "zoom_over_label": null},
+    "2x":  {"zoom": 2.873, "label": 2, "zoom_over_label": 1.436},
+    "4x":  {"zoom": 5.785, "label": 4, "zoom_over_label": 1.446},
+    "6x":  {"zoom": 8.674, "label": 6, "zoom_over_label": 1.446},
+    "rule": "zoom ≈ 1.44 × 镜上标称倍数（实测 1.436 / 1.446 / 1.446）",
+    "warning": "按镜上标称调参会偏 44%，必须用实测值"
+  },
+
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "title": "高倍镜 + 近距离存在几何硬限制",
+      "evidence": "6倍 @20m 预测框高 ≈ 84.55×8.674 = 733px > 采集窗口 640×640；业主肉眼确认画面只剩半个身子",
+      "impact": "框被窗口切掉 ⇒ 框中心与瞄准点不可靠 ⇒ 自瞄失准；调参救不回来",
+      "next": "需更大采集窗口，或专门处理「框贴边」的情形"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "title": "检测框抖动随倍率同步放大",
+      "evidence": "stdev 0.04(腰射) → 1.04(2x) → 6.2(4x/6x)，近似按倍率线性放大",
+      "impact": "高倍镜下噪声占比不变但绝对值变大，滤波必须按目标尺寸自适应（V3 阶段 3a）"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "title": "置信度阈值会吃掉远处小目标",
+      "evidence": "30m 腰射两次采样 0 命中（6s + 12s），业主调低置信度后才出框（50.69px）",
+      "impact": "远距离目标直接锁不上，与倍镜无关，需单独处理"
+    },
+    {
+      "id": "F4",
+      "severity": "info",
+      "title": "场地距离标记不可信，比值法可信",
+      "evidence": "标注 30m 反推实际 33.4m",
+      "impact": "一切依赖绝对距离的标定都要谨慎，优先用同一位置的比值"
+    }
+  ],
+
+  "baseline_physics": {
+    "_source": "ttbox_motion/calibration.py:25 / :19（板端标定实测）",
+    "gain_x_px_per_count": 0.686,
+    "gain_y_px_per_count": 0.695,
+    "response_delay_ms": 51.0,
+    "frame_ms_144fps": 6.944,
+    "_gain_zoom_note": "px/count = 每 count 转角 × f ⇒ 倍镜下 gain 同比放大（ADS 灵敏度统一时）"
+  }
+}

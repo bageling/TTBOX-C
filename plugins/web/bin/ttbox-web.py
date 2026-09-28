@@ -1089,6 +1089,12 @@ def normalize_profile_capture_size(prof: dict) -> dict:
 # 取 0.1 ⇒ 半径 = 0.05 × 内接圆（板端 640 截取 ⇒ 32px），仍可用且合法。
 FOV_FACTOR_MIN = 0.1
 
+# V3 阶段 2（2026-09-28）：倍镜**真实放大倍率**的合法区间。
+# 腰射 = 1.0（下限，也是默认值）。上限 20 覆盖到 15 倍镜（真实 ≈ 1.44 × 15 ≈ 21.6，
+# 取 20 是留余量又不至于让分母大到把误差压成 0）。
+ZOOM_SCALE_MIN = 1.0
+ZOOM_SCALE_MAX = 20.0
+
 
 def _fov_factor_clamp(v, default=1.0) -> float:
     """把倍率夹到 [FOV_FACTOR_MIN, 1.0]；非数值 / NaN 回退 default。"""
@@ -1113,6 +1119,22 @@ def _fov_radius_to_factor(radius, enabled=True) -> float:
         return _fov_factor_clamp(float(radius) * 2.0)
     except (TypeError, ValueError):
         return 1.0
+
+
+def _zoom_scale_clamp(v, default=1.0) -> float:
+    """V3 阶段 2：把「倍镜真实放大倍率」夹到 [ZOOM_SCALE_MIN, ZOOM_SCALE_MAX]。
+
+    语义与 fov_scale **相反**：fov 是 [MIN, 1.0] 的"截取倍率"（越小看得越窄），
+    zoom 是 [1.0, MAX] 的"放大倍率"（腰射 = 1.0，越大越要压增益）。
+    非数值 / NaN / 越界一律回退 default（腰射），保证 core 侧分母永远 > 0。
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if f != f:  # NaN
+        return default
+    return max(ZOOM_SCALE_MIN, min(ZOOM_SCALE_MAX, f))
 
 
 # ---- 瞄准档位（多热键，2026-09-24）----
@@ -1149,6 +1171,9 @@ def _aim_profile_core_dict(p: dict) -> dict:
         out['sensitivity'] = p['sensitivity']
     if p.get('fov_scale') is not None:
         out['fov_scale'] = _fov_factor_clamp(p['fov_scale'])
+    # V3 阶段 2：倍镜真实放大倍率（core 拿它当误差分母）。1.0 = 腰射 = 不折算。
+    if p.get('zoom_scale') is not None:
+        out['zoom_scale'] = _zoom_scale_clamp(p['zoom_scale'])
     mask = p.get('class_filter_mask')
     if mask is not None:
         m = int(mask or 0)
@@ -1593,6 +1618,8 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
                 'hotkey_mode': _hotkey_mode_to_web(j.get('hotkey_mode', 'any')),
                 'sensitivity': j.get('sensitivity', 1.0),
                 'fov_scale': j.get('fov_scale', 1.0),
+                # V3 阶段 2：倍镜真实放大倍率（1.0 = 腰射）
+                'zoom_scale': j.get('zoom_scale', 1.0),
                 'offset_x': ox,
                 'offset_y': oy,
                 'alternate_offset_x': ox,
@@ -1610,6 +1637,7 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
         'hotkey_mode': _hotkey_mode_to_web(mouse.get('aim_hotkey_mode', 'any')),
         'sensitivity': 1.0,
         'fov_scale': 1.0,
+        'zoom_scale': 1.0,
         'offset_x': mouse.get('offset_x', 0.5),
         'offset_y': mouse.get('offset_y', 0.5),
         'alternate_offset_x': mouse.get('offset_x', 0.5),

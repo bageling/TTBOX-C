@@ -183,6 +183,9 @@ void AimThread::loop() {
                 lead_last_move_y_ = 0.0f;
             }
             last_injection_allowed_ = injection_allowed;
+            // V3 阶段 2：每帧以腰射（1.0）为起点，下面命中档位时才覆盖。
+            // 这样即便本帧 frame_profile 为空，也不会残留上一帧的倍率分母。
+            active_zoom_scale_ = 1.0f;
             if (frame_profile) {
                 // 本周期生效档；无档命中（未按热键 / 全部挂起）时退回全局量，
                 // 此时输出本来就被 Gate 拦着，选靶仍用全局参数 —— 与加档位前逐位一致。
@@ -200,6 +203,16 @@ void AimThread::loop() {
                 // ★ 此前 scfg.class_filter 从未被赋值 ⇒ 瞄准侧类别过滤一直是关的，
                 //   全靠推理侧把非本类别框丢掉。多档位必须把这个字段接上。
                 if (ap) scfg.class_filter = ap->class_filter;
+                // ---- V3 阶段 2：本档倍镜真实放大倍率（误差角度化的分母）----
+                // 2026-09-28 训练场实测：真实倍率 ≈ 1.44 × 镜上标称
+                // （腰射 1.000 / 2 倍 2.873 / 4 倍 5.785 / 6 倍 8.674）。
+                // 面板「热键 FOV 缩放」填的是标称倍率，这里乘 1.44 得到真实倍率；
+                // zoom_scale 为 1.0（腰射/未填）⇒ 分母 = 1 ⇒ 与加此机制前完全一致。
+                // 兜底：<=0 或非有限值一律按 1.0（防除零 / 防 NaN 污染整条输出链）。
+                {
+                    const float z = ap ? ap->zoom_scale : 1.0f;
+                    active_zoom_scale_ = (std::isfinite(z) && z > 0.0f) ? z : 1.0f;
+                }
                 // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
                 // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
                 // 之前用整帧 task.frame_width/height（2560×1440）⇒ min/2 = 720px，
@@ -455,8 +468,15 @@ void AimThread::loop() {
                     aibox_y = fov_out_y;
                 } else {
                     // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
-                    aibox_x = static_cast<float>(pid_x_.update(control_x));
-                    aibox_y = static_cast<float>(pid_y_.update(control_y));
+                    // ★ V3 阶段 2（2026-09-28）：误差先除以本档真实倍率再进 PID。
+                    //   推导：倍镜下同一角度误差在画面上放大 M 倍，而 kp 按腰射标定
+                    //   ⇒ 等效增益被放大 M 倍 ⇒ 高倍镜必然过冲。除 M 后等效增益
+                    //   = kp × (deg/count) × f_hip，与倍镜无关（ADS 系数除外）。
+                    //   active_zoom_scale_ 默认 1.0 ⇒ 腰射与未配置档位逐字节不变。
+                    const float err_x = control_x / active_zoom_scale_;
+                    const float err_y = control_y / active_zoom_scale_;
+                    aibox_x = static_cast<float>(pid_x_.update(err_x));
+                    aibox_y = static_cast<float>(pid_y_.update(err_y));
                 }
                 // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。

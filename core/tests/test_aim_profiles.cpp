@@ -91,6 +91,8 @@ int main() {
         check_eq_i64(p.mouse.aim_profiles[0].hotkey_mode, 0, "默认档触发方式 = any");
         check_eq_f(p.mouse.aim_profiles[0].sensitivity, 1.0f, "默认档移动倍率 = 1.0");
         check_eq_f(p.mouse.aim_profiles[0].fov_scale, 1.0f, "默认档 FOV 倍率 = 1.0");
+        // V3 阶段 2：默认 1.0 = 腰射 = 误差不做倍率折算 ⇒ 老配置行为不变。
+        check_eq_f(p.mouse.aim_profiles[0].zoom_scale, 1.0f, "默认档倍镜倍率 = 1.0（腰射）");
     }
 
     // ================= 2. 命中判定 =================
@@ -224,6 +226,7 @@ int main() {
         a.offset_y = 0.31f;
         a.sensitivity = 1.35f;
         a.fov_scale = 0.72f;
+        a.zoom_scale = 2.873f;   // V3 阶段 2：2 倍镜实测真实倍率
         a.class_filter = {0, 2};
         ClassOffset co;
         co.class_id = 2; co.offset_x = 0.25f; co.offset_y = 0.15f; co.priority = 3;
@@ -234,6 +237,7 @@ int main() {
         b.offset_y = 0.66f;
         b.sensitivity = 0.85f;
         b.fov_scale = 0.40f;
+        b.zoom_scale = 8.674f;   // V3 阶段 2：6 倍镜实测真实倍率
         b.class_filter = {1};
 
         p.mouse.aim_profiles = {a, b};
@@ -247,6 +251,7 @@ int main() {
         check_eq_f(q.mouse.aim_profiles[0].offset_y, 0.31f, "往返：档0 offset_y");
         check_eq_f(q.mouse.aim_profiles[0].sensitivity, 1.35f, "往返：档0 移动倍率");
         check_eq_f(q.mouse.aim_profiles[0].fov_scale, 0.72f, "往返：档0 FOV 倍率");
+        check_eq_f(q.mouse.aim_profiles[0].zoom_scale, 2.873f, "往返：档0 倍镜倍率");
         check_eq_i64(static_cast<int64_t>(q.mouse.aim_profiles[0].class_filter.size()), 2,
                      "往返：档0 类别过滤个数");
         check_eq_i64(q.mouse.aim_profiles[0].class_filter[1], 2, "往返：档0 类别过滤内容");
@@ -259,6 +264,7 @@ int main() {
         check_eq_i64(q.mouse.aim_profiles[1].hotkey2, 0x08, "往返：档1 副键");
         check_eq_i64(q.mouse.aim_profiles[1].hotkey_mode, 1, "往返：档1 触发方式 = all");
         check_eq_f(q.mouse.aim_profiles[1].fov_scale, 0.40f, "往返：档1 FOV 倍率");
+        check_eq_f(q.mouse.aim_profiles[1].zoom_scale, 8.674f, "往返：档1 倍镜倍率");
         check_eq_i64(static_cast<int64_t>(q.mouse.aim_profiles[1].class_filter.size()), 1,
                      "往返：档1 类别过滤个数");
 
@@ -338,6 +344,27 @@ int main() {
         check_eq_i64(q.mouse.aim_profiles[0].hotkey_mode, 0, "档内缺字段 -> 触发方式默认 any");
         check_eq_f(q.mouse.aim_profiles[0].offset_y, 0.5f, "档内缺字段 -> 偏移默认 0.5");
         check_eq_f(q.mouse.aim_profiles[0].sensitivity, 1.0f, "档内缺字段 -> 倍率默认 1.0");
+    }
+
+    // ================= 11. V3 阶段 2：倍镜倍率的兜底 =================
+    // zoom_scale 是 PID 误差的**分母**，0 / 负数 / 缺失会让误差变号或变无穷大，
+    // 整条输出链直接废掉 ⇒ 解析层必须一律回退 1.0（腰射 = 不折算）。
+    {
+        const RuntimeProfile miss = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8}]}})", "倍镜倍率缺失");
+        check_eq_f(miss.mouse.aim_profiles[0].zoom_scale, 1.0f,
+                   "倍镜倍率缺失 -> 回退 1.0（腰射，不做折算）");
+
+        const RuntimeProfile zero = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"zoom_scale":0}]}})", "倍镜倍率 0");
+        check_eq_f(zero.mouse.aim_profiles[0].zoom_scale, 1.0f,
+                   "倍镜倍率 0 -> 回退 1.0（防除零）");
+
+        const RuntimeProfile neg = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"zoom_scale":-3.5}]}})",
+            "倍镜倍率负数");
+        check_eq_f(neg.mouse.aim_profiles[0].zoom_scale, 1.0f,
+                   "倍镜倍率负数 -> 回退 1.0（防误差变号）");
     }
 
     if (g_fails == 0) std::printf("test_aim_profiles: PASS\n");
