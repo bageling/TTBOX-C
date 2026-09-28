@@ -552,6 +552,27 @@ struct PersonalMotionConfig {
     std::vector<float> knots;  // 空 ⇒ 用 PersonalMotion::default_knots() 的内置曲线
 };
 
+// V3 阶段 3a（2026-09-28）：滤波强度按目标框高自适应。
+//
+// 动机（训练场实测，docs/calib/range-measure-2026-09-28.json）：
+//   同一个腰射档下，20m 处 box_h=84.55px 的抖动 stdev 只有 0.04px（相对 0.05%），
+//   30m 处 box_h=50.69px 的抖动 stdev 涨到 0.18px（相对 0.36%）⇒ **相对抖动差 7.6 倍**。
+//   远处小框每帧抖的绝对像素虽小、但占框比例大 ⇒ 瞄准点跟着抖 ⇒ 稳态残留变大。
+//
+// 做法：One-Euro 的 min_cutoff 由「框高 EMA」驱动 —— 框越小，截止频率越低（滤得越狠）；
+//   框大到参考尺寸以上就回到现有基准值 0.8Hz，行为与加此机制前一致。
+//
+// ★ 方向性矛盾（V3 已写明，必须留在注释里，别指望"越强越好"）：
+//   加强滤波 ⇒ 相位滞后 ⇒ 移动目标落点偏后。min_cutoff 一个旋钮同时管平滑与滞后，
+//   所以**默认关闭**，只在实测确认远处确实抖得难受时才开，且 cutoff 上下限都可配。
+struct BoxAdaptiveFilterConfig {
+    bool enabled = false;            // 默认关 ⇒ 逐字节保持现有行为（1.5.66 及更早）
+    float ref_box_h_px = 100.0f;     // 参考框高：≥ 此值用 max_cutoff_hz（近处/大框）
+    float max_cutoff_hz = 0.8f;      // 大框截止频率 = 现行 kPosMinCutoffHz（0.8Hz）
+    float min_cutoff_hz = 0.15f;     // 框高趋 0 时的截止频率（滤得更狠）
+    float box_h_ema_alpha = 0.10f;   // 框高 EMA 系数（慢变量，防单帧框跳把 cutoff 拉飞）
+};
+
 // 鼠标配置（RuntimeProfile.mouse，与模型彻底分离）
 struct MouseProfile {
     bool enabled = false;                       // AI 注入总开关（false = 纯物理透传，与 A9 一致）
@@ -652,6 +673,8 @@ struct MouseProfile {
     int hb_head1 = 1;                   // 组合1：头类（命中即删）
     int hb_body2 = -1;                  // 组合2：身体类（-1 = 该组不启用）
     int hb_head2 = -1;                  // 组合2：头类
+    // V3 阶段 3a：滤波强度按框高自适应（默认关 ⇒ 与加入前逐字节一致）。
+    BoxAdaptiveFilterConfig box_adaptive;
     LockConfirmConfig lock_confirm;                 // 目标锁定确认（ENTER/HOLD + instant-enter，第2项）
     // A11 标定闭环：calibrating 强制 AIMING；calibration_bias_* 把准星带到偏置位再拉回
     bool calibrating = false;                   // 标定模式（自瞄全程输出，用偏置测闭环响应）

@@ -12,6 +12,8 @@
 
 #include <cstdint>
 
+#include "mouse/MouseTypes.hpp"   // BoxAdaptiveFilterConfig（V3 阶段 3a）
+
 namespace ttbox::core::aim {
 
 struct TrackedTarget {
@@ -25,6 +27,9 @@ struct TrackedTarget {
     int target_id = -1;
     uint64_t timestamp_us = 0;   // 当前帧时间戳
     uint64_t dt_us = 0;          // 与上一帧时间差
+    // V3 阶段 3a：目标框高的 **EMA**（慢变量）。驱动 One-Euro 的 min_cutoff。
+    // 0 = 还没喂过（此时 cutoff 走既有常量，行为与加此机制前一致）。
+    float box_h_ema = 0.0f;
     float prediction_time = 0.0f;    // 预测时域（秒，由调用方设置）
     float predicted_x = 0.0f;        // 预测位置
     float predicted_y = 0.0f;
@@ -34,6 +39,13 @@ class AimTracker {
 public:
     // 每帧更新目标中心。target_id 变化或时间跳跃过大 → 速度清零（避免伪速度）。
     void update(float cx, float cy, int target_id, uint64_t now_us);
+    // V3 阶段 3a：喂本帧目标框高（px），内部走 EMA。
+    //   box_h <= 0（丢失/无框）⇒ **保持上一帧**，不清零 —— 否则目标一丢 cutoff 就跳变。
+    void set_box_h(float box_h);
+    // V3 阶段 3a：滤波自适应配置（每帧重读，改配置即时生效）。enabled=false ⇒ 走既有常量。
+    void configure(const BoxAdaptiveFilterConfig& cfg) { box_cfg_ = cfg; }
+    // 当前生效的位置截止频率（供测试/遥测核对：框越小 ⇒ 越低 ⇒ 滤得越狠）
+    float min_cutoff_hz() const;
     // 预测位置：pos + vel × prediction_time（s），并存入 state
     void predict(float prediction_time_s, float* px, float* py);
     // 目标丢失/切换后重置
@@ -62,6 +74,9 @@ private:
     float pos_fdx_ = 0.0f;     // 平滑后速度（低通输出）
     float pos_fdy_ = 0.0f;
     bool pos_valid_ = false;   // 平滑器是否已建立（目标切换/重置后清 false）
+    // V3 阶段 3a：滤波自适应配置（默认 enabled=false ⇒ 完全走上面的常量）
+    BoxAdaptiveFilterConfig box_cfg_;
+    float box_h_ema_ = 0.0f;   // 框高 EMA（慢变量，驱动 min_cutoff）
     // 原始输入缓存（速度估计专用：raw_vx 必须用原始帧差，
     // 若用平滑后位置帧差会被双重平滑 → 速度收敛慢 → 预测超前不足）
     float raw_prev_x_ = 0.0f;

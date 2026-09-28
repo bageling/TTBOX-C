@@ -25,6 +25,9 @@ void AimTracker::update(float cx, float cy, int target_id, uint64_t now_us) {
         pos_valid_ = false;
         raw_prev_x_ = cx;
         raw_prev_y_ = cy;
+        // V3 阶段 3a：换目标 ⇒ 框高 EMA 重新建立（旧目标的框尺寸对新目标没意义）。
+        box_h_ema_ = 0.0f;
+        state_.box_h_ema = 0.0f;   // state() 与内部量必须同步，否则遥测读到的是旧目标的框高
         return;
     }
     const uint64_t dt_us = now_us > state_.timestamp_us ? now_us - state_.timestamp_us : 0;
@@ -61,8 +64,11 @@ void AimTracker::update(float cx, float cy, int target_id, uint64_t now_us) {
         // 避免 cutoff 被尖峰抬高导致平滑失效。
         pos_fdx_ += ad * (raw_dx - pos_fdx_);
         pos_fdy_ += ad * (raw_dy - pos_fdy_);
-        const float cutoff_x = kPosMinCutoffHz + kPosBeta * std::fabs(pos_fdx_);
-        const float cutoff_y = kPosMinCutoffHz + kPosBeta * std::fabs(pos_fdy_);
+        // V3 阶段 3a：基底截止频率由框高 EMA 驱动（未启用时恒为 kPosMinCutoffHz
+        // ⇒ 与加此机制前逐字节一致）。框越小 ⇒ cutoff 越低 ⇒ 滤得越狠。
+        const float cutoff_base = min_cutoff_hz();
+        const float cutoff_x = cutoff_base + kPosBeta * std::fabs(pos_fdx_);
+        const float cutoff_y = cutoff_base + kPosBeta * std::fabs(pos_fdy_);
         const float ax = alpha(cutoff_x, dt_s);
         const float ay = alpha(cutoff_y, dt_s);
         // 位置低通：首帧 early-return 已建立初值 pos_fx_=cx，此后无条件平滑。
@@ -88,6 +94,33 @@ void AimTracker::update(float cx, float cy, int target_id, uint64_t now_us) {
     state_.timestamp_us = now_us;
 }
 
+void AimTracker::set_box_h(float box_h) {
+    // ★ box_h <= 0（目标丢失 / 没框）⇒ **保持上一帧**，不清零。
+    //   清零会让 cutoff 瞬间跳到最狠一档，目标一回来就有一段过度平滑的迟钝期。
+    if (!(box_h > 0.0f) || !std::isfinite(box_h)) return;
+    if (box_h_ema_ <= 0.0f) {
+        box_h_ema_ = box_h;                 // 首帧直接建立，不从 0 慢慢爬
+    } else {
+        float a = box_cfg_.box_h_ema_alpha;
+        if (!(a > 0.0f && a <= 1.0f)) a = 0.10f;   // 兜底：EMA 系数必须落在 (0,1]
+        box_h_ema_ += a * (box_h - box_h_ema_);
+    }
+    state_.box_h_ema = box_h_ema_;
+}
+
+float AimTracker::min_cutoff_hz() const {
+    // 未启用 / 还没喂过框高 ⇒ 用既有常量（0.8Hz）⇒ 与加此机制前逐字节一致。
+    if (!box_cfg_.enabled || !(box_h_ema_ > 0.0f)) return kPosMinCutoffHz;
+    const float ref = box_cfg_.ref_box_h_px > 0.0f ? box_cfg_.ref_box_h_px : 100.0f;
+    float t = box_h_ema_ / ref;             // 1.0 = 参考尺寸（大框）⇒ 满截止
+    if (t > 1.0f) t = 1.0f;                 // 更大的框不再提高截止（防止近处过灵敏）
+    if (t < 0.0f) t = 0.0f;
+    const float hz = box_cfg_.min_cutoff_hz +
+                     (box_cfg_.max_cutoff_hz - box_cfg_.min_cutoff_hz) * t;
+    // 兜底：非正/非有限（配置被写坏）时退回既有常量，绝不让滤波器参数失效
+    return (std::isfinite(hz) && hz > 0.0f) ? hz : kPosMinCutoffHz;
+}
+
 void AimTracker::predict(float prediction_time_s, float* px, float* py) {
     state_.prediction_time = prediction_time_s;
     state_.predicted_x = state_.x + state_.vx * prediction_time_s;
@@ -98,6 +131,8 @@ void AimTracker::predict(float prediction_time_s, float* px, float* py) {
 
 void AimTracker::reset() {
     state_ = TrackedTarget{};
+    // V3 阶段 3a：换目标 ⇒ 框高 EMA 重新建立（旧目标的框尺寸对新目标没意义）。
+    box_h_ema_ = 0.0f;
 }
 
 }  // namespace ttbox::core::aim

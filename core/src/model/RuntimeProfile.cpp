@@ -802,6 +802,16 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("hb_head1", JsonValue::number(static_cast<double>(mouse.hb_head1)));
     m.set("hb_body2", JsonValue::number(static_cast<double>(mouse.hb_body2)));
     m.set("hb_head2", JsonValue::number(static_cast<double>(mouse.hb_head2)));
+    // V3 阶段 3a：滤波按框高自适应（默认关 ⇒ 老配置读回来仍是关）
+    {
+        JsonValue ba = JsonValue::object();
+        ba.set("enabled", JsonValue::boolean(mouse.box_adaptive.enabled));
+        ba.set("ref_box_h_px", JsonValue::number(static_cast<double>(mouse.box_adaptive.ref_box_h_px)));
+        ba.set("max_cutoff_hz", JsonValue::number(static_cast<double>(mouse.box_adaptive.max_cutoff_hz)));
+        ba.set("min_cutoff_hz", JsonValue::number(static_cast<double>(mouse.box_adaptive.min_cutoff_hz)));
+        ba.set("box_h_ema_alpha", JsonValue::number(static_cast<double>(mouse.box_adaptive.box_h_ema_alpha)));
+        m.set("box_adaptive", ba);
+    }
     m.set("calibrating", JsonValue::boolean(mouse.calibrating));
     m.set("calibration_bias_x", JsonValue::number(static_cast<double>(mouse.calibration_bias_x)));
     m.set("calibration_bias_y", JsonValue::number(static_cast<double>(mouse.calibration_bias_y)));
@@ -1241,6 +1251,18 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.hb_head1 = static_cast<int>(obj_int(*m, "hb_head1", 1));
         p.mouse.hb_body2 = static_cast<int>(obj_int(*m, "hb_body2", -1));
         p.mouse.hb_head2 = static_cast<int>(obj_int(*m, "hb_head2", -1));
+        // V3 阶段 3a：滤波按框高自适应（缺键 ⇒ 全吃默认 = enabled false，行为不变）
+        if (const JsonValue* ba = m->find("box_adaptive"); ba && ba->is_object()) {
+            p.mouse.box_adaptive.enabled = obj_bool(*ba, "enabled", false);
+            p.mouse.box_adaptive.ref_box_h_px =
+                static_cast<float>(obj_num(*ba, "ref_box_h_px", 100.0));
+            p.mouse.box_adaptive.max_cutoff_hz =
+                static_cast<float>(obj_num(*ba, "max_cutoff_hz", 0.8));
+            p.mouse.box_adaptive.min_cutoff_hz =
+                static_cast<float>(obj_num(*ba, "min_cutoff_hz", 0.15));
+            p.mouse.box_adaptive.box_h_ema_alpha =
+                static_cast<float>(obj_num(*ba, "box_h_ema_alpha", 0.10));
+        }
         p.mouse.switch_cooldown_ms = static_cast<float>(obj_num(*m, "switch_cooldown_ms", 600.0));
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));

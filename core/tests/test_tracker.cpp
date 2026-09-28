@@ -302,6 +302,74 @@ static void test_complete_loss() {
     std::printf("test9_complete_loss: reset_ok\n");
 }
 
+// 场景10（V3 阶段 3a）：滤波截止频率按目标框高自适应
+//
+// 实测依据（docs/calib/range-measure-2026-09-28.json，同腰射档）：
+//   20m 处 box_h=84.55px 抖动 stdev 0.04px（占框 0.05%）
+//   30m 处 box_h=50.69px 抖动 stdev 0.18px（占框 0.36%）⇒ 相对抖动差 7.6 倍
+// ⇒ 远处小框要滤得更狠（截止频率更低）。但滤波越强滞后越大，故**默认关闭**。
+static void test_box_adaptive_cutoff() {
+    // ① 默认关闭 ⇒ 无论框高多少，截止频率恒为既有基准 0.8Hz。
+    //    这条才是"老配置 / OTA 升级后行为不变"的真正判据。
+    {
+        AimTracker tr;
+        tr.update(640.0f, 360.0f, 1, 0);
+        tr.set_box_h(20.0f);
+        CHECK(std::abs(tr.min_cutoff_hz() - 0.8f) < 1e-6f);
+        tr.set_box_h(300.0f);
+        CHECK(std::abs(tr.min_cutoff_hz() - 0.8f) < 1e-6f);
+    }
+    // ② 开启后：框越小 ⇒ 截止频率越低（滤得越狠）；框超过参考尺寸 ⇒ 封顶在 max
+    {
+        BoxAdaptiveFilterConfig cfg;
+        cfg.enabled = true;
+        cfg.ref_box_h_px = 100.0f;
+        cfg.max_cutoff_hz = 0.8f;
+        cfg.min_cutoff_hz = 0.15f;
+        cfg.box_h_ema_alpha = 1.0f;   // α=1 ⇒ 直接用当帧框高，便于精确断言
+        AimTracker small; small.configure(cfg);
+        small.update(640.0f, 360.0f, 1, 0);
+        small.set_box_h(20.0f);       // 远处小框
+        AimTracker big; big.configure(cfg);
+        big.update(640.0f, 360.0f, 1, 0);
+        big.set_box_h(500.0f);        // 超过参考尺寸 ⇒ 封顶
+        const float c_small = small.min_cutoff_hz();
+        const float c_big = big.min_cutoff_hz();
+        CHECK(c_small < c_big);                   // ★ 小框滤得更狠
+        CHECK(std::abs(c_big - 0.8f) < 1e-6f);    // 大框回到既有基准值
+        // 20px/100px = 0.2 ⇒ 0.15 + (0.8-0.15)×0.2 = 0.28
+        CHECK(std::abs(c_small - 0.28f) < 1e-3f);
+    }
+    // ③ box_h <= 0（目标丢失 / 没框）⇒ **保持上一帧**，不清零。
+    //    清零会让 cutoff 瞬间跳到最狠一档，目标一回来先吃一段迟钝期。
+    {
+        BoxAdaptiveFilterConfig cfg;
+        cfg.enabled = true;
+        cfg.box_h_ema_alpha = 1.0f;
+        AimTracker tr; tr.configure(cfg);
+        tr.update(640.0f, 360.0f, 1, 0);
+        tr.set_box_h(50.0f);
+        const float before = tr.min_cutoff_hz();
+        tr.set_box_h(0.0f);
+        CHECK(std::abs(tr.min_cutoff_hz() - before) < 1e-6f);   // ★ 保持不变
+        tr.set_box_h(-5.0f);
+        CHECK(std::abs(tr.min_cutoff_hz() - before) < 1e-6f);
+    }
+    // ④ 换目标 ⇒ 框高 EMA 重新建立（旧目标的框尺寸不带到新目标）
+    {
+        BoxAdaptiveFilterConfig cfg;
+        cfg.enabled = true;
+        cfg.box_h_ema_alpha = 1.0f;
+        AimTracker tr; tr.configure(cfg);
+        tr.update(640.0f, 360.0f, 1, 0);
+        tr.set_box_h(200.0f);
+        CHECK(tr.state().box_h_ema > 0.0f);
+        tr.update(640.0f, 360.0f, 2, kDtUs);   // 换目标
+        CHECK(tr.state().box_h_ema == 0.0f);   // ★ 已清零，等新目标首帧重建
+    }
+    std::printf("test10_box_adaptive_cutoff: cutoff_ok\n");
+}
+
 int main() {
     test_static();
     test_constant_velocity();
@@ -312,8 +380,9 @@ int main() {
     test_target_switch();
     test_brief_loss();
     test_complete_loss();
+    test_box_adaptive_cutoff();
     if (g_failures == 0) {
-        std::printf("test_tracker: ALL 9 PASS\n");
+        std::printf("test_tracker: ALL 10 PASS\n");
         return 0;
     }
     std::fprintf(stderr, "test_tracker: %d FAILURES\n", g_failures);

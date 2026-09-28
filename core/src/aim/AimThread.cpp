@@ -365,7 +365,12 @@ void AimThread::loop() {
                 if (tracker_.target_switched(selected.target_id)) {
                     tracker_.reset();
                 }
+                // V3 阶段 3a：滤波强度按框高自适应（默认关 ⇒ 与加此机制前逐字节一致）。
+                // 配置每帧重读（改配置即时生效）；框高喂在 update **之后** —— 切靶时
+                // update 会把框高 EMA 清零，放之后才能立刻用新目标的框高重建。
+                tracker_.configure(frame_profile->mouse.box_adaptive);
                 tracker_.update(tx, ty, selected.target_id, task.timestamp_us);
+                tracker_.set_box_h(selected.box.y2 - selected.box.y1);
                 // 第15阶段：控制误差必须用「平滑后瞄准点」。
                 // 此前 prediction_time_s_=0 时 control 直接用原始 ex/ey，
                 // 检测框上边缘 y1 帧间跳变（±18px，模型头顶边界）直接进 PID：
