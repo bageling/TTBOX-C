@@ -27,6 +27,8 @@
 #include "mouse/LeadPredictor.hpp"
 #include "mouse/HumanizeShaper.hpp"
 #include "mouse/JitterFeedforward.hpp"
+#include "mouse/SpeedFluctuation.hpp"   // BB 移动速度波动（独立开关，拟人化之前）
+#include "mouse/AccuracySim.hpp"        // BB 命中率随机（独立开关，作用在瞄准点）
 #include "mouse/AntiOvershoot.hpp"
 #include "mouse/SpeedAdaptiveKp.hpp"
 #include "mouse/GlobalWave.hpp"
@@ -193,6 +195,12 @@ private:
     // ★ 挂在"抖动分量"上（两条链各自上报），**不挂整条整形量**：速度包络/制动是
     //   故意要走的一段位移，扣掉会让 PID 以为还没到 ⇒ 过冲。
     JitterFeedforward jitter_ff_;
+    // BB 927 原版的两个独立拟人化模块（照搬，2026-09-28）：
+    //   原版 main.lua:5943 / :6445，各自独立开关、都不归 humanize_enabled 管。
+    SpeedFluctuation speed_fluct_;
+    AccuracySim accuracy_sim_;
+    // 原版口径：速度波动只在**刚锁定目标的第一帧**生效一次（一次性标志）。
+    bool speed_fluct_first_lock_ = false;
     // 本档实测 px/count（热键档 gain_px_per_count，0 ⇒ 回退 mouse.gain_y_px_per_count）
     float active_gain_px_per_count_ = 0.0f;
     // 本帧实际加回的像素量（诊断用，供后续观测字段）

@@ -276,16 +276,20 @@ bool RuntimeProfile::validate(std::string* error) const {
         mouse.humanize.overshoot < 0.0f || mouse.humanize.brake_distance < 0.0f ||
         mouse.humanize.noise_sigma < 0.0f || mouse.humanize.delay_ms < 0.0f ||
         mouse.humanize.delay_random_ms < 0.0f ||
-        mouse.humanize.speed_fluctuation_accel_ratio < 0.0f ||
-        mouse.humanize.speed_fluctuation_accel_ratio > 1.0f ||
-        mouse.humanize.speed_fluctuation_decel_ratio < 0.0f ||
-        mouse.humanize.speed_fluctuation_decel_ratio > 1.0f ||
-        mouse.humanize.speed_fluctuation_intensity < 0.0f ||
-        mouse.humanize.speed_fluctuation_intensity > 1.0f ||
-        mouse.humanize.accuracy_sim_perfect_rate < 0.0f ||
-        mouse.humanize.accuracy_sim_perfect_rate > 100.0f ||
-        mouse.humanize.accuracy_sim_offset_strength < 0.0f) {
-        if (error) *error = "humanize 系数/时长/概率越界";
+        mouse.humanize.delay_random_ms < 0.0f) {
+        if (error) *error = "humanize 系数/时长越界";
+        return false;
+    }
+    // BB 927 原版：这两个是独立段，校验也各自独立（不挂在 humanize 名下）。
+    if (mouse.speed_fluctuation.accel_ratio < 0.0f || mouse.speed_fluctuation.accel_ratio > 1.0f ||
+        mouse.speed_fluctuation.decel_ratio < 0.0f || mouse.speed_fluctuation.decel_ratio > 1.0f ||
+        mouse.speed_fluctuation.intensity < 0.0f || mouse.speed_fluctuation.intensity > 1.0f) {
+        if (error) *error = "speed_fluctuation 比例/强度越界";
+        return false;
+    }
+    if (mouse.accuracy_sim.perfect_rate < 0.0f || mouse.accuracy_sim.perfect_rate > 100.0f ||
+        mouse.accuracy_sim.offset_strength < 0.0f) {
+        if (error) *error = "accuracy_sim 概率/强度越界";
         return false;
     }
     if (mouse.anti_overshoot.outer_distance < 0.0f || mouse.anti_overshoot.inner_distance < 0.0f ||
@@ -663,16 +667,29 @@ JsonValue RuntimeProfile::to_json() const {
         hu.set("noise_sigma", JsonValue::number(static_cast<double>(mouse.humanize.noise_sigma)));
         hu.set("delay_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_ms)));
         hu.set("delay_random_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_random_ms)));
-        hu.set("speed_fluctuation_enabled", JsonValue::boolean(mouse.humanize.speed_fluctuation_enabled));
-        hu.set("speed_fluctuation_start_speed", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_start_speed)));
-        hu.set("speed_fluctuation_accel_ratio", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_accel_ratio)));
-        hu.set("speed_fluctuation_decel_ratio", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_decel_ratio)));
-        hu.set("speed_fluctuation_intensity", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_intensity)));
-        hu.set("accuracy_sim_enabled", JsonValue::boolean(mouse.humanize.accuracy_sim_enabled));
-        hu.set("accuracy_sim_perfect_rate", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_perfect_rate)));
-        hu.set("accuracy_sim_offset_strength", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_offset_strength)));
-        hu.set("accuracy_sim_direction", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_direction)));
+        // ★ 2026-09-28：speed_fluctuation / accuracy_sim 已从 humanize 段拆出，
+        //   按 BB 927 原版口径独立成段（原版是独立开关，不归 humanize_enabled 管）。
         m.set("humanize", std::move(hu));
+
+        // BB 927 原版：这两个是独立开关，不归 humanize.enabled 管（照搬口径）。
+        {
+            JsonValue sf = JsonValue::object();
+            sf.set("enabled", JsonValue::boolean(mouse.speed_fluctuation.enabled));
+            sf.set("start_speed", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.start_speed)));
+            sf.set("accel_ratio", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.accel_ratio)));
+            sf.set("decel_ratio", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.decel_ratio)));
+            sf.set("intensity", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.intensity)));
+            sf.set("total_distance_px", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.total_distance_px)));
+            m.set("speed_fluctuation", std::move(sf));
+        }
+        {
+            JsonValue as = JsonValue::object();
+            as.set("enabled", JsonValue::boolean(mouse.accuracy_sim.enabled));
+            as.set("perfect_rate", JsonValue::number(static_cast<double>(mouse.accuracy_sim.perfect_rate)));
+            as.set("offset_strength", JsonValue::number(static_cast<double>(mouse.accuracy_sim.offset_strength)));
+            as.set("direction", JsonValue::number(static_cast<double>(mouse.accuracy_sim.direction)));
+            m.set("accuracy_sim", std::move(as));
+        }
 
         JsonValue ao = JsonValue::object();
         ao.set("enabled", JsonValue::boolean(mouse.anti_overshoot.enabled));
@@ -1118,15 +1135,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             c.noise_sigma = static_cast<float>(obj_num(*hu, "noise_sigma", 0.2));
             c.delay_ms = static_cast<float>(obj_num(*hu, "delay_ms", 0.0));
             c.delay_random_ms = static_cast<float>(obj_num(*hu, "delay_random_ms", 0.0));
-            c.speed_fluctuation_enabled = obj_bool(*hu, "speed_fluctuation_enabled", false);
-            c.speed_fluctuation_start_speed = static_cast<float>(obj_num(*hu, "speed_fluctuation_start_speed", 0.80));
-            c.speed_fluctuation_accel_ratio = static_cast<float>(obj_num(*hu, "speed_fluctuation_accel_ratio", 0.20));
-            c.speed_fluctuation_decel_ratio = static_cast<float>(obj_num(*hu, "speed_fluctuation_decel_ratio", 0.20));
-            c.speed_fluctuation_intensity = static_cast<float>(obj_num(*hu, "speed_fluctuation_intensity", 0.15));
-            c.accuracy_sim_enabled = obj_bool(*hu, "accuracy_sim_enabled", false);
-            c.accuracy_sim_perfect_rate = static_cast<float>(obj_num(*hu, "accuracy_sim_perfect_rate", 90.0));
-            c.accuracy_sim_offset_strength = static_cast<float>(obj_num(*hu, "accuracy_sim_offset_strength", 0.50));
-            c.accuracy_sim_direction = static_cast<int>(obj_int(*hu, "accuracy_sim_direction", 0));
+            // ★ 2026-09-28：speed_fluctuation / accuracy_sim 已拆出 humanize 段，
+            //   改为独立段解析（见下方 mouse.speed_fluctuation / mouse.accuracy_sim）。
         }
         if (const JsonValue* ao = m->find("anti_overshoot"); ao && ao->is_object()) {
             auto& c = p.mouse.anti_overshoot;
@@ -1286,6 +1296,23 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
         // V3 阶段 5 前置：实测回路延迟（ms）。老配置没有这个键 ⇒ 0（未标定）。
         p.mouse.response_delay_ms = static_cast<float>(obj_num(*m, "response_delay_ms", 0.0));
+        // BB 927 原版：两个独立拟人化开关（不归 humanize.enabled 管）。老配置无键 ⇒ 默认关。
+        if (const JsonValue* sf = m->find("speed_fluctuation"); sf && sf->is_object()) {
+            auto& c = p.mouse.speed_fluctuation;
+            c.enabled = obj_bool(*sf, "enabled", false);
+            c.start_speed = static_cast<float>(obj_num(*sf, "start_speed", 0.80));
+            c.accel_ratio = static_cast<float>(obj_num(*sf, "accel_ratio", 0.20));
+            c.decel_ratio = static_cast<float>(obj_num(*sf, "decel_ratio", 0.20));
+            c.intensity = static_cast<float>(obj_num(*sf, "intensity", 0.15));
+            c.total_distance_px = static_cast<float>(obj_num(*sf, "total_distance_px", 452.5));
+        }
+        if (const JsonValue* as = m->find("accuracy_sim"); as && as->is_object()) {
+            auto& c = p.mouse.accuracy_sim;
+            c.enabled = obj_bool(*as, "enabled", false);
+            c.perfect_rate = static_cast<float>(obj_num(*as, "perfect_rate", 90.0));
+            c.offset_strength = static_cast<float>(obj_num(*as, "offset_strength", 0.50));
+            c.direction = static_cast<int>(obj_int(*as, "direction", 0));
+        }
         // V3 阶段 5：抖动前馈扣除。老配置没有这个键 ⇒ 默认关（enabled=false）。
         if (const JsonValue* jf = m->find("jitter_feedforward"); jf && jf->is_object()) {
             auto& c = p.mouse.jitter_feedforward;

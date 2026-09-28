@@ -490,20 +490,54 @@ struct HumanizeShaperConfig {
     float smooth_factor = 0.0f;      // 一阶低通系数（0~0.99，0 = 关闭）
     float overshoot = 0.0f;          // 过冲强度（factor = 1 + overshoot×min(1, dtt/200)）
     float brake_distance = 0.0f;     // 制动触发距离（px，0 = 关闭）
-    float noise_sigma = 0.2f;        // 高斯噪声标准差（px）
+    float noise_sigma = 0.2f;        // 高斯噪声标准差（count）—— BB 原版加在位移 mx/my 上，量纲是 count
     float delay_ms = 0.0f;           // 反应延迟基准（ms）
     float delay_random_ms = 0.0f;    // 反应延迟随机幅度（±ms）
-    // 速度波动（可选附加项，见 03 号 §3.4）
-    bool speed_fluctuation_enabled = false;
-    float speed_fluctuation_start_speed = 0.80f;
-    float speed_fluctuation_accel_ratio = 0.20f;
-    float speed_fluctuation_decel_ratio = 0.20f;
-    float speed_fluctuation_intensity = 0.15f;
-    // 精度模拟（可选附加项，见 03 号 §3.6）：把瞄准点推到目标框边缘/四角
-    bool accuracy_sim_enabled = false;
-    float accuracy_sim_perfect_rate = 90.0f;   // "完美命中"概率（%）
-    float accuracy_sim_offset_strength = 0.50f; // 偏移强度（占框半径比例）
-    int accuracy_sim_direction = 0;            // 0=四角优先 1=边缘随机 2=随机
+    // ★ 2026-09-28 照搬 BB 927 原版：speed_fluctuation / accuracy_sim 在 BB 里是
+    //   **独立于 humanize_enabled 的开关**（main.lua:5943 / :6445 各自独立判断），
+    //   不属于本结构。此前塞在这里且未接线 ⇒ 面板勾了没反应（假开关）。
+    //   现已拆成 MouseProfile.speed_fluctuation / .accuracy_sim，按原版口径独立生效。
+};
+
+// ---------------------------------------------------------------------------
+// BB 移动速度波动（BB `applySpeedFluctuation`，main.lua:5265 / 调用点 :5943）
+// 照搬 BB 927 原版：让一次"拉过去"的动作先慢、再快、最后减速 —— 速度倍率乘在
+// 位移上。progress = 1 - dtt/total_distance；起步段 / 收尾段各占一个比例。
+//
+// ★ 原版口径（照抄，不自己发挥）：
+//   1. 它是**独立开关**，不受 humanize_enabled 管（原版 :5266 只看 speed_fluctuation_enabled）。
+//   2. 只在**刚锁定目标的第一帧**生效一次（原版 :5943 传 st.speed_fluctuation_first_lock，
+//      用完立刻置 false）。之后同一目标上不再作用。
+//   3. 全程参考距离 td 用的是 `sqrt(Centre²+Centre²)`（瞄准范围对角线，原版 :5943）。
+//
+// ★ 默认 enabled=false ⇒ 与本模块加入前逐字节一致。
+// ---------------------------------------------------------------------------
+struct SpeedFluctuationConfig {
+    bool enabled = false;                 // 独立开关（不归 humanize_enabled 管）
+    float start_speed = 0.80f;            // 起步速度倍率（0.1~1.0）
+    float accel_ratio = 0.20f;            // 起步段占总距离比例（0.1~0.5）
+    float decel_ratio = 0.20f;            // 收尾段占总距离比例（0.1~0.5）
+    float intensity = 0.15f;              // 随机波动幅度（0~0.5）
+    float total_distance_px = 452.5f;     // 全程参考距离（px）= sqrt(Centre²+Centre²)，Centre=320
+};
+
+// ---------------------------------------------------------------------------
+// BB 命中率随机（BB `applyAccuracySim`，main.lua:5274 / 调用点 :6445）
+// 照搬 BB 927 原版：按概率把**瞄准点**推到目标框四角/边缘，复现"打不中"的手感。
+//
+// ★ 原版口径（照抄）：
+//   1. 它是**独立开关**，不受 humanize_enabled 管。
+//   2. 作用在**瞄准点**（选靶之后、进 PID 之前），不是在输出位移上加抖动
+//      —— 原版 :6445 `at = applyAccuracySim(at, lp)`，改的是 locked_target。
+//   3. 命中"完美"概率内不动；不完美时按方向策略取角度，偏移量 = 框半径 × 强度。
+//
+// ★ 默认 enabled=false ⇒ 与本模块加入前逐字节一致。
+// ---------------------------------------------------------------------------
+struct AccuracySimConfig {
+    bool enabled = false;                 // 独立开关（不归 humanize_enabled 管）
+    float perfect_rate = 90.0f;           // 完美命中概率（%，50~100）
+    float offset_strength = 0.50f;        // 偏移强度（占框半径比例，0.1~1.0）
+    int direction = 0;                    // 0=四角优先 1=边缘随机 2=全随机（BB 字符串同义）
 };
 
 // ---------------------------------------------------------------------------
@@ -668,6 +702,9 @@ struct MouseProfile {
     Lead1Config lead1;                      // 提前量一代（帧窗口投票，X 轴）
     Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）
     HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
+    // BB 927 原版里这两个是**独立开关**，不归 humanize.enabled 管（照搬，2026-09-28）。
+    SpeedFluctuationConfig speed_fluctuation;  // 移动速度波动（作用在位移上，拟人化之前）
+    AccuracySimConfig accuracy_sim;            // 命中率随机（作用在瞄准点上，选靶阶段）
     AntiOvershootConfig anti_overshoot;     // 抗过冲状态机
     SpeedAdaptiveKpConfig speed_adaptive_kp; // 速度自适应 Kp（临时乘子）
     GlobalWaveConfig global_wave;           // 全局正弦扰动

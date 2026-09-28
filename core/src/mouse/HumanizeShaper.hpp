@@ -118,53 +118,10 @@ public:
     float last_jitter_x() const { return last_jitter_x_; }
     float last_jitter_y() const { return last_jitter_y_; }
 
-    // 速度波动（可选附加项，见 03 号 §3.4）：按"离目标多远"给出速度倍率。
-    // progress = 1 - dtt/total_distance；先加速段（0→accel_ratio）、后减速段（1-decel_ratio→1）。
-    // 仅在 speed_fluctuation_enabled 且有全程参考距离时生效。
-    void speed_fluctuation(float* x, float* y, float total_distance_px, float dtt,
-                           const HumanizeShaperConfig& cfg) {
-        if (!cfg.speed_fluctuation_enabled || total_distance_px <= 0.0f) return;
-        float p = 1.0f - dtt / total_distance_px;
-        if (p < 0.0f) p = 0.0f;
-        if (p > 1.0f) p = 1.0f;
-        const float start_speed = cfg.speed_fluctuation_start_speed;
-        const float accel = cfg.speed_fluctuation_accel_ratio;
-        const float decel = cfg.speed_fluctuation_decel_ratio;
-        float sf = 1.0f;
-        if (accel > 0.0f && p < accel) {
-            sf = start_speed + (1.0f - start_speed) * (p / accel);
-        } else if (decel > 0.0f && p > (1.0f - decel)) {
-            sf = 1.0f - (1.0f - start_speed) * ((p - (1.0f - decel)) / decel);
-        }
-        if (cfg.speed_fluctuation_intensity > 0.0f) {
-            sf *= 1.0f + (rand_unit() - 0.5f) * 2.0f * cfg.speed_fluctuation_intensity;
-        }
-        *x *= sf;
-        *y *= sf;
-    }
-
-    // 精度模拟（可选附加项，见 03 号 §3.6）：直接改**瞄准点**（不是位移），
-    // 按概率把瞄准点推到目标框四角/边缘，复现"打不中"的手感。
-    void accuracy_sim(float* target_x, float* target_y, float box_w, float box_h,
-                      const HumanizeShaperConfig& cfg) {
-        if (!cfg.accuracy_sim_enabled) return;
-        if (rand_unit() * 100.0f <= cfg.accuracy_sim_perfect_rate) return;  // 完美命中，不偏移
-        const float hw = (box_w > 0.0f ? box_w : 50.0f) * 0.5f;
-        const float hh = (box_h > 0.0f ? box_h : 50.0f) * 0.5f;
-        float angle_deg = 0.0f;
-        if (cfg.accuracy_sim_direction == 0) {          // 四角优先 ±15°
-            const int k = static_cast<int>(rand_unit() * 4.0f) & 3;
-            angle_deg = 45.0f + 90.0f * static_cast<float>(k) + (rand_unit() * 30.0f - 15.0f);
-        } else if (cfg.accuracy_sim_direction == 1) {   // 边缘随机 ±30°
-            const int k = static_cast<int>(rand_unit() * 4.0f) & 3;
-            angle_deg = 90.0f * static_cast<float>(k) + (rand_unit() * 60.0f - 30.0f);
-        } else {                                        // 随机 0~360°
-            angle_deg = rand_unit() * 360.0f;
-        }
-        const float a = angle_deg * 3.14159265f / 180.0f;
-        *target_x += std::cos(a) * hw * cfg.accuracy_sim_offset_strength;
-        *target_y += std::sin(a) * hh * cfg.accuracy_sim_offset_strength;
-    }
+    // ★ 2026-09-28：speed_fluctuation / accuracy_sim 已从本类移出，按 BB 927 原版
+    //   口径独立成模块（SpeedFluctuation.hpp / AccuracySim.hpp），且**不受
+    //   humanize.enabled 管**（原版 main.lua:5943 / :6445 都是独立判断）。
+    //   此前它们挂在本配置里且从未被调用 ⇒ 面板上那 9 个格子全是假开关。
 
     void reset() {
         has_last_ = false;

@@ -22,6 +22,8 @@
 #include "mouse/LeadPredictor.hpp"
 #include "mouse/RecoilController.hpp"
 #include "mouse/SpeedAdaptiveKp.hpp"
+#include "mouse/SpeedFluctuation.hpp"
+#include "mouse/AccuracySim.hpp"
 #include "model/RuntimeProfile.hpp"
 
 using namespace ttbox::core::aim;
@@ -735,7 +737,12 @@ void test_profile_roundtrip() {
     p.mouse.humanize.enabled = true;
     p.mouse.humanize.smooth_factor = 0.35f;
     p.mouse.humanize.noise_sigma = 0.33f;
-    p.mouse.humanize.accuracy_sim_direction = 2;
+    // BB 927 原版：accuracy_sim 是独立段（不归 humanize.enabled 管）
+    p.mouse.accuracy_sim.enabled = true;
+    p.mouse.accuracy_sim.direction = 2;
+    p.mouse.accuracy_sim.perfect_rate = 77.0f;
+    p.mouse.speed_fluctuation.enabled = true;
+    p.mouse.speed_fluctuation.start_speed = 0.65f;
     p.mouse.anti_overshoot.enabled = true;
     p.mouse.anti_overshoot.inner_frames = 4;
     p.mouse.speed_adaptive_kp.enabled = true;
@@ -778,9 +785,15 @@ void test_profile_roundtrip() {
               std::fabs(q.mouse.lead2.decay - 0.9f) < 1e-5f,
           "lead2 键往返一致");
     check(q.mouse.humanize.enabled && std::fabs(q.mouse.humanize.smooth_factor - 0.35f) < 1e-4f &&
-              std::fabs(q.mouse.humanize.noise_sigma - 0.33f) < 1e-4f &&
-              q.mouse.humanize.accuracy_sim_direction == 2,
+              std::fabs(q.mouse.humanize.noise_sigma - 0.33f) < 1e-4f,
           "humanize 键往返一致");
+    // ★ 独立段必须能独立落盘：关掉 humanize.enabled 也照样生效（BB 原版口径）
+    check(q.mouse.accuracy_sim.enabled && q.mouse.accuracy_sim.direction == 2 &&
+              std::fabs(q.mouse.accuracy_sim.perfect_rate - 77.0f) < 1e-4f,
+          "accuracy_sim 独立段往返一致");
+    check(q.mouse.speed_fluctuation.enabled &&
+              std::fabs(q.mouse.speed_fluctuation.start_speed - 0.65f) < 1e-4f,
+          "speed_fluctuation 独立段往返一致");
     check(q.mouse.anti_overshoot.enabled && q.mouse.anti_overshoot.inner_frames == 4,
           "anti_overshoot 键往返一致");
     check(q.mouse.speed_adaptive_kp.enabled &&
@@ -840,6 +853,100 @@ void test_profile_defaults_zero_behavior() {
 
 }  // namespace
 
+// ===========================================================================
+// BB 927 原版照搬的两个独立模块（2026-09-28）
+// 口径全部对齐 main.lua：applySpeedFluctuation(:5265) / applyAccuracySim(:5274)
+// ===========================================================================
+
+// 速度波动：起步慢（sf<1）→ 中段匀速（sf=1）→ 收尾减速（sf<1）
+void test_speed_fluctuation_shape() {
+    SpeedFluctuationConfig cfg;
+    cfg.enabled = true;
+    cfg.start_speed = 0.80f;
+    cfg.accel_ratio = 0.20f;
+    cfg.decel_ratio = 0.20f;
+    cfg.intensity = 0.0f;          // 关随机，先看骨架
+    cfg.total_distance_px = 100.0f;
+    SpeedFluctuation sf;
+    sf.reset();
+
+    // dtt=95 ⇒ p=0.05 < 0.20 ⇒ 起步段：sf = 0.8 + 0.2×(0.05/0.20) = 0.85
+    {
+        float mx = 10.0f, my = 10.0f;
+        sf.apply(&mx, &my, 95.0f, true, cfg);
+        check(std::fabs(mx - 8.5f) < 1e-3f, "起步段：位移被压到 0.85 倍");
+    }
+    // dtt=50 ⇒ p=0.5 ⇒ 中段：sf = 1.0
+    {
+        float mx = 10.0f, my = 10.0f;
+        sf.apply(&mx, &my, 50.0f, true, cfg);
+        check(std::fabs(mx - 10.0f) < 1e-3f, "中段：位移不变（倍率 1.0）");
+    }
+    // dtt=5 ⇒ p=0.95 > 0.80 ⇒ 收尾段：sf = 1 - 0.2×((0.95-0.8)/0.2) = 0.85
+    {
+        float mx = 10.0f, my = 10.0f;
+        sf.apply(&mx, &my, 5.0f, true, cfg);
+        check(std::fabs(mx - 8.5f) < 1e-3f, "收尾段：位移被压到 0.85 倍");
+    }
+}
+
+// 原版口径：只在"刚锁定目标的第一帧"生效一次（first_lock=false ⇒ 完全不动）
+void test_speed_fluctuation_first_lock_only() {
+    SpeedFluctuationConfig cfg;
+    cfg.enabled = true;
+    cfg.intensity = 0.0f;
+    cfg.total_distance_px = 100.0f;
+    SpeedFluctuation sf;
+    sf.reset();
+    float mx = 10.0f, my = 10.0f;
+    sf.apply(&mx, &my, 95.0f, false, cfg);
+    check(mx == 10.0f && my == 10.0f, "非首帧：原版口径下完全不作用");
+
+    // 默认关 ⇒ 哪怕首帧也不动
+    SpeedFluctuationConfig off;
+    float ox = 10.0f, oy = 10.0f;
+    sf.apply(&ox, &oy, 95.0f, true, off);
+    check(ox == 10.0f && oy == 10.0f, "默认关 ⇒ 零变化");
+}
+
+// 命中率随机：完美命中概率内不动；必偏时偏移量 = 框半径 × 强度
+void test_accuracy_sim() {
+    AccuracySimConfig cfg;
+    cfg.enabled = true;
+    cfg.perfect_rate = 100.0f;      // 永远完美 ⇒ 永不偏移
+    cfg.offset_strength = 0.5f;
+    AccuracySim as;
+    as.reset();
+    {
+        float tx = 100.0f, ty = 100.0f;
+        for (int i = 0; i < 50; ++i) as.apply(&tx, &ty, 60.0f, 80.0f, cfg);
+        check(tx == 100.0f && ty == 100.0f, "完美命中概率 100% ⇒ 瞄准点不动");
+    }
+    cfg.perfect_rate = 0.0f;        // 必偏
+    cfg.direction = 0;              // 四角优先
+    {
+        bool moved = false;
+        bool in_box = true;
+        for (int i = 0; i < 200; ++i) {
+            float tx = 100.0f, ty = 100.0f;
+            as.apply(&tx, &ty, 60.0f, 80.0f, cfg);
+            const float dx = tx - 100.0f, dy = ty - 100.0f;
+            if (dx != 0.0f || dy != 0.0f) moved = true;
+            // 偏移上限 = 半宽×强度 = 15（X）/ 半高×强度 = 20（Y）
+            if (std::fabs(dx) > 15.0f + 1e-3f || std::fabs(dy) > 20.0f + 1e-3f) in_box = false;
+        }
+        check(moved, "完美命中概率 0% ⇒ 每帧都偏");
+        check(in_box, "偏移量不超过 框半径 x 强度");
+    }
+    // 默认关 ⇒ 不动
+    {
+        AccuracySimConfig off;
+        float tx = 7.0f, ty = 7.0f;
+        as.apply(&tx, &ty, 60.0f, 80.0f, off);
+        check(tx == 7.0f && ty == 7.0f, "默认关 ⇒ 零变化");
+    }
+}
+
 int main() {
     std::printf("=== test_bb_second_batch：BB 对标第二批模块测试 ===\n");
     test_bb_disabled_zero();
@@ -872,6 +979,10 @@ int main() {
 
     test_speed_kp();
     test_global_wave();
+
+    test_speed_fluctuation_shape();
+    test_speed_fluctuation_first_lock_only();
+    test_accuracy_sim();
 
     test_profile_roundtrip();
     test_profile_defaults_zero_behavior();

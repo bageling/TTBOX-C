@@ -374,6 +374,16 @@ void AimThread::loop() {
                 if (aim_point.head_aim.enabled) {
                     constrain_aim_point_to_head(selected.box, aim_point, &tx, &ty);
                 }
+                // ---- BB 命中率随机（照搬 BB 927 原版 main.lua:6445）----
+                // ★ 位置照抄原版：作用在**瞄准点**上、进 PID 之前 ⇒ 它是"瞄歪一点"，
+                //   不是"手抖一下" —— PID 会老老实实往这个偏了的点瞄。
+                // ★ 独立开关，不受 humanize.enabled 管（原版 :5275 同样只判自己）。
+                if (frame_profile && frame_profile->mouse.accuracy_sim.enabled) {
+                    accuracy_sim_.apply(&tx, &ty,
+                                        selected.box.x2 - selected.box.x1,
+                                        selected.box.y2 - selected.box.y1,
+                                        frame_profile->mouse.accuracy_sim);
+                }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
                 // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。
                 // prediction_time_s_>0 时用预测点做控制误差；=0 保持原行为（直接用瞄准点）。
@@ -410,8 +420,13 @@ void AimThread::loop() {
                     anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
                     humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
                     jitter_ff_.reset();       // V3 阶段 5：换目标 ⇒ 旧目标的抖动欠账作废
+                    speed_fluct_.reset();     // BB 速度波动：新目标重新走"起步→收尾"
                     global_wave_.reset();
                 }
+                // BB 原版口径：速度波动的一次性标志在**新锁定目标**时置 true
+                // （原版 main.lua:5742 `st.speed_fluctuation_first_lock=true`），
+                // 用完一帧即清（见尾链调用处）。锁定同一个目标期间不再作用。
+                if (last_target_id_ != selected.target_id) speed_fluct_first_lock_ = true;
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
                 // 速度信息只进入 P_PID 的前馈/Kalman，不在目标坐标层 coast。
@@ -693,16 +708,51 @@ void AimThread::loop() {
             // （deadzone → remainder → int16 → 拟人化 → 热键安全门），
             // 保证压枪量与正常瞄准一样受同样的安全门与量化约束，不绕过任何一道。
             if (target_ok || recoil_add_x != 0.0f || recoil_add_y != 0.0f) {
-                scaled_y += recoil_add_y;
-                scaled_x += recoil_add_x;
-                // ---- BB 抗过冲（recoil 之后、deadzone 之前）----
+                // ★★ 2026-09-28：尾链顺序**照搬 BB 927 原版**（main.lua:5943 / :6010-6015）：
+                //     速度波动 → 拟人化 → 抗过冲 → 压枪 → 全局正弦波 → deadzone
+                //   此前我们是 压枪 → 抗过冲 → 正弦波 → deadzone → **拟人化放最后**，
+                //   与 BB 差三处：
+                //     ① 拟人化在抗过冲**之后** ⇒ 噪声/过冲不再被抗过冲收一遍；
+                //     ② 压枪在抗过冲**之前** ⇒ 压枪量会被抗过冲按"离目标近"衰减掉，
+                //        只能靠 target_ok 补丁绕开（原版顺序天然没这问题）；
+                //     ③ 拟人化挪到了整数截断**之后** ⇒ 噪声不足 1 count 就被吃掉，
+                //        原版是在浮点位移域做的。
+                //   ★ 默认这几个模块全关 ⇒ 老配置行为零变化；只有开了的人才有差别。
+
+                // ---- BB 移动速度波动（独立开关，拟人化之前，原版 :5943）----
+                if (target_ok && frame_profile && frame_profile->mouse.speed_fluctuation.enabled) {
+                    speed_fluct_.apply(&scaled_x, &scaled_y, dtt_px, speed_fluct_first_lock_,
+                                       frame_profile->mouse.speed_fluctuation);
+                }
+                speed_fluct_first_lock_ = false;   // 与/原版一致：用完一帧即清
+
+                // ---- BB 拟人化链（低通 → 反应延迟 → 过冲 → 制动 → 噪声）----
+                // 位置按原版挪到浮点位移域、抗过冲之前（原版 :6010）。
+                // 顺序固定，见 HumanizeShaper.hpp 顶部注释（与 BB 的差异仍照旧保留）。
+                if (humanize_cfg.enabled) {
+                    HumanizeShaper::Context hctx;
+                    hctx.dtt = dtt_px;
+                    hctx.now_ms = now_ms32;
+                    hctx.aiming = true;
+                    humanize_shaper_.apply(&scaled_x, &scaled_y, humanize_cfg, hctx);
+                    // V3 阶段 5：只把**高斯噪声**登记进前馈缓冲（低通/延迟/过冲/制动
+                    // 都是"故意要走或不走的一段"，扣掉会让 PID 以为还没到位 ⇒ 过冲）。
+                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
+                        jitter_ff_.push(humanize_shaper_.last_jitter_x(),
+                                        humanize_shaper_.last_jitter_y());
+                    }
+                }
+
+                // ---- BB 抗过冲（拟人化之后、压枪之前，原版 :6010）----
                 // 靠近目标时按内/外圈强度分段衰减位移；各圈"最多衰减 N 帧"，跑满即本轮停手。
-                // ★ 无目标时跳过：它按"离目标距离"分区，dtt=0 会被判成"在最内圈"
-                //   ⇒ 把压枪量整体衰减掉（inner_strength=100 时直接归零，等于白压）。
+                // ★ 无目标时跳过：它按"离目标距离"分区，dtt=0 会被判成"在最内圈"。
+                //   （照搬原版顺序后，压枪在其后 ⇒ 压枪量天然不会被它衰减。）
                 if (target_ok && anti_over_cfg.enabled) {
                     anti_overshoot_.apply(&scaled_x, &scaled_y, dtt_px, now_ms32, anti_over_cfg);
                 }
-                // ---- BB 全局正弦扰动（deadzone 之前）----
+                scaled_y += recoil_add_y;
+                scaled_x += recoil_add_x;
+                // ---- BB 全局正弦扰动（压枪之后、deadzone 之前，原版 :6015）----
                 if (global_wave_cfg.enabled) {
                     global_wave_.apply(&scaled_x, &scaled_y, now_ms32, global_wave_cfg);
                 }
@@ -747,28 +797,11 @@ void AimThread::loop() {
                 // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。
                 // 输入：已量化 count(dx,dy) + 控制误差 px(ex,ey)；按需激活（新目标首次有效帧）。
                 // ---- BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）----
-                // 顺序固定：低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。
-                // 注入点与旧引擎相同（int16 量化之后、热键 Gate 之前）⇒ 安全边界不变。
-                // ★ speed_fluctuation / accuracy_sim 两个"附加项"本期只提供模块与配置键、
-                //   **未接线**（默认关 ⇒ 无影响）；等面板那批确认取值口径后再接。
-                if (humanize_cfg.enabled) {
-                    float hx = static_cast<float>(move_x);
-                    float hy = static_cast<float>(move_y);
-                    HumanizeShaper::Context hctx;
-                    hctx.dtt = dtt_px;
-                    hctx.now_ms = now_ms32;
-                    hctx.aiming = true;
-                    humanize_shaper_.apply(&hx, &hy, humanize_cfg, hctx);
-                    // ★ V3 阶段 5：只登记**高斯噪声**这一项随机抖动。
-                    //   低通/反应延迟/过冲/制动都是"故意要走（或不走）的一段"，
-                    //   扣掉会让 PID 以为还没到位 ⇒ 过冲。噪声才是该被 PID 忽略的部分。
-                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
-                        jitter_ff_.push(humanize_shaper_.last_jitter_x(),
-                                        humanize_shaper_.last_jitter_y());
-                    }
-                    move_x = static_cast<int16_t>(std::clamp(hx, kHidMin, kHidMax));
-                    move_y = static_cast<int16_t>(std::clamp(hy, kHidMin, kHidMax));
-                } else if (personal_traj_cfg.enabled && injection_allowed) {
+                // ★ 2026-09-28：BB 拟人化链已按原版顺序**上移**到浮点位移域
+                //   （抗过冲之前，见上面尾链段），这里不再重复跑一遍。
+                //   speed_fluctuation / accuracy_sim 也按原版独立接线（分别在尾链
+                //   与瞄准点处），不再是"只提供模块、未接线"的假开关。
+                if (!humanize_cfg.enabled && personal_traj_cfg.enabled && injection_allowed) {
                     if (!personal_shader_.active()) {
                         // 激活一次移动：用当前控制误差距离作为本次移动目标距离
                         personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);

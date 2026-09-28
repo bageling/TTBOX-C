@@ -5806,24 +5806,24 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">反应时间随机 ±ms<input id="humanize_delay_random_ms" data-config type="number" min="0" step="5"><span class="field-hint">每次的反应时间在上下这个范围内浮动，不至于每次都一模一样。</span></label>
                     </div>
                     <div class="check-field">
-                      <label class="check-line"><input id="humanize_speed_fluctuation_enabled" data-config type="checkbox"> 速度波动</label>
+                      <label class="check-line"><input id="speed_fluctuation_enabled" data-config type="checkbox"> 速度波动</label>
                       <span class="field-hint">整段移动的速度曲线做轻微起伏，看起来更像手在动。</span>
                     </div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="field">起步速度<input id="humanize_speed_fluctuation_start_speed" data-config type="number" min="0" step="0.05"><span class="field-hint">刚开始动的时候有多快（1 = 全速）。设小一点就是「先慢慢起手」。</span></label>
-                      <label class="field">加速段占多少<input id="humanize_speed_fluctuation_accel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的前面多少比例用来加速（0.2 = 前 20%）。</span></label>
-                      <label class="field">减速段占多少<input id="humanize_speed_fluctuation_decel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的最后多少比例用来减速收尾（0.2 = 后 20%）。</span></label>
-                      <label class="field">起伏有多大<input id="humanize_speed_fluctuation_intensity" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">速度忽快忽慢的程度。0 就是匀速，0.15 是轻微起伏，再大就明显一顿一顿了。</span></label>
+                      <label class="field">起步速度<input id="speed_fluctuation_start_speed" data-config type="number" min="0" step="0.05"><span class="field-hint">刚开始动的时候有多快（1 = 全速）。设小一点就是「先慢慢起手」。</span></label>
+                      <label class="field">加速段占多少<input id="speed_fluctuation_accel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的前面多少比例用来加速（0.2 = 前 20%）。</span></label>
+                      <label class="field">减速段占多少<input id="speed_fluctuation_decel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的最后多少比例用来减速收尾（0.2 = 后 20%）。</span></label>
+                      <label class="field">起伏有多大<input id="speed_fluctuation_intensity" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">速度忽快忽慢的程度。0 就是匀速，0.15 是轻微起伏，再大就明显一顿一顿了。</span></label>
                     </div>
                     <div class="check-field">
-                      <label class="check-line"><input id="humanize_accuracy_sim_enabled" data-config type="checkbox"> 精度模拟</label>
+                      <label class="check-line"><input id="accuracy_sim_enabled" data-config type="checkbox"> 精度模拟</label>
                       <span class="field-hint">不是每次都钉在正中，按概率把落点推到框边或四角。</span>
                     </div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="field">完美命中概率 %<input id="humanize_accuracy_sim_perfect_rate" data-config type="number" min="0" max="100" step="1"><span class="field-hint">有多少比例的次数是正正好好瞄在中间的。90 = 十次里有九次准、一次故意偏一点。想更像人就往下调。</span></label>
-                      <label class="field">偏移强度<input id="humanize_accuracy_sim_offset_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">占框半径的比例。</span></label>
+                      <label class="field">完美命中概率 %<input id="accuracy_sim_perfect_rate" data-config type="number" min="0" max="100" step="1"><span class="field-hint">有多少比例的次数是正正好好瞄在中间的。90 = 十次里有九次准、一次故意偏一点。想更像人就往下调。</span></label>
+                      <label class="field">偏移强度<input id="accuracy_sim_offset_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">占框半径的比例。</span></label>
                       <label class="field">落点方式
-                        <select id="humanize_accuracy_sim_direction" data-config>
+                        <select id="accuracy_sim_direction" data-config>
                           <option value="0">四角优先</option>
                           <option value="1">边缘随机</option>
                           <option value="2">随机</option>
@@ -6648,15 +6648,22 @@ const BB_CTRL_MODULES = [
     ["noise_sigma", "n", 0.2],
     ["delay_ms", "n", 0.0],
     ["delay_random_ms", "n", 0.0],
-    ["speed_fluctuation_enabled", "b", false],
-    ["speed_fluctuation_start_speed", "n", 0.8],
-    ["speed_fluctuation_accel_ratio", "n", 0.2],
-    ["speed_fluctuation_decel_ratio", "n", 0.2],
-    ["speed_fluctuation_intensity", "n", 0.15],
-    ["accuracy_sim_enabled", "b", false],
-    ["accuracy_sim_perfect_rate", "n", 90.0],
-    ["accuracy_sim_offset_strength", "n", 0.5],
-    ["accuracy_sim_direction", "i", 0],
+  ]],
+  // BB 927 原版：这两个是**独立开关**，不归 humanize.enabled 管
+  //（原版 main.lua:5943 / :6445 各自独立判断）⇒ 拆成独立段，面板也不再挂在拟人化卡片下。
+  ["speed_fluctuation", [
+    ["enabled", "b", false],
+    ["start_speed", "n", 0.8],
+    ["accel_ratio", "n", 0.2],
+    ["decel_ratio", "n", 0.2],
+    ["intensity", "n", 0.15],
+    ["total_distance_px", "n", 452.5],
+  ]],
+  ["accuracy_sim", [
+    ["enabled", "b", false],
+    ["perfect_rate", "n", 90.0],
+    ["offset_strength", "n", 0.5],
+    ["direction", "i", 0],
   ]],
   ["anti_overshoot", [
     ["enabled", "b", false],
