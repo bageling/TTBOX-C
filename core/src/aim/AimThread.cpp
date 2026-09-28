@@ -726,6 +726,37 @@ void AimThread::loop() {
                 }
                 speed_fluct_first_lock_ = false;   // 与/原版一致：用完一帧即清
 
+                // ---- 深度融合（2026-09-28）：两条拟人化链合成一条 ----
+                // 职责分工（不再二选一，互补叠加）：
+                //   ① 自研 personal_trajectory = **这一段路怎么走**
+                //      （Fitts 时长、起步→加速→收尾的速度包络、垂直于移动方向的手抖曲线、
+                //        大误差/快目标/老目标自动停手的抑制）
+                //   ② BB humanize = **人的生理特征**
+                //      （低通、反应延迟、冲过头、快到了收力、手不稳的噪声）
+                // 顺序：先定轨迹、再叠人的特征 —— BB 的过冲/噪声才有"超出轨迹"的自由。
+                // ★ 两者都开时不会互相打架：包络管"沿路快慢"，噪声/过冲管"末端手感"；
+                //   BB 的速度波动只在锁定首帧作用一次，与自研全程包络天然错开。
+                float fused_raw_x = scaled_x, fused_raw_y = scaled_y;
+                if (personal_traj_cfg.enabled && injection_allowed) {
+                    if (!personal_shader_.active()) {
+                        personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);
+                        target_age_ms_ = 0.0f;
+                    }
+                    const auto& ts = tracker_.state();
+                    personal_shader_.set_error_speed_px_s(ts.valid ? std::hypot(ts.vx, ts.vy) : 0.0f);
+                    personal_shader_.set_target_age_ms(target_age_ms_);
+                    target_age_ms_ += dt_ms;
+                    personal_shader_.set_target_radius_px(
+                        (selected.box.y2 - selected.box.y1) * 0.5f);
+                    personal_shader_.shape_f(&scaled_x, &scaled_y, control_x, control_y, dt_ms,
+                                             personal_traj_cfg);
+                    // V3 阶段 5：只登记**垂直随机抖动**。transport 增益是故意要走的一段。
+                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
+                        jitter_ff_.push(personal_shader_.last_jitter_x(),
+                                        personal_shader_.last_jitter_y());
+                    }
+                }
+
                 // ---- BB 拟人化链（低通 → 反应延迟 → 过冲 → 制动 → 噪声）----
                 // 位置按原版挪到浮点位移域、抗过冲之前（原版 :6010）。
                 // 顺序固定，见 HumanizeShaper.hpp 顶部注释（与 BB 的差异仍照旧保留）。
@@ -741,6 +772,16 @@ void AimThread::loop() {
                         jitter_ff_.push(humanize_shaper_.last_jitter_x(),
                                         humanize_shaper_.last_jitter_y());
                     }
+                }
+
+                // ---- 融合链末端守卫 ----
+                // 自研那套安全约束（幅度上限 / 与误差同向 / 不许反向 / 能量不增）
+                // 罩住**整条**拟人化输出 —— 深度融合后 BB 的过冲和噪声同样不许
+                // 把准星推反、不许凭空加力。自研链没开时这条守卫不生效（保持 BB 原味）。
+                if (personal_traj_cfg.enabled && injection_allowed) {
+                    personal_shader_.guard_fused(&scaled_x, &scaled_y,
+                                                 fused_raw_x, fused_raw_y,
+                                                 control_x, control_y, personal_traj_cfg);
                 }
 
                 // ---- BB 抗过冲（拟人化之后、压枪之前，原版 :6010）----
@@ -797,32 +838,9 @@ void AimThread::loop() {
                 // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。
                 // 输入：已量化 count(dx,dy) + 控制误差 px(ex,ey)；按需激活（新目标首次有效帧）。
                 // ---- BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）----
-                // ★ 2026-09-28：BB 拟人化链已按原版顺序**上移**到浮点位移域
-                //   （抗过冲之前，见上面尾链段），这里不再重复跑一遍。
-                //   speed_fluctuation / accuracy_sim 也按原版独立接线（分别在尾链
-                //   与瞄准点处），不再是"只提供模块、未接线"的假开关。
-                if (!humanize_cfg.enabled && personal_traj_cfg.enabled && injection_allowed) {
-                    if (!personal_shader_.active()) {
-                        // 激活一次移动：用当前控制误差距离作为本次移动目标距离
-                        personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);
-                        target_age_ms_ = 0.0f;
-                    }
-                    // 运行时参数：目标速度（tracker 估）、目标年龄、目标框半径
-                    const auto& ts = tracker_.state();
-                    personal_shader_.set_error_speed_px_s(ts.valid ? std::hypot(ts.vx, ts.vy) : 0.0f);
-                    personal_shader_.set_target_age_ms(target_age_ms_);
-                    target_age_ms_ += dt_ms;
-                    personal_shader_.set_target_radius_px(
-                        (selected.box.y2 - selected.box.y1) * 0.5f);
-                    personal_shader_.shape(&move_x, &move_y, control_x, control_y, dt_ms,
-                                           personal_traj_cfg);
-                    // ★ V3 阶段 5：只登记**垂直随机抖动**分量。transport 增益（速度包络）
-                    //   是故意要走的一段位移，不能扣（扣了 PID 以为没到 ⇒ 过冲）。
-                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
-                        jitter_ff_.push(personal_shader_.last_jitter_x(),
-                                        personal_shader_.last_jitter_y());
-                    }
-                }
+                // ★ 2026-09-28 深度融合：两条拟人化链都已**上移**到浮点位移域
+                //   （自研整形 → BB 拟人化 → 融合守卫 → 抗过冲，见上面尾链段），
+                //   这里不再有第二次整形。两条链不再互斥，互补叠加。
             }
             // ---- Hotkey Gate 兜底（安全边界最后一行）----
             // 无论前面算出什么，热键未按下时最终动作强制归零。

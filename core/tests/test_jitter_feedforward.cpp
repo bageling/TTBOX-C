@@ -170,7 +170,37 @@ void test_personal_reports_perp_only() {
           "reset 后抖动上报清零（换目标不欠账）");
 }
 
-// 场景 6：默认配置下整套机制什么都不做（老行为零变化）
+// 场景 6：深度融合的末端守卫（自研那套安全约束罩住 BB 的过冲与噪声）
+void test_fused_guard() {
+    PersonalTrajectoryConfig cfg;
+    cfg.enabled = true;
+    cfg.max_extra_px = 2.0f;
+    PersonalTrajectoryShader sh;
+    sh.reset();
+
+    // (a) 幅度上限：不许超过 raw ± max_extra
+    {
+        float x = 999.0f, y = 10.0f;
+        sh.guard_fused(&x, &y, 10.0f, 10.0f, 50.0f, 50.0f, cfg);
+        check(std::fabs(x) <= 12.0f + 1e-6f, "融合守卫：幅度被压回 raw ± max_extra");
+    }
+    // (b) 反向：误差是正的，输出却往负走 ⇒ 不许（拉回 raw 而不是照发）
+    {
+        float x = -30.0f, y = -30.0f;
+        sh.guard_fused(&x, &y, 10.0f, 10.0f, 50.0f, 50.0f, cfg);
+        check(x >= 0.0f && y >= 0.0f, "融合守卫：不许把准星往误差反方向推");
+    }
+    // (c) 能量不增：整形后的投影不能小于 raw 自身能量
+    {
+        float x = 1.0f, y = 1.0f;
+        sh.guard_fused(&x, &y, 10.0f, 10.0f, 50.0f, 50.0f, cfg);
+        const float proj = x * 10.0f + y * 10.0f;
+        check(proj >= 10.0f * 10.0f + 10.0f * 10.0f - 1e-3f,
+              "融合守卫：能量不增（不会把位移整小到比不整还慢）");
+    }
+}
+
+// 场景 7：默认配置下整套机制什么都不做（老行为零变化）
 void test_default_is_noop() {
     JitterFeedforward ff;           // 默认构造即空
     check(ff.pending() == 0, "默认构造 = 空缓冲");
@@ -195,6 +225,7 @@ int main() {
     test_buffer_behavior();
     test_humanize_reports_noise_only();
     test_personal_reports_perp_only();
+    test_fused_guard();
     test_default_is_noop();
     if (fails == 0) std::printf("test_jitter_feedforward: PASS\n");
     else std::printf("test_jitter_feedforward: %d FAILED\n", fails);

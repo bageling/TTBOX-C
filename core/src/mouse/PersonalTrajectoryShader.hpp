@@ -57,18 +57,20 @@ public:
         last_error_y_ = 0.0f;
     }
 
-    // 整形输出：dx,dy 为已量化 HID count；ex,ey 为控制误差(px)；dt_ms 为帧间隔(ms)。
-    // 返回整形后的 (out_dx, out_dy)。未启用/未激活/零移动时原样返回。
-    void shape(int16_t* out_dx, int16_t* out_dy, float ex, float ey, float dt_ms,
-               const PersonalTrajectoryConfig& cfg) {
-        const int raw_x = static_cast<int>(*out_dx);
-        const int raw_y = static_cast<int>(*out_dy);
-        const int dx = raw_x, dy = raw_y;
+    // ---- 深度融合（2026-09-28）：浮点入口 ----
+    // 与 BB 拟人化链融合后，整形必须在**浮点位移域**做（BB 原版也是在浮点域，
+    // 原版 main.lua:6010 之后才量化）。整数入口 shape() 保留为薄封装。
+    // out_dx/out_dy 是浮点 count（量化前）；ex,ey 为控制误差(px)；dt_ms 帧间隔。
+    void shape_f(float* out_dx, float* out_dy, float ex, float ey, float dt_ms,
+                 const PersonalTrajectoryConfig& cfg) {
+        const float raw_x = *out_dx;
+        const float raw_y = *out_dy;
         // ★ 每帧先清零：本帧没注入抖动就必须是 0（前馈读数不能沿用上一帧的残值）。
         last_jitter_x_ = 0.0f;
         last_jitter_y_ = 0.0f;
-        if (dx == 0 && dy == 0) return;
+        if (raw_x == 0.0f && raw_y == 0.0f) return;
         if (!(cfg.enabled && active_)) return;
+        const float dx = raw_x, dy = raw_y;
 
         const float dt = clamp_(dt_ms, 0.1f, 40.0f);
         const float err_len = std::hypot(ex, ey);
@@ -117,15 +119,13 @@ public:
         last_raw_x_ = dx;
         last_raw_y_ = dy;
 
-        // 增益附加（含余数累积，防整数截断丢失）
-        const float desired_extra_x = static_cast<float>(dx) * (gain - 1.0f) + gain_round_x_;
-        const float desired_extra_y = static_cast<float>(dy) * (gain - 1.0f) + gain_round_y_;
-        const int extra_x = static_cast<int>(std::trunc(desired_extra_x));
-        const int extra_y = static_cast<int>(std::trunc(desired_extra_y));
-        gain_round_x_ = desired_extra_x - static_cast<float>(extra_x);
-        gain_round_y_ = desired_extra_y - static_cast<float>(extra_y);
-        float out_x = static_cast<float>(dx + extra_x);
-        float out_y = static_cast<float>(dy + extra_y);
+        // 增益附加（浮点域直接算；整数入口的余数累积在 shape() 里仍保留）
+        const float desired_extra_x = dx * (gain - 1.0f) + gain_round_x_;
+        const float desired_extra_y = dy * (gain - 1.0f) + gain_round_y_;
+        gain_round_x_ = 0.0f;   // 浮点域不需要余数（不会被截断吃掉）
+        gain_round_y_ = 0.0f;
+        float out_x = dx + desired_extra_x;
+        float out_y = dy + desired_extra_y;
 
         // 垂直向 AR(1) 随机游走抖动（垂直于当前移动方向）
         const float mag = std::hypot(static_cast<float>(dx), static_cast<float>(dy));
@@ -155,16 +155,31 @@ public:
             curve_state_ *= std::exp(-dt / tau);
         }
 
-        // 量化 + 安全守卫
-        int ix = static_cast<int>(std::lround(out_x));
-        int iy = static_cast<int>(std::lround(out_y));
-        guard_output_(&ix, &iy, dx, dy, ex, ey, cfg);
+        // 安全守卫（浮点版：幅度上限 + 与误差同向 + 禁止反向投影 + 能量不增）
+        guard_output_f_(&out_x, &out_y, dx, dy, ex, ey, cfg);
         shape_count_++;
-        if (ix != dx || iy != dy) applied_count_++;
+        if (out_x != dx || out_y != dy) applied_count_++;
         else if (suppress) pause_count_++;
 
-        *out_dx = static_cast<int16_t>(ix);
-        *out_dy = static_cast<int16_t>(iy);
+        *out_dx = out_x;
+        *out_dy = out_y;
+    }
+
+    // 整数入口（老路径/单测）：转浮点 → shape_f → 量化回 int16。
+    void shape(int16_t* out_dx, int16_t* out_dy, float ex, float ey, float dt_ms,
+               const PersonalTrajectoryConfig& cfg) {
+        float fx = static_cast<float>(*out_dx);
+        float fy = static_cast<float>(*out_dy);
+        shape_f(&fx, &fy, ex, ey, dt_ms, cfg);
+        *out_dx = static_cast<int16_t>(std::lround(fx));
+        *out_dy = static_cast<int16_t>(std::lround(fy));
+    }
+
+    // 融合链末端守卫：把自研那套安全约束（幅度/同向/不反向/能量不增）
+    // 也罩住 BB 拟人化的输出。深度融合后 BB 的过冲与噪声同样不许把准星推反。
+    void guard_fused(float* x, float* y, float raw_x, float raw_y, float ex, float ey,
+                     const PersonalTrajectoryConfig& cfg) {
+        guard_output_f_(x, y, raw_x, raw_y, ex, ey, cfg);
     }
 
     // 目标切换 / 瞄准退出时重置状态（不关闭 enabled）
@@ -313,23 +328,31 @@ private:
     }
 
     // 安全守卫：幅度限制 + 保持与误差同向 + 禁止反向投影 + 能量不增
-    void guard_output_(int* ix, int* iy, int raw_x, int raw_y,
-                       float ex, float ey, const PersonalTrajectoryConfig& cfg) {
-        const int max_x = std::abs(raw_x) + static_cast<int>(cfg.max_extra_px);
-        const int max_y = std::abs(raw_y) + static_cast<int>(cfg.max_extra_px);
+    // ★ 浮点版（融合链主用）：语义与整数版一致，只是不经过 lround。
+    void guard_output_f_(float* ix, float* iy, float raw_x, float raw_y,
+                         float ex, float ey, const PersonalTrajectoryConfig& cfg) {
+        const float max_x = std::abs(raw_x) + cfg.max_extra_px;
+        const float max_y = std::abs(raw_y) + cfg.max_extra_px;
         *ix = std::max(-max_x, std::min(max_x, *ix));
         *iy = std::max(-max_y, std::min(max_y, *iy));
-        if (*ix != 0 && !same_sign_or_zero_(static_cast<float>(*ix), ex)) *ix = (raw_x == 0) ? 0 : raw_x;
-        if (*iy != 0 && !same_sign_or_zero_(static_cast<float>(*iy), ey)) *iy = (raw_y == 0) ? 0 : raw_y;
-        if (raw_x != 0 && *ix == 0 && same_sign_or_zero_(static_cast<float>(raw_x), ex))
-            *ix = static_cast<int>(std::copysign(1.0f, static_cast<float>(raw_x)));
-        if (raw_y != 0 && *iy == 0 && same_sign_or_zero_(static_cast<float>(raw_y), ey))
-            *iy = static_cast<int>(std::copysign(1.0f, static_cast<float>(raw_y)));
-        const int64_t raw_energy =
-            static_cast<int64_t>(raw_x) * raw_x + static_cast<int64_t>(raw_y) * raw_y;
-        const int64_t shaped_projection =
-            static_cast<int64_t>(*ix) * raw_x + static_cast<int64_t>(*iy) * raw_y;
-        if (raw_energy > 0 && shaped_projection < raw_energy) { *ix = raw_x; *iy = raw_y; }
+        if (*ix != 0.0f && !same_sign_or_zero_(*ix, ex)) *ix = (raw_x == 0.0f) ? 0.0f : raw_x;
+        if (*iy != 0.0f && !same_sign_or_zero_(*iy, ey)) *iy = (raw_y == 0.0f) ? 0.0f : raw_y;
+        if (raw_x != 0.0f && *ix == 0.0f && same_sign_or_zero_(raw_x, ex))
+            *ix = std::copysign(1.0f, raw_x);
+        if (raw_y != 0.0f && *iy == 0.0f && same_sign_or_zero_(raw_y, ey))
+            *iy = std::copysign(1.0f, raw_y);
+        const float raw_energy = raw_x * raw_x + raw_y * raw_y;
+        const float shaped_projection = (*ix) * raw_x + (*iy) * raw_y;
+        if (raw_energy > 0.0f && shaped_projection < raw_energy) { *ix = raw_x; *iy = raw_y; }
+    }
+
+    void guard_output_(int* ix, int* iy, int raw_x, int raw_y,
+                       float ex, float ey, const PersonalTrajectoryConfig& cfg) {
+        float fx = static_cast<float>(*ix);
+        float fy = static_cast<float>(*iy);
+        guard_output_f_(&fx, &fy, static_cast<float>(raw_x), static_cast<float>(raw_y), ex, ey, cfg);
+        *ix = static_cast<int>(std::lround(fx));
+        *iy = static_cast<int>(std::lround(fy));
     }
 
     // 简易确定性随机数（xorshift，缓冲 0.99999 防止 gauss 除 0）
