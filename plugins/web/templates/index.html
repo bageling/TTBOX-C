@@ -528,11 +528,19 @@ html[data-theme="light"] .top-shell {
 }
 
 .dashboard-grid {
+  /* 2026-09-28 外观整理（业主：运行数据和主控开关重新排列，运行数据两列对齐）。
+     改前：preview | 核心状态+运行数据(300px 单列) | 主控(556px)。
+     主控只占 302px 高，下方留出约 470px 空白；运行数据被压在 300px 窄列里单列排。
+     改后：主控挪到中间列并与「实时锁定」横排（左文案 + 右按钮）；
+     核心状态 4 项改 2×2 放右列，与主控同高（都撑满行高，不留半格）；
+     运行数据移到第二行、横跨「主控+核心状态」两列宽，内部两列对齐。
+     布局是定死的（所有 @media 都被置成 max-width:0，主内容区恒 1348px）：
+     1348-32=1316，fr 1.02/0.86/0.92 ⇒ 480/404/432。 */
   display: grid;
-  grid-template-columns: minmax(320px, 460px) minmax(230px, 300px) minmax(280px, 1fr);
+  grid-template-columns: minmax(360px, 1.02fr) minmax(300px, 0.86fr) minmax(330px, 0.92fr);
   grid-template-areas:
-    "preview metrics control"
-    "preview summary control"
+    "preview control metrics"
+    "preview summary summary"
     "controls controls controls"
     "hardware hardware hardware";
   gap: 16px;
@@ -645,19 +653,26 @@ html[data-theme="light"] .modal-card {
 }
 
 .hero-control {
+  /* 2026-09-28 外观整理：改成横排（左文案 / 右按钮），高度从 302px 收到约 200px，
+     腾出的空间给下面的「运行数据」两列块，主控卡片也不再独占一整列宽度。 */
   grid-area: control;
   display: grid;
-  gap: 16px;
+  /* 右列必须给固定宽度：按钮宽度写的是 min(172px, 100%)，放在 auto 轨道里
+     百分比按内容尺寸解析（循环依赖）⇒ 实测被压到 66px。 */
+  grid-template-columns: minmax(0, 1fr) 172px;
+  gap: 14px;
+  align-items: center;
   align-content: center;
-  justify-items: center;
+  /* 撑满行高，底边与右列「核心状态」对齐（否则比它矮 9px，露出台阶） */
+  align-self: stretch;
   min-height: 0;
-  padding: 20px;
+  padding: 14px;
 }
 
 .hero-copy {
   display: grid;
   gap: 7px;
-  text-align: center;
+  text-align: left;
 }
 
 .hero-copy h2 {
@@ -668,7 +683,9 @@ html[data-theme="light"] .modal-card {
   position: relative;
   display: grid;
   place-items: center;
-  width: min(190px, 100%);
+  /* 2026-09-28 外观整理：190 → 172px，配合主控横排把卡片高度压到约 200px
+     （原来竖排整体 302px，满宽列下半截是空白）。 */
+  width: min(172px, 100%);
   aspect-ratio: 1 / 1;
   min-height: 0;
   padding: 0;
@@ -765,11 +782,17 @@ html[data-theme="light"] .modal-card {
 }
 
 .quick-metrics {
+  /* 2026-09-28 外观整理：4 项从单列竖排改 2×2，排在右列与主控同一行带。
+     align-self: stretch + grid-auto-rows: 1fr ⇒ 四张卡自适应撑满主控那一行的高度，
+     不会在底部留出一段空白（原来主控下方约 470px 是空的）。 */
   grid-area: metrics;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(62px, 1fr);
   gap: 12px;
   width: 100%;
+  align-self: stretch;
+  align-content: start;
 }
 
 .quick-metrics div,
@@ -824,34 +847,82 @@ html[data-theme="light"] .runtime-stat {
 }
 
 .overview-controls {
+  /* 2026-09-28 外观整理：原来 minmax(150px,1fr) ⇒ 定死 1348px 下挤成 8 列 ×160px。
+     实测后果：标签折 2~4 行、数字框 96px 占了格子 60% 宽、8 条滑条落在 8 个不同
+     高度（y = 886/919/940/947/932/940/903/893，差最多 61px）。
+     抬到 292px ⇒ 1348/(292+10) = 4.4 ⇒ 恒 4 列 ×329px，标签一行放得下。 */
   grid-area: controls;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(292px, 1fr));
+  /* 8 个格排成 4 列 × 2 行；这两行取 1fr 让它俩等高（第一行含「看得有多宽」的
+     预设刻度，天然高 18px，不等高的话两行底边会错开）。
+     ★ 只能用 grid-template-rows（显式两行），不能用 grid-auto-rows —— 后者会连
+     「重置所有」按钮所在的隐式第三行一起拉成 174px 高。 */
+  grid-template-rows: 1fr 1fr;
   gap: 10px;
   min-width: 0;
   align-items: stretch;
 }
 
-#home-page .overview-controls .field,
-#home-page .overview-controls .slider-field {
-  gap: 8px;
-  padding: 10px 12px;
+/* 8 个格统一成同一个三行模板：标签 / 数值+滑条 / 说明。
+   这样同一行里数字框宽度一致、滑条左端与 y 一致、说明从同一高度起。
+   旧写法是两种结构混在一行：4 个 .slider-field（.label-row 里塞标签+数字，滑条另起一行）
+   + 4 个 <label> 直排字段（标签、数字、滑条依次铺开）⇒ 数字框 96px / 134px 并存。 */
+#home-page .overview-controls > .field,
+#home-page .overview-controls > .slider-field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-areas:
+    "label label"
+    "value slider"
+    "hint hint";
+  gap: 8px 12px;
+  align-items: center;
+  align-content: start;
+  padding: 12px;
+}
+
+/* .label-row 只作分组用，布局交给上面的对齐模板 ⇒ 去掉它自己的盒子，
+   让内部的 label 与数值框直接成为网格项。颜色/字重继承不受影响。 */
+#home-page .overview-controls .label-row {
+  display: contents;
+}
+
+#home-page .overview-controls .label-row > label {
+  grid-area: label;
+}
+
+#home-page .overview-controls .label-row > .value-input {
+  grid-area: value;
+}
+
+#home-page .overview-controls input[type="range"] {
+  grid-area: slider;
+  min-width: 0;
+  min-height: 24px;
+}
+
+#home-page .overview-controls .field-hint {
+  grid-area: hint;
 }
 
 #home-page .overview-controls .value-input {
   min-height: 36px;
   padding: 7px 10px;
-}
-
-#home-page .overview-controls input[type="range"] {
-  min-height: 24px;
+  text-align: center;
 }
 
 #home-page .overview-controls .crop-size-field {
   min-width: 0;
+  grid-template-areas:
+    "label label"
+    "value slider"
+    "presets presets"
+    "hint hint";
 }
 
 #home-page .overview-controls .crop-size-presets {
+  grid-area: presets;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
@@ -871,7 +942,9 @@ html[data-theme="light"] .runtime-stat {
 }
 
 #home-page .overview-reset-button {
-  align-self: stretch;
+  /* 整行占位 + 靠右收窄：铺满 1348px 时会变成一条横贯的分割线，太抢眼 */
+  grid-column: 1 / -1;
+  justify-self: end;
   min-height: 44px;
   padding-inline: 14px;
 }
@@ -994,10 +1067,21 @@ html[data-theme="light"] .preview-panel {
 }
 
 .runtime-summary {
+  /* 2026-09-28 外观整理：运行数据改两列对齐。
+     5 项 ⇒ 2+2+1，最后一项（最后错误，文案最长）用下面的规则横跨两列，
+     不会在右半边留一个空格子；grid-auto-rows 让三行等高，行与行对齐。
+     容器高度由 grid-template-rows: auto minmax(0,1fr)（见 .rail-group）撑到
+     与左侧「实时画面」同底，所以行高会均分剩余空间。 */
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(60px, 1fr);
   gap: 10px;
   min-width: 0;
+  align-content: stretch;
+}
+
+.runtime-summary > .runtime-stat:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .runtime-summary:empty {
@@ -1009,7 +1093,9 @@ html[data-theme="light"] .preview-panel {
   display: grid;
   gap: 14px;
   min-width: 0;
-  align-content: start;
+  /* 横跨「主控 + 核心状态」两列，撑满该行以对齐左侧实时画面底边 */
+  align-self: stretch;
+  align-content: stretch;
 }
 
 .hardware-strip {
@@ -1385,9 +1471,14 @@ html[data-theme="light"] #control-section-pid .range-control-field .field-hint {
 }
 
 .rail-group {
+  /* 仅「运行数据」用（rail-head + #runtimeSummary）。
+     第二行 minmax(0,1fr) 把剩余高度让给两列数据格，行高才能均分、
+     并与左侧实时画面底边对齐。 */
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
+  align-content: stretch;
 }
 
 .rail-head {
@@ -5145,25 +5236,41 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <span class="field-hint">准星会在这个圆圈范围内自动跟人，出了圈就不跟。瞄准范围就是**截取尺寸**那块方形画面里能画出的最大圆（内接圆），1.00 = 用满这个圆；调小就是按比例把圆收小（比如 0.5 = 只有一半大）。</span>
               </div>
 
-              <label class="field overview-field">看的位置左右移
-                <input id="capture_crop_offset_x" data-config class="value-input" type="number" min="-150" max="150" step="1">
+              <!-- 2026-09-28 外观整理：这 4 个字段原来写成 <label class="field overview-field">
+                   直排（标签文字 → 数字框 → 由 JS 注入的滑条 → 说明），与上面 4 个
+                   .slider-field 的结构不同，同一行里滑条高度差最多 61px。
+                   统一成 .slider-field + .label-row，并保留 for/id 关联（点标签仍能聚焦输入框）。 -->
+              <div class="slider-field overview-field">
+                <div class="label-row">
+                  <label for="capture_crop_offset_x">看的位置左右移</label>
+                  <input id="capture_crop_offset_x" data-config class="value-input" type="number" min="-150" max="150" step="1">
+                </div>
                 <span class="field-hint">正数 = 识别区域往右挪，负数 = 往左挪（像素）。画面中心偏了才需要动它。</span>
-              </label>
+              </div>
 
-              <label class="field overview-field">看的位置上下移
-                <input id="capture_crop_offset_y" data-config class="value-input" type="number" min="-150" max="150" step="1">
+              <div class="slider-field overview-field">
+                <div class="label-row">
+                  <label for="capture_crop_offset_y">看的位置上下移</label>
+                  <input id="capture_crop_offset_y" data-config class="value-input" type="number" min="-150" max="150" step="1">
+                </div>
                 <span class="field-hint">正数 = 往下挪，负数 = 往上挪（像素）。</span>
-              </label>
+              </div>
 
-              <label class="field overview-field">瞄的位置左右偏
-                <input id="controller_aim_reference_offset_x" data-config class="value-input" type="number" min="-160" max="160" step="1">
+              <div class="slider-field overview-field">
+                <div class="label-row">
+                  <label for="controller_aim_reference_offset_x">瞄的位置左右偏</label>
+                  <input id="controller_aim_reference_offset_x" data-config class="value-input" type="number" min="-160" max="160" step="1">
+                </div>
                 <span class="field-hint">准星最终停在哪：正数 = 往人右边偏一点，负数 = 往左（像素）。想瞄头就往上调下面那格。</span>
-              </label>
+              </div>
 
-              <label class="field overview-field">瞄的位置上下偏
-                <input id="controller_aim_reference_offset_y" data-config class="value-input" type="number" min="-160" max="160" step="1">
+              <div class="slider-field overview-field">
+                <div class="label-row">
+                  <label for="controller_aim_reference_offset_y">瞄的位置上下偏</label>
+                  <input id="controller_aim_reference_offset_y" data-config class="value-input" type="number" min="-160" max="160" step="1">
+                </div>
                 <span class="field-hint">正数 = 往下偏（比如瞄胸口），负数 = 往上偏（比如瞄头）。</span>
-              </label>
+              </div>
 
               <div class="slider-field">
                 <div class="label-row">
