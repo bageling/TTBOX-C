@@ -1094,6 +1094,8 @@ FOV_FACTOR_MIN = 0.1
 # 取 20 是留余量又不至于让分母大到把误差压成 0）。
 ZOOM_SCALE_MIN = 1.0
 ZOOM_SCALE_MAX = 20.0
+# V3 阶段 5：本档 px/count 上限（腰射实测 ≈0.7，给到 20 足够覆盖高倍镜 × 高灵敏度）
+GAIN_PX_PER_COUNT_MAX = 20.0
 
 
 def _fov_factor_clamp(v, default=1.0) -> float:
@@ -1137,6 +1139,24 @@ def _zoom_scale_clamp(v, default=1.0) -> float:
     return max(ZOOM_SCALE_MIN, min(ZOOM_SCALE_MAX, f))
 
 
+def _gain_px_per_count_clamp(v, default=0.0) -> float:
+    """V3 阶段 5：本档实测 px/count（鼠标 1 count = 画面多少 px）。
+
+    0 = 还没测过 ⇒ core 回退 mouse.gain_y_px_per_count（腰射值）。
+    ★ 必须按倍镜各测一次：px/count 随 f × ADS 系数变，腰射 0.695 在 6 倍镜下不成立。
+    负值 / NaN 一律回退 0（拿负数换算会把抖动扣成反向，比不扣更糟）。
+    """
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if f != f:  # NaN
+        return default
+    if f < 0.0:
+        return default
+    return min(GAIN_PX_PER_COUNT_MAX, f)
+
+
 # ---- 瞄准档位（多热键，2026-09-24）----
 # 面板「热键与类别」页每张卡片 = 一个档位，提交体是 aim_profiles[] 数组。
 # core 侧 MouseProfile.aim_profiles 是热键的**唯一真源**：老的平铺
@@ -1174,6 +1194,9 @@ def _aim_profile_core_dict(p: dict) -> dict:
     # V3 阶段 2：倍镜真实放大倍率（core 拿它当误差分母）。1.0 = 腰射 = 不折算。
     if p.get('zoom_scale') is not None:
         out['zoom_scale'] = _zoom_scale_clamp(p['zoom_scale'])
+    # V3 阶段 5：本档实测 px/count（前馈换算用）。0 = 没测过 ⇒ 回退腰射 gain_y。
+    if p.get('gain_px_per_count') is not None:
+        out['gain_px_per_count'] = _gain_px_per_count_clamp(p['gain_px_per_count'])
     mask = p.get('class_filter_mask')
     if mask is not None:
         m = int(mask or 0)
@@ -1620,6 +1643,8 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
                 'fov_scale': j.get('fov_scale', 1.0),
                 # V3 阶段 2：倍镜真实放大倍率（1.0 = 腰射）
                 'zoom_scale': j.get('zoom_scale', 1.0),
+                # V3 阶段 5：本档实测 px/count（0 = 没测过 ⇒ 回退腰射 gain）
+                'gain_px_per_count': j.get('gain_px_per_count', 0.0),
                 'offset_x': ox,
                 'offset_y': oy,
                 'alternate_offset_x': ox,
@@ -1638,6 +1663,7 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
         'sensitivity': 1.0,
         'fov_scale': 1.0,
         'zoom_scale': 1.0,
+        'gain_px_per_count': 0.0,
         'offset_x': mouse.get('offset_x', 0.5),
         'offset_y': mouse.get('offset_y', 0.5),
         'alternate_offset_x': mouse.get('offset_x', 0.5),
@@ -4230,8 +4256,21 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
             delay_ms = float(calib.get('mouse_response_delay_ms') or 0)
             if delay_ms > 0:
                 mo['response_delay_ms'] = round(delay_ms, 2)
+            # V3 阶段 5：倍镜下的 px/count 是**按档**的（腰射值在倍镜下不成立）。
+            #   标定时选了哪一档，就把这次测到的 gain 写进那一档的 gain_px_per_count。
+            #   scope_index < 0（默认）= 只写全局 gain，不动任何档。
+            scope_index = int(calib.get('scope_index', -1) or -1)
+            wrote_scope = ''
+            if scope_index >= 0:
+                aps = mo.get('aim_profiles')
+                if isinstance(aps, list) and scope_index < len(aps):
+                    aps[scope_index]['gain_px_per_count'] = round(gain_y, 4)
+                    wrote_scope = f"，并写入档位 #{scope_index + 1}"
+                else:
+                    wrote_scope = '（档位序号越界，只写了全局）'
             r = ipc_request('SET_CONFIG', {'profile': prof})
-        return r.get('status') == 0, r.get('error', '配置已更新')
+        ok = r.get('status') == 0
+        return ok, (r.get('error', '配置已更新') + wrote_scope)
     except Exception as exc:
         return False, str(exc)
 
@@ -4567,6 +4606,8 @@ def _calib_worker() -> None:
             'model_id': _read_active_model(),
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
+            # V3 阶段 5：这次标定要写进哪个倍镜档（-1 = 只写全局）
+            'scope_index': int(_cal.get('scope_index', -1) or -1),
         }
         # 自动调参：按实测 gain/延迟 + 当前 smooth 推导 KP/KD/predict（pid1 体系，见
         # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
@@ -4780,6 +4821,14 @@ def start_auto_calibration():
         return jsonify({'ok': False, 'error': '推理服务未运行或目标反馈未就绪（请先启动推理）'}), 400
     if _calib_target() is None:
         return jsonify({'ok': False, 'error': '未识别到目标，无法开始标定（请将准星对准画面中的目标，等待检测框稳定出现）'}), 400
+    # V3 阶段 5：倍镜下的 px/count 必须按档各测一次 ⇒ 允许指定"这次标定写进哪一档"。
+    # body: {"scope_index": N}，N 从 0 起；缺省/负数 = 只写全局 gain（腰射）。
+    body = request.get_json(silent=True) or {}
+    try:
+        scope_index = int(body.get('scope_index', -1))
+    except (TypeError, ValueError):
+        scope_index = -1
+    _calib_set(scope_index=scope_index)
     th = threading.Thread(target=_calib_thread_entry, daemon=True)
     with _cal_lock:
         _cal['thread'] = th
