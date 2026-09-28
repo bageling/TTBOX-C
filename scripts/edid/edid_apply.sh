@@ -4,28 +4,55 @@
 # 默认自动切 HPD 让源端重新读取 EDID；TTBOX_EDID_REHANDSHAKE=0 可退回纯注入。
 # 不修改 DRM/真实显示器输出。
 # 用法：sudo bash /opt/ttbox/scripts/edid/edid_apply.sh [device]  默认 /dev/video0
+#
+# ★★ 2026-09-28 修「开机黑屏多次」——本文件四处改动（配套 deploy/systemd/ttbox-edid.service
+#    的 timeout 20s→45s）。背景与为什么这样改，先看这一段，再看下面代码：
+#   现网症状：客户开机时屏幕连续黑好几次。
+#   根因链（09-27 板端 12:27 那次开机的毫秒级日志）：
+#     ① 本脚本当时把 ttbox_dtb_fix.sh 挂在入口最前面。它在开机窗口要 12.06 秒
+#        （多锚点 find -L + 两份 DTB sha256sum；同样的脚本在系统就绪后只要 0.231 秒，
+#         差异来自开机期 CPU/IO 争抢，不是脚本逻辑慢）。
+#     ② systemd 只给 20 秒（`timeout 20s`），被 dtb_fix 吃掉 12 秒后只剩 8 秒，
+#        而脚本自身最少要 8~9 秒（一轮 HPD off/on + 应用回读 + settle + 等锁 7~15 秒）。
+#     ③ 于是脚本在 12:28:01 被 SIGTERM 精确杀死，**而内核实测 12:28:01.7 就 lock ok 了**
+#        —— 差 1~2 秒。失败后下次开机重来，客户看到的就是"开机黑屏多次"。
+#   为什么"黑屏次数"值得单独治：
+#     每一次 `set_hpd off` + `set_hpd on` 都会让源端（PC）重新枚举一次 HDMI 链路，
+#     对客户就是**屏幕黑一次**。所以 ATTEMPTS=12 的真实含义是"最坏黑 12 次"。
+#   四处改动：
+#     一、删掉入口处的 ttbox_dtb_fix.sh 调用 —— 改挂 scripts/ttbox_ensure_services.sh
+#         （周期巡检，每 10 分钟一次）。DTB 修复本就需要重启才生效，晚一点无影响；
+#         它和 EDID 注入本来就是两件事，不该互相拖累。
+#     二、ATTEMPTS_DEFAULT 12 → 2。板端实测首轮 7~8 秒即 lock ok，2 轮足够覆盖
+#         "源端第一次没枚举完"的情形；黑屏上限随之从 12 次降到 2 次。
+#     三、每轮重协商确保「恰好一次 HPD 周期，且 HPD 一定回到 on」。
+#         旧版把 `set_hpd on` 写在 apply_and_verify 成功分支里：一旦写入/回读失败，
+#         HPD 就停在 off，源端会一直认为"显示器被拔了"而**持续黑屏**（最坏卡到超时）。
+#     四、trap 除 EXIT 外再接 TERM/INT。被 systemd 的 `timeout` 杀时 bash 默认不跑
+#         EXIT trap ⇒ HPD 可能停在 off。现在收到 TERM 会先把 HPD 拉回 on 再退出。
+#   另外新增一个「幂等短路」：驱动已持有目标 EDID 且输入已锁定 ⇒ 一次 HPD 都不切，
+#     零黑屏直接成功（防面板反复点「保存并应用」时反复黑屏）。
 set -euo pipefail
+
+T0="$(date +%s)"
 
 # 根前缀参数化（A-PATH-4）：板端默认 /opt/ttbox；联调可用 TTBOX_PREFIX 覆盖。
 TTBOX_PREFIX="${TTBOX_PREFIX:-/opt/ttbox}"
 
-# ---- 1.5.23：先修 DTB（出厂镜像里 HDMI-RX 是 disabled ⇒ /dev/video0 根本不存在）----
-# 为什么挂在这里，而不是只放在 ttbox_release_install.sh：
-#   OTA 更新器调的是 /opt/ttbox/current/scripts/ttbox_release_install.sh，而**那一刻
-#   current 还指向旧版本** ⇒ 新包里对 install 脚本的改动本次**不会被执行**；
-#   而 edid 服务是在 current 切换**之后**才被 ensure 拉起的，跑的是**新包**的脚本。
-#   故把修复挂在 EDID 入口最前面（没有 /dev/video0 时 EDID 本来就必失败）。
-# 脚本自带指纹门禁（只认已知的坏版本）+ 恒返回 0 ⇒ 不会打断 EDID 流程，也不会反复重启。
-DTB_FIX="${TTBOX_PREFIX}/current/scripts/ttbox_dtb_fix.sh"
-if [ -x "$DTB_FIX" ]; then
-    "$DTB_FIX" || true
-fi
+# ---- DTB 修复已移出本入口（2026-09-28）----
+# 历史（1.5.23 起）本处调用过 ttbox_dtb_fix.sh，理由是"edid 服务跑的是新包脚本，
+# 顺路把 DTB 修复带到"，但代价是开机窗口吃掉 20s 预算里的 12s（见文件头 ★★）。
+# 现在改挂 scripts/ttbox_ensure_services.sh，本入口不再等待它。
+# 保留变量名只为让 grep 这个改动的人一眼看到它去哪了。
+DTB_FIX="${TTBOX_PREFIX}/current/scripts/ttbox_dtb_fix.sh"   # 现由 ttbox_ensure_services.sh 调用
 
 CONFIG="${TTBOX_DISPLAY_CONFIG:-${TTBOX_PREFIX}/config/hardware_display.json}"
 EDID_DIR="${TTBOX_PREFIX}/runtime/edid"
-# B-CONST-4 / V-09：HPD 重协商重试次数默认**单一真源 = 12**（Web 不再覆写；运维可经
+# B-CONST-4 / V-09：HPD 重协商重试次数默认**单一真源 = 2**（Web 不再覆写；运维可经
 # TTBOX_EDID_REHANDSHAKE_ATTEMPTS 覆盖）。登记见 docs/protocols/config-path-env-registry.md §三。
-ATTEMPTS_DEFAULT=12
+# ★ 2026-09-28 由 12 下调为 2：每一轮都要切一次 HPD = 源端黑屏一次，12 轮 = 最坏黑 12 次。
+#   门禁 scripts/ttbox_conventions_gate.sh ⑤ 与本值同步（"单一真源"约束不变，变的是值）。
+ATTEMPTS_DEFAULT=2
 EDID_OUTPUT="${EDID_OUTPUT:-$EDID_DIR/current.bin}"
 VIDEO_DEV="${1:-/dev/video0}"
 if [ "$VIDEO_DEV" != "/dev/video0" ]; then
@@ -187,6 +214,27 @@ set_hpd() {
   printf '%s\n' "$state" > "$HPD_STATUS" 2>/dev/null
 }
 
+# 回读驱动当前持有的 EDID，与目标 current.bin 做**全字节**比对。
+# 与 apply_and_verify 用同一口径：必须带 format=raw —— 不带 format 的 `--get-edid=pad=0`
+# 返回的是**源端(SOURCE)的 EDID**（实测 769 B，= 显示器真实身份），拿它比永远比不出真相。
+edid_matches_driver() {
+  local raw_file ok
+  raw_file="$(mktemp)"
+  if ! v4l2-ctl -d "$VIDEO_DEV" --get-edid=pad=0,format=raw > "$raw_file" 2>/dev/null; then
+    rm -f "$raw_file"; return 1
+  fi
+  # 写法与 apply_and_verify 保持一致：用 `&& echo yes || echo no` 兜底，避免在 set -e 下
+  # 因"比对不相等"直接结束脚本（本函数当前只在 if 条件里调用，但别依赖那个隐含语义）。
+  ok=$(python3 -c "
+import sys
+a=open('$raw_file','rb').read()
+b=open('$EDID_OUTPUT','rb').read()
+sys.exit(0 if a and len(a)==len(b) and a==b else 1)
+" 2>/dev/null && echo yes || echo no)
+  rm -f "$raw_file"
+  [ "$ok" = "yes" ]
+}
+
 apply_and_verify() {
   v4l2-ctl -d "$VIDEO_DEV" --set-edid=pad=0,file="$EDID_OUTPUT",format=raw || return 1
   # 根因修复：全字节验证（此前只验证 name 字段——注入损坏/半截时仍误判成功，
@@ -210,7 +258,9 @@ sys.exit(0 if len(data) == len(cur) and data == cur else 1)
 }
 
 wait_for_lock() {
-  local timeout="${TTBOX_EDID_LOCK_TIMEOUT_SEC:-14}"
+  # ★ 2026-09-28：默认 14s → 10s。板端实测锁定耗时 7~8 秒（内核实测 i:94/96/152 三次
+  #   分别是 7s / 7s / 8s），14s 只会让失败路径更久地占着 HPD 不放。
+  local timeout="${TTBOX_EDID_LOCK_TIMEOUT_SEC:-10}"
   local deadline=$(( $(date +%s) + timeout ))
   local status timing
   while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -223,7 +273,7 @@ wait_for_lock() {
       fi
     fi
     # V-EDID-4（板端实测 2026-09-19）：debugfs 仅 root 可读——ttbox（web 路径）读不到
-    # status（空串）时若也走上面的「未锁则等」，锁永远判不上 ⇒ 重试打满 12 轮 ⇒
+    # status（空串）时若也走上面的「未锁则等」，锁永远判不上 ⇒ 重试打满 ⇒
     # 必然超 web subprocess 60s ⇒ Flask 500（用户实测「保存后没有重新枚举」）。
     # 降级：status 读不到时仅用 v4l2 --query-dv-timing 判锁（走 /dev/video0，video 组即可）。
     timing="$(mktemp)"
@@ -237,6 +287,18 @@ wait_for_lock() {
   return 1
 }
 
+# 一次即时判锁（不等待）——只给幂等短路用，绝不用于"等锁"。
+lock_probe_quick() {
+  local timing
+  timing="$(mktemp)"
+  if v4l2-ctl -d "$VIDEO_DEV" --query-dv-timing >"$timing" 2>&1 && ! grep -qE 'failed|No locks' "$timing"; then
+    rm -f "$timing"
+    return 0
+  fi
+  rm -f "$timing"
+  return 1
+}
+
 EXPECT_NAME=$(python3 -c "
 import json
 cfg=json.load(open('$CONFIG'))
@@ -245,8 +307,11 @@ print(cfg.get('name','TTBOX')[:13])
 
 if [ "$REHANDSHAKE" = "1" ]; then
   # RK3588 实际流程：HPD 断开后源端不一定一次就完成重新枚举。
-  # 采用有限重试，每轮都重新拉低/拉高 HPD，直到 EDID 回读且 RX 锁定。
+  # 采用有限重试（每轮恰好拉低/拉高 HPD 一次），直到 EDID 回读且 RX 锁定。
+  # ★ 2026-09-28：除 EXIT 外再接 TERM/INT —— 被 systemd 的 `timeout` 发 SIGTERM 杀掉时，
+  #   bash 默认**不会**执行 EXIT trap，HPD 会停在 off ⇒ 源端一直黑屏。这里先恢复再退出。
   trap 'set_hpd on 2>/dev/null || true' EXIT
+  trap 'set_hpd on 2>/dev/null || true; exit 143' TERM INT
 fi
 
 if [ "$REHANDSHAKE" = "1" ]; then
@@ -255,24 +320,43 @@ if [ "$REHANDSHAKE" = "1" ]; then
   ATTEMPTS="${TTBOX_EDID_REHANDSHAKE_ATTEMPTS:-$ATTEMPTS_DEFAULT}"
   case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=$ATTEMPTS_DEFAULT ;; esac
   [ "$ATTEMPTS" -gt 0 ] || ATTEMPTS=1
+
+  # ★ 幂等短路：驱动已持有目标 EDID **且**输入已锁定 ⇒ 一次 HPD 都不切，零黑屏直接成功。
+  #   典型场景：面板反复点「保存并应用」但配置没变；或驱动在重启后仍保留着上次的 EDID。
+  if edid_matches_driver && lock_probe_quick; then
+    APPLIED=1
+    LOCKED=1
+    trap - EXIT TERM INT
+    echo "edid_apply: 驱动已持有目标 EDID 且输入已锁定，跳过 HPD 重协商（零黑屏）" >&2
+  fi
+
   attempt=1
-  while [ "$attempt" -le "$ATTEMPTS" ]; do
+  while [ "$LOCKED" != "1" ] && [ "$attempt" -le "$ATTEMPTS" ]; do
+    # ★ 一轮 = 恰好一次 HPD 周期，且 off 之后**无论如何都要 on**。
+    #   旧版把 `set_hpd on` 放在 apply_and_verify 成功分支里 ⇒ 一旦写入/回读失败，
+    #   HPD 就停在 off，源端会一直认为"显示器被拔了"而持续黑屏（直到下一轮）。这是黑屏
+    #   之外的第二个坑，本次一并堵上。
     set_hpd off
     sleep 0.2
     if apply_and_verify; then
       APPLIED=1
-      set_hpd on
+    fi
+    set_hpd on
+    if [ "$APPLIED" = "1" ]; then
       sleep "${TTBOX_EDID_HPD_SETTLE_SEC:-0.5}"
       if wait_for_lock; then
         LOCKED=1
-        trap - EXIT
+        trap - EXIT TERM INT
         break
       fi
     fi
     attempt=$((attempt + 1))
-    sleep 0.5
+    [ "$LOCKED" = "1" ] || sleep 0.5
   done
   if [ "$LOCKED" != "1" ]; then
+    # 失败路径也必须让 HPD 回到 on（走 EXIT trap 亦可，这里显式说清意图并落一条耗时日志）。
+    set_hpd on 2>/dev/null || true
+    echo "edid_apply: 失败（attempts=${ATTEMPTS} 轮全未锁定，耗时 $(( $(date +%s) - T0 ))s）" >&2
     if [ "$APPLIED" = "1" ]; then
       echo '{"ok": false, "error": "EDID 已写入且回读一致，但 HDMI-RX 多轮重新枚举后仍未锁定输入", "edid_applied": true, "locked": false}'
     else
@@ -306,6 +390,7 @@ if [ "$REHANDSHAKE" = "1" ] && [ "$LOCKED" = "1" ]; then
   # 加 `|| true` 防止 set -o pipefail 下它把已成功的结局误报成致命错误抛给 caller
   # （systemd oneshot / Web 两处 caller 都不该因这一行偶发失败而看到失败）。
   CUR=$(v4l2-ctl -d "$VIDEO_DEV" --get-edid=pad=0,format=raw 2>/dev/null | wc -c) || true
+  echo "edid_apply: 成功（耗时 $(( $(date +%s) - T0 ))s）" >&2
   echo "{\"ok\": true, \"hpd\": \"$([ \"$REHANDSHAKE\" = \"1\" ] && echo rehandshake || echo unchanged)\", \"version\": \"$CUR\", \"method\": \"v4l2_ctl\", \"file\": \"$EDID_OUTPUT\", \"mode\": \"$EXPECT_NAME\"}"
   exit 0
 fi
@@ -324,5 +409,6 @@ fi
 echo "Persisted firmware EDID: $FIRMWARE_DIR/hdmirx_edid.bin"
 # T1.04（DEP-02）：同上一处——诊断性回读失败不得把已成功的结局误报成致命错误。
 CUR=$(v4l2-ctl -d "$VIDEO_DEV" --get-edid=pad=0,format=raw 2>/dev/null | wc -c) || true
+echo "edid_apply: 成功（纯注入模式，耗时 $(( $(date +%s) - T0 ))s）" >&2
 echo "{\"ok\": true, \"hpd\": \"unchanged\", \"version\": \"$CUR\", \"method\": \"v4l2_ctl\", \"file\": \"$EDID_OUTPUT\", \"mode\": \"$EXPECT_NAME\"}"
 exit 0

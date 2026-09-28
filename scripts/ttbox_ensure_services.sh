@@ -195,5 +195,32 @@ else
     log "SKIP：无 systemd，跳过 enable --now"
 fi
 
+# ---------------------------------------------------------------------------
+# 7. DTB 修复（★ 2026-09-28 从 scripts/edid/edid_apply.sh 的入口处搬到这里）
+# ---------------------------------------------------------------------------
+# 为什么搬家：edid_apply.sh 被 systemd 的 `timeout` 卡着（开机只有几十秒预算），
+#   而 ttbox_dtb_fix.sh 在开机窗口要吃掉 12 秒（多锚点 find -L + 两份 DTB sha256sum；
+#   同样的脚本在系统就绪后只要 0.231 秒——差异来自开机期 CPU/IO 争抢，不是脚本慢）。
+#   实测后果：09-27 12:27 那次开机，EDID 直到 12:27:53 才写完，12:28:01 就被 timeout
+#   精确杀死，而内核日志显示再晚 1~2 秒 HPD 重协商就 lock ok 了。
+#   搬迁后 EDID 不再等它，DTB 修复也不再被 EDID 的预算挤压。
+# 为什么放周期巡检（本脚本由 ttbox-ensure.timer 每 10 分钟拉起）够用：
+#   DTB 由 u-boot 在开机时读取，换完本来就必须重启才生效；晚 10 分钟没有任何实际影响。
+#   而"什么时候真的需要修"只有一种情形：出厂镜像的 DTB 是 hdmirx disabled 的坏版本，
+#   修过一次之后永远命中 GOOD_SHA 分支（replaced=false），之后再跑只是几次 sha256sum。
+# 安全：脚本自带指纹门禁（只认已知坏版本 GOOD/BAD_SHA，其余一律不动）+ **恒退出 0**
+#   ⇒ 绝不允许它把一次自愈判失败。
+# 幂等：本块重复执行无副作用。
+DTB_FIX="${CURRENT_LINK}/scripts/ttbox_dtb_fix.sh"
+if [ -x "$DTB_FIX" ]; then
+    if "$DTB_FIX"; then
+        log "dtb_fix: 已执行（报告见 /opt/ttbox/presets/_dtbfix.json）"
+    else
+        warn "dtb_fix: 返回非零（已忽略；DTB 属启动链，不影响自愈结果）"
+    fi
+else
+    log "SKIP：${DTB_FIX} 不存在或不可执行"
+fi
+
 log "完成（changed=${changed}）"
 exit 0

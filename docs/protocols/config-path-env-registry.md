@@ -113,9 +113,9 @@
 | `TTBOX_RUN` | 路径 | `/run/ttbox` | 同 | RUNTIME |
 | `TTBOX_KEEP_VERSIONS` | 整数 | 部署脚本内置 | `ttbox_release_install.sh` | RUNTIME |
 | `TTBOX_EDID_REHANDSHAKE` | 开关 | `1` | `scripts/edid/edid_apply.sh` | RUNTIME |
-| `TTBOX_EDID_REHANDSHAKE_ATTEMPTS` | 整数 | **12**（单一真源，V-09） | `scripts/edid/edid_apply.sh` | RUNTIME |
+| `TTBOX_EDID_REHANDSHAKE_ATTEMPTS` | 整数 | **2**（单一真源，V-09；★ 2026-09-28 由 12 下调——每轮切一次 HPD = 源端黑屏一次，12 轮最坏 12 次黑屏） | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_EDID_HPD_SETTLE_SEC` | 秒 | `0.5` | `scripts/edid/edid_apply.sh` | RUNTIME |
-| `TTBOX_EDID_LOCK_TIMEOUT_SEC` | 秒 | `14` | `scripts/edid/edid_apply.sh` | RUNTIME |
+| `TTBOX_EDID_LOCK_TIMEOUT_SEC` | 秒 | `10`（★ 2026-09-28 由 14 下调；板端实测锁定需 7~8s） | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_CURRENT` | 路径 | `/opt/ttbox/current` | `scripts/ttbox.sh` | 覆盖 current 软链根（运维入口/doctor 定位 scripts 与 web） | RUNTIME |
 | `TTBOX_STATE` | 路径 | `/opt/ttbox/state` | `scripts/ttbox.sh` + `core/src/common/Paths.hpp::kStateDirDefault` | 覆盖状态目录（version 留档、OTA 状态、`runtime_intent.json` 用户启停意愿等） | RUNTIME |
 

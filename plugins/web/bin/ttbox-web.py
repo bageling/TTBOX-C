@@ -5513,7 +5513,8 @@ def update_display_hardware():
         apply_env = dict(os.environ)
         apply_env['TTBOX_EDID_REHANDSHAKE'] = '1'
         # V-09：不再覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS —— 重试次数单一真源在
-        # edid_apply.sh（默认 12），Web 与手动路径必须同值（原 Web 私自设 6 ⇒ 行为不可预期）。
+        # edid_apply.sh（★ 2026-09-28 起默认 2，此前 12；每次重试都要切一次 HPD = 源端黑屏一次），
+        # Web 与手动路径必须同值（原 Web 私自设 6 ⇒ 行为不可预期）。
         r = subprocess.run(['bash', ttbox_paths.scripts_dir() + '/edid/edid_apply.sh'],
                            capture_output=True, text=True, timeout=60, env=apply_env)
         result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}

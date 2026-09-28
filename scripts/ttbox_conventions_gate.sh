@@ -424,10 +424,14 @@ def check_crosslang():
             and "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" in web_py:
         ok("⑤ 跨语言同值：socket×3 / web 端口 %d / usb-proxy socket 全部一致" % port_py)
 
-    # EDID 重协商 attempts：单一真源 12；web 不得覆写（V-09）
+    # EDID 重协商 attempts：单一真源 = 2（★ 2026-09-28 由 12 下调；V-09 的"单一真源"约束不变，
+    # 变的是那个真源的值）。为什么下调：每一轮重协商都要拉低/拉高一次 HPD，源端就重新枚举一次
+    # （= 屏幕黑一次）；12 轮意味着最坏 12 次黑屏，客户体感"开机黑屏多次"。
+    # 板端实测首轮 7~8s 即 lock ok，2 轮足够覆盖"源端一次没枚举完"的情形。
+    # 配套：deploy/systemd/ttbox-edid.service 的 timeout 同步 20s→45s（否则跑不完一轮）。
     edid = read("scripts/edid/edid_apply.sh")
-    if int_const(edid, "ATTEMPTS_DEFAULT") != 12:
-        bad("⑤ EDID ATTEMPTS_DEFAULT 非 12（V-09 单一真源被破坏）")
+    if int_const(edid, "ATTEMPTS_DEFAULT") != 2:
+        bad("⑤ EDID ATTEMPTS_DEFAULT 非 2（V-09 单一真源被破坏）")
     for n, line in enumerate(web_py.splitlines(), 1):
         if "TTBOX_EDID_REHANDSHAKE_ATTEMPTS" in strip_comment(line, ".py"):
             bad("⑤ ttbox-web.py:%d 仍覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS（V-09 回归）" % n)
