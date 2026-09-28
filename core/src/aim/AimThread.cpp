@@ -628,19 +628,37 @@ void AimThread::loop() {
                 if (global_wave_cfg.enabled) {
                     global_wave_.apply(&scaled_x, &scaled_y, now_ms32, global_wave_cfg);
                 }
-                // output_deadzone（自适应死区基准）：低于死区的输出归零（防微抖）。
-                if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
-                if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;
-                // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
+                // ---- V3 阶段 3b：输出门限挪到余数累加**之后**（2026-09-28）----
+                //
+                // 旧行为（已废弃）：这里先把 |scaled| < out_deadzone 归零，再进 remainder。
+                //   ⇒ 不足门槛的输出被**永久丢弃**，remainder 根本收不到它 ⇒
+                //     稳态误差被钉在"输出首次跌破门槛那一刻的剩余误差"，
+                //     动态场景下这部分欠账永远补不回来。
+                //
+                // 新行为：先累加，再由"累积量是否够 out_deadzone"决定本帧发不发，
+                //   **余数始终保留**，下一帧继续攒。死区从此只决定"多久发一次"，
+                //   不再决定稳态误差。
+                //
+                // 闭环 replay 实测（core/tools/pid_sim/aim_replay.py，Gain=0.686 / 延迟 51ms / 144fps）：
+                //   腰射 移动 60px/s：稳态 7.05px → 5.15px（-27%）
+                //   腰射 框跳 ±18px：稳态 0.47px → 0.21px（-55%）
+                //   腰射 静止靶：    稳态 0.21px → 0.21px（静止时旧链路靠"冻结"亦可，收益在动态）
+                //   ★ 结论：收益集中在**动态场景**，静止靶场景两者相当。
+                //
+                // out_deadzone 沿用同一个配置键（面板「抖动忽略门槛」，index.html:5393），
+                // 量纲仍是 count，语义变为"累积到这么多才发一次"。
                 remainder_x_ += scaled_x; remainder_y_ += scaled_y;
+                const float emit_x = (std::abs(remainder_x_) >= out_deadzone) ? remainder_x_ : 0.0f;
+                const float emit_y = (std::abs(remainder_y_) >= out_deadzone) ? remainder_y_ : 0.0f;
                 // int16 截断保护：单帧输出 clamp 到 HID count 范围（-32768..32767），
                 // 防异常大值 static_cast 产生实现定义行为（乱飞）。
                 constexpr float kHidMax = 32767.0f;
                 constexpr float kHidMin = -32768.0f;
-                const float cx_f = std::clamp(remainder_x_, kHidMin, kHidMax);
-                const float cy_f = std::clamp(remainder_y_, kHidMin, kHidMax);
+                const float cx_f = std::clamp(emit_x, kHidMin, kHidMax);
+                const float cy_f = std::clamp(emit_y, kHidMin, kHidMax);
                 move_x = static_cast<int16_t>(cx_f);
                 move_y = static_cast<int16_t>(cy_f);
+                // 只把真正发出去的部分从余数里扣掉；未发的部分继续留着攒（不丢弃）。
                 remainder_x_ -= static_cast<float>(move_x); remainder_y_ -= static_cast<float>(move_y);
                 // 兜底：若余数已非有限（理论上 validate 已挡），立即清零防持续乱飞
                 if (!std::isfinite(remainder_x_) || !std::isfinite(remainder_y_)) {
