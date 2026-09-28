@@ -64,6 +64,9 @@ public:
         const int raw_x = static_cast<int>(*out_dx);
         const int raw_y = static_cast<int>(*out_dy);
         const int dx = raw_x, dy = raw_y;
+        // ★ 每帧先清零：本帧没注入抖动就必须是 0（前馈读数不能沿用上一帧的残值）。
+        last_jitter_x_ = 0.0f;
+        last_jitter_y_ = 0.0f;
         if (dx == 0 && dy == 0) return;
         if (!(cfg.enabled && active_)) return;
 
@@ -140,8 +143,13 @@ public:
             curve_state_ = curve_state_ * decay + gauss_(0.0f, innovation);
             perp_offset = clamp_(curve_state_ * transport_window * strength * curve_sign_,
                                  -visual_budget, visual_budget);
-            out_x += -uy * perp_offset;
-            out_y += ux * perp_offset;
+            // ★ V3 阶段 5：垂直抖动是"随机分量"，报出去给前馈扣除。
+            //   注意只报这一项 —— transport 增益（gain-1 那部分）是故意要走的速度
+            //   包络，扣掉会让 PID 以为还没到位而继续加力 ⇒ 过冲。
+            last_jitter_x_ = -uy * perp_offset;
+            last_jitter_y_ = ux * perp_offset;
+            out_x += last_jitter_x_;
+            out_y += last_jitter_y_;
         } else {
             const float tau = std::max(cfg.curve_time_constant_ms, 1.0f);
             curve_state_ *= std::exp(-dt / tau);
@@ -175,12 +183,19 @@ public:
         has_last_error_ = false;
         last_error_x_ = 0.0f;
         last_error_y_ = 0.0f;
+        last_jitter_x_ = 0.0f;
+        last_jitter_y_ = 0.0f;
     }
 
     // 外部运行时参数（每帧由 AimThread 提供）
     void set_error_speed_px_s(float v) { error_speed_px_s_ = v; }
     void set_target_age_ms(float v) { target_age_ms_ = v; }
     void set_target_radius_px(float v) { target_radius_px_ = v; }
+    // V3 阶段 5：本帧注入的垂直随机抖动分量（count 域，guard 之前的值）。
+    // 未启用 / 未激活 / 被抑制 / 误差太小 ⇒ 恒为 0。
+    float last_jitter_x() const { return last_jitter_x_; }
+    float last_jitter_y() const { return last_jitter_y_; }
+
     // 统计（供 Web/诊断）
     uint64_t shape_count() const { return shape_count_; }
     uint64_t applied_count() const { return applied_count_; }
@@ -351,6 +366,9 @@ private:
     float error_speed_px_s_ = 0.0f;
     float target_age_ms_ = 0.0f;
     float target_radius_px_ = 0.0f;
+    // V3 阶段 5：本帧注入的垂直随机抖动（count），供前馈扣除读取。
+    float last_jitter_x_ = 0.0f;
+    float last_jitter_y_ = 0.0f;
     uint64_t shape_count_ = 0;
     uint64_t applied_count_ = 0;
     uint64_t pause_count_ = 0;

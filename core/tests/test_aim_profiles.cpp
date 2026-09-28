@@ -227,6 +227,7 @@ int main() {
         a.sensitivity = 1.35f;
         a.fov_scale = 0.72f;
         a.zoom_scale = 2.873f;   // V3 阶段 2：2 倍镜实测真实倍率
+        a.gain_px_per_count = 0.343f;  // V3 阶段 5：本档实测 px/count（前馈换算用）
         a.class_filter = {0, 2};
         ClassOffset co;
         co.class_id = 2; co.offset_x = 0.25f; co.offset_y = 0.15f; co.priority = 3;
@@ -252,6 +253,7 @@ int main() {
         check_eq_f(q.mouse.aim_profiles[0].sensitivity, 1.35f, "往返：档0 移动倍率");
         check_eq_f(q.mouse.aim_profiles[0].fov_scale, 0.72f, "往返：档0 FOV 倍率");
         check_eq_f(q.mouse.aim_profiles[0].zoom_scale, 2.873f, "往返：档0 倍镜倍率");
+        check_eq_f(q.mouse.aim_profiles[0].gain_px_per_count, 0.343f, "往返：档0 px/count");
         check_eq_i64(static_cast<int64_t>(q.mouse.aim_profiles[0].class_filter.size()), 2,
                      "往返：档0 类别过滤个数");
         check_eq_i64(q.mouse.aim_profiles[0].class_filter[1], 2, "往返：档0 类别过滤内容");
@@ -365,6 +367,28 @@ int main() {
             "倍镜倍率负数");
         check_eq_f(neg.mouse.aim_profiles[0].zoom_scale, 1.0f,
                    "倍镜倍率负数 -> 回退 1.0（防误差变号）");
+    }
+
+    // ================= 12. V3 阶段 5：本档 px/count =================
+    // 前馈换算要用"当前倍镜的 px/count"。没测过必须是 0（回退腰射 gain），
+    // 负数也同样回退 0 —— 拿负数去换算会把抖动扣成反向，比不扣更糟。
+    {
+        const RuntimeProfile miss = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8}]}})", "本档 px/count 缺失");
+        check_eq_f(miss.mouse.aim_profiles[0].gain_px_per_count, 0.0f,
+                   "本档 px/count 缺失 -> 0（未标定，回退腰射 gain）");
+
+        const RuntimeProfile neg = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"gain_px_per_count":-1.2}]}})",
+            "本档 px/count 负数");
+        check_eq_f(neg.mouse.aim_profiles[0].gain_px_per_count, 0.0f,
+                   "本档 px/count 负数 -> 0（防抖动被反向扣除）");
+
+        const RuntimeProfile ok = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"gain_px_per_count":0.343}]}})",
+            "本档 px/count 正常");
+        check_eq_f(ok.mouse.aim_profiles[0].gain_px_per_count, 0.343f,
+                   "本档 px/count 正常值往返一致");
     }
 
     if (g_fails == 0) std::printf("test_aim_profiles: PASS\n");

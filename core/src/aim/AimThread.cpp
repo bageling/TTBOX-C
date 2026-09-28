@@ -40,6 +40,7 @@ void AimThread::reset_runtime_state() {
     // BB 对标第二批（2026-09-24）：新模块状态同样必须随世代清零，禁止 A 模型状态漏到 B
     lead_pred_.reset();
     humanize_shaper_.reset();
+    jitter_ff_.reset();      // V3 阶段 5：跨世代的抖动欠账不能留给新模型去扣
     anti_overshoot_.reset();
     speed_kp_.reset();
     global_wave_.reset();
@@ -177,6 +178,7 @@ void AimThread::loop() {
                 remainder_y_ = 0.0f;
                 lead_pred_.reset();
                 humanize_shaper_.reset();
+                jitter_ff_.reset();  // V3 阶段 5：热键松开那一帧的抖动欠账一并作废
                 anti_overshoot_.reset();
                 speed_kp_.reset();
                 global_wave_.reset();
@@ -212,6 +214,13 @@ void AimThread::loop() {
                 {
                     const float z = ap ? ap->zoom_scale : 1.0f;
                     active_zoom_scale_ = (std::isfinite(z) && z > 0.0f) ? z : 1.0f;
+                }
+                // ---- V3 阶段 5：本档实测 px/count（前馈换算用）----
+                // 倍镜下 px/count 随 f × ADS 系数变 ⇒ 必须按倍镜各测一次；
+                // 本档没测过（0）⇒ 回退腰射 gain_y_px_per_count（见下面换算处）。
+                {
+                    const float g = ap ? ap->gain_px_per_count : 0.0f;
+                    active_gain_px_per_count_ = (std::isfinite(g) && g > 0.0f) ? g : 0.0f;
                 }
                 // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
                 // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
@@ -400,6 +409,7 @@ void AimThread::loop() {
                     lead_pred_.reset();       // BB 提前量：新目标重新收帧/清零积分
                     anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
                     humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
+                    jitter_ff_.reset();       // V3 阶段 5：换目标 ⇒ 旧目标的抖动欠账作废
                     global_wave_.reset();
                 }
                 last_target_id_ = selected.target_id;
@@ -469,6 +479,43 @@ void AimThread::loop() {
                 if (trigger_recoil_offset_px_ != 0.0f) {
                     control_y += trigger_recoil_offset_px_;
                     trigger_recoil_offset_px_ = 0.0f;   // 只在开火的下一帧生效一次
+                }
+                // ---- V3 阶段 5：拟人化抖动前馈扣除（默认关 ⇒ 与本机制加入前逐字节一致）----
+                // 把"到期的抖动 count"换算成像素、加回控制误差 ⇒ PID 看不见自己发的抖动。
+                // 量纲：jitter(count) × px_per_count = 画面像素位移。
+                // 顺序：先 advance（取到期量），再走 PID；本帧新注入的抖动在帧尾才 push，
+                //       ⇒ 本帧注入的样本下一帧才开始计时，不会"提前一帧扣"。
+                jitter_ff_x_px_ = 0.0f;
+                jitter_ff_y_px_ = 0.0f;
+                if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
+                    const auto& ff = frame_profile->mouse.jitter_feedforward;
+                    float delay_ms = ff.delay_ms;
+                    if (!(delay_ms > 0.0f)) delay_ms = frame_profile->mouse.response_delay_ms;
+                    float g = ff.gain_px_per_count;
+                    if (!(g > 0.0f)) g = active_gain_px_per_count_;
+                    if (!(g > 0.0f)) g = frame_profile->mouse.gain_y_px_per_count;
+                    if (delay_ms > 0.0f && g > 0.0f) {
+                        float jx = 0.0f, jy = 0.0f;
+                        jitter_ff_.advance(dt_ms, delay_ms, &jx, &jy);
+                        const float sc = (ff.scale > 0.0f) ? ff.scale : 0.0f;
+                        float ax = jx * g * sc;
+                        float ay = jy * g * sc;
+                        // 单帧上限：防异常配置把误差顶飞（默认 40px）
+                        const float lim = (ff.max_px > 0.0f) ? ff.max_px : 0.0f;
+                        if (lim > 0.0f) {
+                            ax = std::clamp(ax, -lim, lim);
+                            ay = std::clamp(ay, -lim, lim);
+                        }
+                        control_x += ax;
+                        control_y += ay;
+                        jitter_ff_x_px_ = ax;
+                        jitter_ff_y_px_ = ay;
+                    } else {
+                        // 没标过延迟 / 没标过 gain ⇒ 前馈无从换算，清空缓冲防止陈旧样本积压
+                        jitter_ff_.reset();
+                    }
+                } else if (jitter_ff_.pending() > 0) {
+                    jitter_ff_.reset();  // 开关刚关：别留一队过期样本等下次开启时集中释放
                 }
                 // pid1.cpp P_PID 直接消费控制域误差（像素域）。
                 // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。
@@ -705,6 +752,8 @@ void AimThread::loop() {
                 // ★ speed_fluctuation / accuracy_sim 两个"附加项"本期只提供模块与配置键、
                 //   **未接线**（默认关 ⇒ 无影响）；等面板那批确认取值口径后再接。
                 if (humanize_cfg.enabled) {
+                    const int16_t pre_hx = move_x;   // 整形前的量化输出（前馈增量基准）
+                    const int16_t pre_hy = move_y;
                     float hx = static_cast<float>(move_x);
                     float hy = static_cast<float>(move_y);
                     HumanizeShaper::Context hctx;
@@ -712,6 +761,13 @@ void AimThread::loop() {
                     hctx.now_ms = now_ms32;
                     hctx.aiming = true;
                     humanize_shaper_.apply(&hx, &hy, humanize_cfg, hctx);
+                    // ★ V3 阶段 5：把本帧注入的**随机抖动**（不是整条整形量）登记进前馈缓冲。
+                    //   "注入量"取整形后的增量，因为 move_x 是 int16 —— 高斯噪声不足 1 count
+                    //   时会被截断成 0，但噪声在浮点域是累积的（低通+噪声会跨帧留痕）；
+                    //   这里记浮点增量，前馈才对得上"实际想抖多少"。
+                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
+                        jitter_ff_.push(hx - static_cast<float>(pre_hx), hy - static_cast<float>(pre_hy));
+                    }
                     move_x = static_cast<int16_t>(std::clamp(hx, kHidMin, kHidMax));
                     move_y = static_cast<int16_t>(std::clamp(hy, kHidMin, kHidMax));
                 } else if (personal_traj_cfg.enabled && injection_allowed) {
@@ -729,6 +785,12 @@ void AimThread::loop() {
                         (selected.box.y2 - selected.box.y1) * 0.5f);
                     personal_shader_.shape(&move_x, &move_y, control_x, control_y, dt_ms,
                                            personal_traj_cfg);
+                    // ★ V3 阶段 5：只登记**垂直随机抖动**分量。transport 增益（速度包络）
+                    //   是故意要走的一段位移，不能扣（扣了 PID 以为没到 ⇒ 过冲）。
+                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
+                        jitter_ff_.push(personal_shader_.last_jitter_x(),
+                                        personal_shader_.last_jitter_y());
+                    }
                 }
             }
             // ---- Hotkey Gate 兜底（安全边界最后一行）----

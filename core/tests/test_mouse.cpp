@@ -455,6 +455,12 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.gain_x_px_per_count = 0.42f;   // 自动标定产物（px/count）必须落盘生效
     p.mouse.gain_y_px_per_count = 0.71f;
     p.mouse.response_delay_ms = 51.0f;   // V3 阶段5 前置：实测回路延迟（板端 51ms）
+    // V3 阶段5：抖动前馈扣除（默认关，这里显式打开验证往返）
+    p.mouse.jitter_feedforward.enabled = true;
+    p.mouse.jitter_feedforward.delay_ms = 0.0f;          // 0 = 用 response_delay_ms
+    p.mouse.jitter_feedforward.gain_px_per_count = 0.0f; // 0 = 用热键档 / 腰射 gain
+    p.mouse.jitter_feedforward.scale = 0.8f;
+    p.mouse.jitter_feedforward.max_px = 25.0f;
     p.mouse.aim_point.aim_offset_x = 12.0f;
     p.mouse.fov_mode = true;
     p.mouse.hfov = 90.0f;
@@ -479,6 +485,11 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.gain_x_px_per_count == 0.42f);
     CHECK(q.mouse.gain_y_px_per_count == 0.71f);
     CHECK(q.mouse.response_delay_ms == 51.0f);   // ★ 延迟必须落盘，否则前馈没得对齐
+    CHECK(q.mouse.jitter_feedforward.enabled);            // ★ 前馈开关必须落盘
+    CHECK(q.mouse.jitter_feedforward.delay_ms == 0.0f);
+    CHECK(q.mouse.jitter_feedforward.gain_px_per_count == 0.0f);
+    CHECK(q.mouse.jitter_feedforward.scale == 0.8f);
+    CHECK(q.mouse.jitter_feedforward.max_px == 25.0f);
     CHECK(q.mouse.aim_point.aim_offset_x == 12.0f);
     CHECK(q.mouse.fov_mode);
     CHECK(q.mouse.hfov == 90.0f);

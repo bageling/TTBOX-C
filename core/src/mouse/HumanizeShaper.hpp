@@ -39,6 +39,9 @@ public:
 
     // 就地滤波。x/y 单位是 count（量化前），传入传出同一量纲。
     void apply(float* x, float* y, const HumanizeShaperConfig& cfg, const Context& ctx) {
+        // ★ 每帧先清零：本帧没注入抖动就必须是 0（前馈读数不能沿用上一帧的残值）。
+        last_jitter_x_ = 0.0f;
+        last_jitter_y_ = 0.0f;
         if (!cfg.enabled) return;
 
         // ① 一阶低通
@@ -98,11 +101,22 @@ public:
         }
 
         // ⑤ 高斯噪声（各轴独立）
+        // ★ V3 阶段 5：噪声是"随机抖动"，要报出去给前馈扣除（速度包络/制动不报，
+        //   那是故意要走的一段位移，扣掉会让 PID 以为没到 ⇒ 过冲）。
         if (cfg.noise_sigma > 0.0f) {
-            *x += gauss() * cfg.noise_sigma;
-            *y += gauss() * cfg.noise_sigma;
+            const float nx = gauss() * cfg.noise_sigma;
+            const float ny = gauss() * cfg.noise_sigma;
+            *x += nx;
+            *y += ny;
+            last_jitter_x_ = nx;
+            last_jitter_y_ = ny;
         }
     }
+
+    // V3 阶段 5：本帧注入的**随机抖动**分量（与 x/y 同量纲 = count）。
+    // 未启用 / 被反应延迟整帧压掉 / noise_sigma=0 ⇒ 恒为 0。
+    float last_jitter_x() const { return last_jitter_x_; }
+    float last_jitter_y() const { return last_jitter_y_; }
 
     // 速度波动（可选附加项，见 03 号 §3.4）：按"离目标多远"给出速度倍率。
     // progress = 1 - dtt/total_distance；先加速段（0→accel_ratio）、后减速段（1-decel_ratio→1）。
@@ -156,6 +170,8 @@ public:
         has_last_ = false;
         last_x_ = 0.0f;
         last_y_ = 0.0f;
+        last_jitter_x_ = 0.0f;
+        last_jitter_y_ = 0.0f;
         has_aim_time_ = false;
         last_aim_ms_ = 0;
         delay_cached_ = 0.0f;
@@ -181,6 +197,9 @@ private:
     bool has_last_ = false;
     float last_x_ = 0.0f;
     float last_y_ = 0.0f;
+    // V3 阶段 5：本帧注入的随机抖动（count），供前馈扣除读取。
+    float last_jitter_x_ = 0.0f;
+    float last_jitter_y_ = 0.0f;
     bool has_aim_time_ = false;
     uint32_t last_aim_ms_ = 0;
     float delay_cached_ = 0.0f;

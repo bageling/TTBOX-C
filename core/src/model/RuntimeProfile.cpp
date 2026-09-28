@@ -437,6 +437,8 @@ JsonValue RuntimeProfile::to_json() const {
         j.set("sensitivity", JsonValue::number(static_cast<double>(ap.sensitivity)));
         j.set("fov_scale", JsonValue::number(static_cast<double>(ap.fov_scale)));
         j.set("zoom_scale", JsonValue::number(static_cast<double>(ap.zoom_scale)));
+        // V3 阶段 5：本档实测 px/count（0 = 没测过 ⇒ 回退 mouse.gain_y_px_per_count）
+        j.set("gain_px_per_count", JsonValue::number(static_cast<double>(ap.gain_px_per_count)));
         JsonValue ap_cos = JsonValue::array();
         for (const auto& c : ap.class_offsets) {
             JsonValue o = JsonValue::object();
@@ -821,6 +823,17 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("gain_y_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_y_px_per_count)));
     // V3 阶段 5 前置：实测回路延迟（ms）。0 = 未标定。
     m.set("response_delay_ms", JsonValue::number(static_cast<double>(mouse.response_delay_ms)));
+    // V3 阶段 5：拟人化抖动前馈扣除（默认关 ⇒ 序列化出来也是关的，老配置行为不变）。
+    {
+        JsonValue jf = JsonValue::object();
+        jf.set("enabled", JsonValue::boolean(mouse.jitter_feedforward.enabled));
+        jf.set("delay_ms", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.delay_ms)));
+        jf.set("gain_px_per_count",
+               JsonValue::number(static_cast<double>(mouse.jitter_feedforward.gain_px_per_count)));
+        jf.set("scale", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.scale)));
+        jf.set("max_px", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.max_px)));
+        m.set("jitter_feedforward", std::move(jf));
+    }
     JsonValue cos = JsonValue::array();
     for (const auto& c : mouse.aim_point.class_offsets) {
         JsonValue o = JsonValue::object();
@@ -1273,6 +1286,15 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
         // V3 阶段 5 前置：实测回路延迟（ms）。老配置没有这个键 ⇒ 0（未标定）。
         p.mouse.response_delay_ms = static_cast<float>(obj_num(*m, "response_delay_ms", 0.0));
+        // V3 阶段 5：抖动前馈扣除。老配置没有这个键 ⇒ 默认关（enabled=false）。
+        if (const JsonValue* jf = m->find("jitter_feedforward"); jf && jf->is_object()) {
+            auto& c = p.mouse.jitter_feedforward;
+            c.enabled = obj_bool(*jf, "enabled", false);
+            c.delay_ms = static_cast<float>(obj_num(*jf, "delay_ms", 0.0));
+            c.gain_px_per_count = static_cast<float>(obj_num(*jf, "gain_px_per_count", 0.0));
+            c.scale = static_cast<float>(obj_num(*jf, "scale", 1.0));
+            c.max_px = static_cast<float>(obj_num(*jf, "max_px", 40.0));
+        }
         if (const JsonValue* co = m->find("class_offsets"); co && co->is_array()) {
             for (const auto& e : co->as_array()) {
                 if (!e.is_object()) continue;
@@ -1306,6 +1328,11 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 {
                     const double z = obj_num(j, "zoom_scale", 1.0);
                     ap.zoom_scale = (z > 0.0) ? static_cast<float>(z) : 1.0f;
+                }
+                // V3 阶段 5：本档实测 px/count（0/负 = 没测过 ⇒ 回退腰射 gain_y）。
+                {
+                    const double g = obj_num(j, "gain_px_per_count", 0.0);
+                    ap.gain_px_per_count = (g > 0.0) ? static_cast<float>(g) : 0.0f;
                 }
                 if (const JsonValue* co = j.find("class_offsets"); co && co->is_array()) {
                     for (const auto& e : co->as_array()) {

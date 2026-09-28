@@ -132,6 +132,11 @@ struct AimHotkeyProfile {
     // 用途：PID 输入的像素误差除以它，等价于把误差换成角度域（差一个常数 1/f_hip，已并入 kp）
     //   ⇒ kp 保持腰射标定值即可通吃各倍镜，**不需要知道绝对焦距、也不需要知道靶子高度**。
     float zoom_scale = 1.0f;
+    // V3 阶段 5（2026-09-28）：本档实测 px/count（鼠标 1 count = 画面多少 px）。
+    // ★ 必须按倍镜各测一次：px/count 随 f × ADS 系数变，腰射的 0.686 在 6 倍镜下不成立。
+    //   填 0 = 还没测过 ⇒ 回退到 mouse.gain_y_px_per_count（腰射值）。
+    //   测法同 gain 标定：训练场里固定发 N count，量画面位移 px，取 px/N。
+    float gain_px_per_count = 0.0f;
 };
 
 // 单档命中判定：当前按键位图是否落进这一档。
@@ -234,6 +239,33 @@ struct PersonalTrajectoryConfig {
     float direction_change_cosine = 0.15f;  // 方向突变检测余弦阈值
     // -- 响应参数（视觉抖动预算换算：target_radius / response_px_per_count）
     float response_px_per_count = 0.65f;    // 每 count 对应 px（来自 gain_x/y_px_per_count 标定）
+};
+
+// ---------------------------------------------------------------------------
+// V3 阶段 5（2026-09-28）：拟人化抖动**前馈扣除**。
+//
+// 问题：拟人化注入的抖动是"自己发的扰动"，它会在 response_delay_ms 之后真的
+//       出现在采集画面里 ⇒ PID 把它当成"目标动了"，于是反向去追 ⇒ 抖动被自己
+//       抵消掉（拟人化消失），且闭环里多出一串本不该有的修正。
+//
+// 做法：拟人化链每帧报出"这帧注入了多少抖动（count）"，存进环形缓冲；
+//       按逐帧 dt 累计到 response_delay_ms 之后，才把它乘 px/count 换算回像素、
+//       **加回**控制误差（control_x/y）。PID 因此看不到自己发的抖动。
+//
+// ★ 为什么只扣抖动、不扣整条整形量：速度包络/制动是"故意要走的那一段位移"，
+//   扣掉会让 PID 以为还没到、继续加力 ⇒ 过冲。只有随机抖动该被扣。
+//
+// ★ 为什么按 dt 累计而不是"固定 N 帧"：帧率会抖（板端 144fps 实测在 130~150 之间
+//   漂），按帧数对齐会累积错位，前馈本身就变成高频扰动。
+//
+// ★ 默认 enabled=false ⇒ 与本参数加入前逐字节一致。
+// ---------------------------------------------------------------------------
+struct JitterFeedforwardConfig {
+    bool enabled = false;           // 总开关
+    float delay_ms = 0.0f;          // 落帧延迟；0 = 用 mouse.response_delay_ms（实测 51ms）
+    float gain_px_per_count = 0.0f; // 本档 px/count；0 = 用热键档 gain_px_per_count，再兜底 gain_y
+    float scale = 1.0f;             // 扣除比例（1.0=全额；0.5=只扣一半，留一点人味残差）
+    float max_px = 40.0f;           // 单帧加回量的绝对值上限（px），防异常值把误差顶飞
 };
 
 // 压枪（recoil：按住开火键期间持续下压，补偿后坐力）
@@ -622,6 +654,7 @@ struct MouseProfile {
         PullCurveConfig pull_curve;
         PersonalMotionConfig personal_motion;
         PersonalTrajectoryConfig personal_trajectory;  // 拟人化整形引擎（Fitts 时长+包络+垂直抖动+自适应抑制+安全守卫）
+        JitterFeedforwardConfig jitter_feedforward;  // V3 阶段 5：拟人化抖动前馈扣除（默认关）
         // 持续提前量：AI 输出持续同向累计超 enter 后附加 X 偏置（渐入渐出）。
         // ★ 默认 enabled=false ⇒ 未显式开启时输出链与本参数加入前逐字节一致（行为零变化）。
         // 此前 ContinuousLeadConfig 与 ContinuousLead.hpp 早已存在且有单测，但

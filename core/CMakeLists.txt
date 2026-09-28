@@ -630,6 +630,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_pid1 PRIVATE ttbox_core)
   add_test(NAME test_pid1 COMMAND test_pid1)
 
+  # V3 阶段 5：拟人化抖动前馈扣除（延迟对齐环形缓冲 + 两条链抖动上报）
+  add_executable(test_jitter_feedforward tests/test_jitter_feedforward.cpp)
+  target_link_libraries(test_jitter_feedforward PRIVATE ttbox_core)
+  add_test(NAME test_jitter_feedforward COMMAND test_jitter_feedforward)
+
   # Hotkey Gate 最终输出安全边界测试（7 个验收场景）
   add_executable(test_hotkey_gate tests/test_hotkey_gate.cpp)
   target_link_libraries(test_hotkey_gate PRIVATE ttbox_core)

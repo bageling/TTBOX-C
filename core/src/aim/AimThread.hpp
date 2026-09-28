@@ -26,6 +26,7 @@
 // BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
 #include "mouse/LeadPredictor.hpp"
 #include "mouse/HumanizeShaper.hpp"
+#include "mouse/JitterFeedforward.hpp"
 #include "mouse/AntiOvershoot.hpp"
 #include "mouse/SpeedAdaptiveKp.hpp"
 #include "mouse/GlobalWave.hpp"
@@ -184,6 +185,19 @@ private:
     // 修法：PID 输入误差除以 M（等价于 kp/M），kp 保持腰射值即可通吃各倍镜。
     // 无档命中 / 未配置时 = 1.0 ⇒ 与加此机制前逐字节一致。
     float active_zoom_scale_ = 1.0f;
+    // ---- V3 阶段 5：拟人化抖动前馈扣除（2026-09-28）----
+    // 两条拟人化链（humanize / personal_trajectory）都只往输出里"加"抖动，
+    // 但抖动会在 response_delay_ms（实测 51ms）之后出现在采集画面里，被 PID 当成
+    // "目标动了"反向追 ⇒ 抖动被自己抵消，闭环还多一串多余修正。
+    // 这里按延迟把注入量**加回**控制误差 ⇒ PID 看不见自己发的抖动。
+    // ★ 挂在"抖动分量"上（两条链各自上报），**不挂整条整形量**：速度包络/制动是
+    //   故意要走的一段位移，扣掉会让 PID 以为还没到 ⇒ 过冲。
+    JitterFeedforward jitter_ff_;
+    // 本档实测 px/count（热键档 gain_px_per_count，0 ⇒ 回退 mouse.gain_y_px_per_count）
+    float active_gain_px_per_count_ = 0.0f;
+    // 本帧实际加回的像素量（诊断用，供后续观测字段）
+    float jitter_ff_x_px_ = 0.0f;
+    float jitter_ff_y_px_ = 0.0f;
     // 热键保护：toggle_hotkey 的**上升沿**翻转挂起状态。用上一周期的原始位图判边沿，
     // 与瞄准热键的"按住才生效"语义区分开（这里是按一下切换一次，按住不会连续翻转）。
     uint16_t last_raw_buttons_ = 0;         // 上一周期采样到的原始物理按键位图
