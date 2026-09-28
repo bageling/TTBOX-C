@@ -239,6 +239,12 @@ void AimThread::loop() {
                 scfg.priority_scoring = frame_profile->mouse.priority_scoring;
                 scfg.weight_dist = frame_profile->mouse.weight_dist;
                 scfg.weight_size = frame_profile->mouse.weight_size;
+                // V3 阶段 4：打分的两项（距离/尺寸）都要除以本档倍率归一到腰射等效量纲，
+                // 否则倍镜下 dist 项变小、size 项变大 ⇒ 同一组权重选出不同的目标。
+                scfg.zoom_scale = active_zoom_scale_;
+                // V3 阶段 4：选靶打分的两项（距离 / 尺寸）都要除以本档倍率归一到腰射
+                // 等效量纲，否则倍镜下 dist 项变小、size 项变大，同一组权重选出不同目标。
+                scfg.zoom_scale = active_zoom_scale_;
                 scfg.stickiness = frame_profile->mouse.stickiness;
                 scfg.switch_threshold_px = frame_profile->mouse.switch_threshold_px;
                 scfg.head_body_stable = frame_profile->mouse.head_body_stable;

@@ -93,6 +93,18 @@ struct TargetSelectorConfig {
     float weight_size = 0.3f;           // 打分制：尺寸项权重（对齐 BB priority_weight_size=0.3）
     float stickiness = 1.0f;            // 打分制：粘滞权重（对齐 BB target_stickiness=1，进公式时 ×0.5）
     float switch_threshold_px = 60.0f;  // stick 判定半径（对齐 BB target_switch_threshold=60px）
+    // ---- V3 阶段 4（2026-09-28）：打分去量纲 ----
+    // ① 尺寸项原为 min(1, w×h/10000)。实测（docs/calib/range-measure-2026-09-28.json）：
+    //    腰射 20m 框 25×85=2135（0.21），但 2 倍镜 70×243=17086、4 倍 132×489=64738
+    //    ⇒ **2 倍镜起全部撞顶拿 1.0**，size 项彻底失去区分度（等于没配）。
+    //    改 sqrt(面积)/参考边长：重尾压掉，大框不再一律顶格。
+    // ② 两项都除以本档真实倍率 M ⇒ 归一到**腰射等效量纲**：
+    //    否则倍镜下 dist 项变小、size 项变大，权重天平被倍镜拨走，
+    //    同一组权重在腰射和 6 倍镜下选出完全不同的目标。
+    //    M=1.0（腰射/未配倍率）⇒ 与本参数加入前完全一致。
+    float zoom_scale = 1.0f;        // 本档倍镜真实倍率（与阶段 2 误差角度化同一个 M）
+    float size_ref_px = 320.0f;     // 尺寸参考边长（默认 = 640 截取窗口的一半）
+    float dist_ref_px = 100.0f;     // 距离尺度（腰射等效 px，原式里的 100）
     // 头身稳定过滤：同一帧里同时出现 (bodyN + headN) 时删掉 headN 框，
     // 理由——头身同框时"头部框"容易把瞄准点抢走，只留身体框更稳（对齐 BB applyHeadBodyStable）。
     bool head_body_stable = false;      // 总开关（默认关）
