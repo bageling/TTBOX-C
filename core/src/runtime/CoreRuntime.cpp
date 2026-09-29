@@ -489,6 +489,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     out->pid_output_y = aim_status.pid_output_y;
     out->scheduler_input_x = aim_status.scheduler_input_x;
     out->scheduler_input_y = aim_status.scheduler_input_y;
+    out->aim_control_y = aim_status.control_y;   // 闭环纠偏真正消费的控制域误差
     // 压枪 v1 闭环遥测（AimThread::Status → Metrics，再经 IpcServer 投影给面板）
     out->recoil_cl_add_y = aim_status.recoil_cl_add_y;
     out->recoil_cl_integral = aim_status.recoil_cl_integral;

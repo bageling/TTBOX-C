@@ -239,11 +239,12 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "recoil_bb.smooth / y_suppress_strength 超出 [0,1]";
         return false;
     }
-    // 开火期闭环纠偏（压枪 v1，2026-09-29）：增益/限幅/安全阀不能为负；
+    // 开火期闭环纠偏（压枪 v2，2026-09-29）：增益/限幅/安全阀不能为负；
     // start_frames 必须 >= 1 —— 0 会退化成"第一帧就压"，与「先观测再压」定案冲突。
     if (mouse.recoil_cl.kp < 0.0f || mouse.recoil_cl.gain < 0.0f ||
         mouse.recoil_cl.integral_max < 0.0f ||
         mouse.recoil_cl.press_max_count < 0.0f || mouse.recoil_cl.start_frames < 1 ||
+        mouse.recoil_cl.slew_count_per_frame < 0.0f ||
         mouse.recoil_cl.baseline_tau_ms < 0.0f) {
         if (error) *error = "recoil_cl 参数越界（start_frames 需 >= 1）";
         return false;
@@ -613,7 +614,7 @@ JsonValue RuntimeProfile::to_json() const {
         vc.set("ramp3_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_end)));
         m.set("vertical_correction", std::move(vc));
 
-        // 开火期闭环纠偏（压枪 v1，2026-09-29）：默认 enabled=false ⇒ 不开时行为零变化。
+        // 开火期闭环纠偏（压枪 v2，2026-09-29）：默认 enabled=false ⇒ 不开时行为零变化。
         JsonValue rcl = JsonValue::object();
         rcl.set("enabled", JsonValue::boolean(mouse.recoil_cl.enabled));
         rcl.set("kp", JsonValue::number(static_cast<double>(mouse.recoil_cl.kp)));
@@ -621,6 +622,8 @@ JsonValue RuntimeProfile::to_json() const {
         rcl.set("integral_max", JsonValue::number(static_cast<double>(mouse.recoil_cl.integral_max)));
         rcl.set("start_frames", JsonValue::number(static_cast<double>(mouse.recoil_cl.start_frames)));
         rcl.set("press_max_count", JsonValue::number(static_cast<double>(mouse.recoil_cl.press_max_count)));
+        rcl.set("slew_count_per_frame",
+                JsonValue::number(static_cast<double>(mouse.recoil_cl.slew_count_per_frame)));
         rcl.set("baseline_tau_ms", JsonValue::number(static_cast<double>(mouse.recoil_cl.baseline_tau_ms)));
         m.set("recoil_cl", std::move(rcl));
 
@@ -1048,17 +1051,22 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             v.ramp3_middle = static_cast<float>(obj_num(*vc, "ramp3_middle", 0.5));
             v.ramp3_end = static_cast<float>(obj_num(*vc, "ramp3_end", 0.1));
         }
-        // 开火期闭环纠偏（压枪 v1，2026-09-29）。默认值必须与 MouseTypes.hpp 的
+        // 开火期闭环纠偏（压枪 v2，2026-09-29）。默认值必须与 MouseTypes.hpp 的
         // RecoilClConfig 结构体默认值一字不差（面板首次回填显示的就是这里）。
+        // ★ v2 换了默认值（kp 0.5→0、gain 2.0→0.25、integral_max 100→12、
+        //   press_max_count 20→3、baseline_tau_ms 1500→2000），并新增字段
+        //   slew_count_per_frame。**板端旧配置里存的是 v1 那套值**，会覆盖这里的默认
+        //   ⇒ 升到 v2 后必须显式把面板那几个值改成 v2 口径（见发布记录）。
         if (const JsonValue* rcl = m->find("recoil_cl"); rcl && rcl->is_object()) {
             auto& c = p.mouse.recoil_cl;
             c.enabled = obj_bool(*rcl, "enabled", false);
-            c.kp = static_cast<float>(obj_num(*rcl, "kp", 0.5));
-            c.gain = static_cast<float>(obj_num(*rcl, "gain", 2.0));
-            c.integral_max = static_cast<float>(obj_num(*rcl, "integral_max", 100.0));
+            c.kp = static_cast<float>(obj_num(*rcl, "kp", 0.0));
+            c.gain = static_cast<float>(obj_num(*rcl, "gain", 0.25));
+            c.integral_max = static_cast<float>(obj_num(*rcl, "integral_max", 12.0));
             c.start_frames = static_cast<int>(obj_int(*rcl, "start_frames", 6));
-            c.press_max_count = static_cast<float>(obj_num(*rcl, "press_max_count", 20.0));
-            c.baseline_tau_ms = static_cast<float>(obj_num(*rcl, "baseline_tau_ms", 1500.0));
+            c.press_max_count = static_cast<float>(obj_num(*rcl, "press_max_count", 3.0));
+            c.slew_count_per_frame = static_cast<float>(obj_num(*rcl, "slew_count_per_frame", 0.3));
+            c.baseline_tau_ms = static_cast<float>(obj_num(*rcl, "baseline_tau_ms", 2000.0));
         }
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
         if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {

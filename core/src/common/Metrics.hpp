@@ -89,6 +89,10 @@ struct PipelineMetrics {
     double pid_output_y = 0.0;
     double scheduler_input_x = 0.0;
     double scheduler_input_y = 0.0;
+    // 控制域误差（平滑瞄准点 − 参考点，px）：**闭环纠偏真正消费的那个量**。
+    // trace 里原有的 aim_error_y 是原始目标点误差（ey，未平滑、含检测框跳变），
+    // 拿它判闭环效果会把"检测抖动"当成"后坐力" ⇒ 2026-09-29 v2 一并暴露本字段。
+    double aim_control_y = 0.0;
     // ---- 开火期闭环纠偏遥测（压枪 v1，2026-09-29）----
     // 此前压枪**没有任何运行期观测**（ttbox-web.py 里零个 recoil 字段）⇒ 优化无从验收。
     double recoil_cl_add_y = 0.0;      // 本帧闭环注入的下压量（count）

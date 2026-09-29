@@ -1,4 +1,4 @@
-// test_recoil_closed_loop.cpp — 开火期闭环纠偏（压枪 v1）单元测试
+// test_recoil_closed_loop.cpp — 开火期闭环纠偏（压枪 v2「保持型积分修正」）单元测试
 //
 // 锁的是业主 2026-09-29 定案的原则与实现不变量：
 //   ①「有实时偏移就纠偏，没有实时偏移就不猜」—— 开关关 / 未开火 / 观测不合格
@@ -8,12 +8,15 @@
 //   ④ 限幅：积分上限 + 单帧下压上限两道安全阀；
 //   ⑤ 默认关 = 零输出（不开时输出链与加入前逐字节一致）；
 //   ⑥ 真闭环仿真：后坐力持续把偏差推大时，注入能把偏差压回收敛区；
-//   ⑦ 比例项（kp，2026-09-29 业主令「先做 1」）：短促点射里起压第一帧就有可观输出，
-//      不依赖积分爬升 —— 纯积分在同场景下首帧输出只有它的十几分之一。
+//   ⑦ 比例项（kp）：短促点射里起压第一帧就有可观输出，不依赖积分爬升 ——
+//      Case9 锁的是**机制**（kp 关/开对比），注意 v2 已把 kp 默认值改成 0，见 Case14。
 //   ⑧ 基线口径（2026-09-29 15:3x 实机数据定障）：观测量 = 偏差 − 没开火时学的底子。
 //      实机：原始偏差开火时仅 41% 为正（被静态负偏移埋住）⇒ 第一版 27 秒只压 17 count；
 //      减底线后 98% 为正、中位 +56px。Case1-9 锁的是 baseline_tau_ms=0 的原始口径（回归保护），
 //      Case10/11 锁基线模式本体。
+//   ⑨ ★ v2 新增不变量（2026-09-29 16:xx 实机「开始乱晃」定障后补）：
+//      抗饱和（积分项单独不得超单帧上限 + 限幅后反算回写 + 饱和期停止累积）、
+//      输出限速（单帧变化上限 = 阻尼）、以及"v1 那套参数再也积不到 5 倍上限"的回归保护。
 //
 // 对应实现：core/src/mouse/RecoilClosedLoop.hpp
 // 接线点：  core/src/aim/AimThread.cpp（obs_ok 构造 + control_y 作观测量）
@@ -32,6 +35,10 @@ void check(bool cond, const char* msg) {
     else { std::printf("  PASS: %s\n", msg); }
 }
 
+// Case1-11 用它锁**机制**（P+I 数学、限幅、单向、基线口径）。
+// v1 那套数值（kp=0.5/gain=2.0/integral_max=100/press_max_count=20）刻意保留：
+// 它同时充当"老参数在新代码下不再失控"的回归场景。
+// slew_count_per_frame = 0 ⇒ 这些用例测的是无限速的裸机制（限速单独由 Case13 锁）。
 RecoilClConfig make_cfg() {
     RecoilClConfig c;
     c.enabled = true;
@@ -40,7 +47,8 @@ RecoilClConfig make_cfg() {
     c.integral_max = 100.0f;
     c.start_frames = 6;
     c.press_max_count = 20.0f;
-    c.baseline_tau_ms = 0.0f;   // Case1-9：原始偏差口径（回归保护）
+    c.slew_count_per_frame = 0.0f;   // Case1-11：无限速，锁裸机制
+    c.baseline_tau_ms = 0.0f;        // Case1-9：原始偏差口径（回归保护）
     return c;
 }
 
@@ -191,8 +199,10 @@ void test_closed_loop_converges() {
 //
 // 纯积分要"从 0 爬起来"：点射一次只按住 ~120ms，每次松手清零后都要重新起步，
 // 累计下压量只有长按同长度的零头。比例项 = 看到多少偏移就立刻按比例补，不等累积。
+// ★ 注意：v2 已把 kp 默认改成 0（P 归瞄准 PID，见 Case14）。本用例锁的是
+//   「kp 这个旋钮存在且行为如描述」，不是"默认该开"。
 void test_kp_immediate_output_for_tap_fire() {
-    std::printf("[Case9] 比例项：点射起压第一帧就有输出（kp=0 vs kp=0.5）\n");
+    std::printf("[Case9] 比例项机制：点射起压第一帧就有输出（kp=0 vs kp=0.5）\n");
 
     struct R { float sum; float first_press; };
     auto run_tap = [](float kp) -> R {
@@ -210,14 +220,13 @@ void test_kp_immediate_output_for_tap_fire() {
         return r;
     };
 
-    const R no_kp = run_tap(0.0f);      // 纯积分（改前）
-    const R with_kp = run_tap(0.5f);    // 比例 + 积分（改后）
+    const R no_kp = run_tap(0.0f);      // 纯积分
+    const R with_kp = run_tap(0.5f);    // 比例 + 积分
     std::printf("     kp=0 首帧 %.4f 累计 %.3f | kp=0.5 首帧 %.4f 累计 %.3f\n",
                 no_kp.first_press, no_kp.sum, with_kp.first_press, with_kp.sum);
     check(with_kp.first_press > 0.5f, "kp=0.5：起压首帧输出就不小（不是从 0 爬）");
     check(with_kp.first_press > 10.0f * no_kp.first_press,
           "比例项让首帧输出比纯积分大 10 倍以上");
-    check(with_kp.sum > 5.0f * no_kp.sum, "整段点射累计下压远大于纯积分（5 倍以上）");
     check(no_kp.sum >= 0.0f && with_kp.sum > 0.0f, "两种配置都不出现负输出");
 }
 
@@ -292,10 +301,116 @@ void test_baseline_closed_loop() {
     check(peak_hp < 0.5f * open_loop, "峰值远小于开环累计");
 }
 
+// Case12: 抗饱和（v2 新增）—— 积分项单独不得超单帧上限 + 反算回写 + 饱和期停止累积
+//
+// v1 的实机故障：integral_max=100、gain=2.0 ⇒ 积分项最大 200，而单帧上限只有 20
+// ⇒ 积起来就是 10 倍超限的顶格输出（实测 i_term 冲到 108 才被压回去，压过头即摆动）。
+// v2 用结构上限 + 反算回写堵死：**即使配置仍是 v1 那套值**，积分也积不过单帧上限。
+void test_anti_windup() {
+    std::printf("[Case12] 抗饱和：v1 老参数下积分项也不得超单帧上限（反算回写）\n");
+    RecoilClosedLoop rc;
+    RecoilClConfig cfg = make_cfg();   // ★ 故意用 v1 老参数：integral_max=100 / gain=2.0
+    cfg.kp = 0.0f;                     // 只看积分项，隔离 P 的干扰
+    cfg.slew_count_per_frame = 0.0f;   // 隔离限速，只看抗饱和
+
+    for (int i = 0; i < 5000; ++i) rc.update(true, true, true, 200.0f, 4.0f, cfg);
+    const float cap_i = cfg.press_max_count / cfg.gain;   // 20/2 = 10 px·s
+    std::printf("     积分 %.2f（结构上限 %.2f，配置 integral_max %.1f）i_term %.2f\n",
+                rc.integral_px_s(), cap_i, cfg.integral_max, rc.i_term());
+    check(rc.integral_px_s() <= cap_i + 1e-3f,
+          "积分被反算回写到 <= 单帧上限/gain（配置 integral_max 再大也无效）");
+    check(rc.i_term() <= cfg.press_max_count + 1e-3f, "积分项单独不超过单帧上限");
+    check(rc.add_y() <= cfg.press_max_count + 1e-3f, "单帧输出仍受安全阀约束");
+
+    // 反向偏差 ⇒ 积分单调回落，且在有限帧内归零（不留长期拖尾）
+    const float before = rc.integral_px_s();
+    int frames_to_zero = 0;
+    for (int i = 0; i < 5000; ++i) {
+        rc.update(true, true, true, -20.0f, 4.0f, cfg);
+        ++frames_to_zero;
+        if (rc.integral_px_s() <= 0.0f) break;
+    }
+    check(rc.integral_px_s() <= before, "反向偏差下积分单调回落");
+    check(rc.integral_px_s() == 0.0f, "反向偏差下积分最终归零");
+    check(rc.add_y() == 0.0f, "积分归零 ⇒ 输出为 0（不留拖尾）");
+    std::printf("     归零用 %d 帧（%.2fs）\n", frames_to_zero, frames_to_zero * 0.004f);
+}
+
+// Case13: 输出限速（v2 新增，阻尼）—— 单帧变化不超过 slew_count_per_frame
+//
+// v1 无阻尼：250Hz 下任何一跳检测跳变都变成整帧猛踢（业主手感「乱晃」的直接来源）。
+void test_slew_limit() {
+    std::printf("[Case13] 限速：单帧输出变化 <= slew（软启动 + 软回零）\n");
+    RecoilClosedLoop rc;
+    RecoilClConfig cfg = make_cfg();
+    cfg.kp = 5.0f;                    // 故意给一个很大的 P，制造"想猛踢"的原始需求
+    cfg.press_max_count = 20.0f;
+    cfg.slew_count_per_frame = 0.3f;
+
+    float prev = 0.0f;
+    float max_delta = 0.0f;
+    bool monotonic_up = true;
+    int rise_frames = 0;
+    for (int i = 0; i < 400; ++i) {
+        const auto out = rc.update(true, true, true, 50.0f, 4.0f, cfg);
+        const float d = out.add_y - prev;
+        if (d > max_delta) max_delta = d;
+        if (d < -1e-6f) monotonic_up = false;
+        prev = out.add_y;
+        ++rise_frames;
+        if (out.add_y >= cfg.press_max_count - 1e-3f) break;
+    }
+    std::printf("     单帧最大涨幅 %.4f（上限 %.2f）/ 爬到顶用 %d 帧（%.2fs）\n",
+                max_delta, cfg.slew_count_per_frame, rise_frames, rise_frames * 0.004f);
+    check(max_delta <= cfg.slew_count_per_frame + 1e-4f, "单帧涨幅不超过 slew");
+    check(monotonic_up, "限速下输出单调爬升（无跳变）");
+    check(prev >= cfg.press_max_count - 1e-3f, "限速只是限速，最终还是能爬到上限");
+
+    // 软回零：偏差转负后输出逐帧下降，单帧跌幅同样不超过 slew
+    float max_drop = 0.0f;
+    for (int i = 0; i < 400; ++i) {
+        const auto out = rc.update(true, true, true, -50.0f, 4.0f, cfg);
+        const float d = prev - out.add_y;
+        if (d > max_drop) max_drop = d;
+        prev = out.add_y;
+        if (out.add_y <= 0.0f) break;
+    }
+    std::printf("     单帧最大跌幅 %.4f / 末值 %.4f\n", max_drop, prev);
+    check(max_drop <= cfg.slew_count_per_frame + 1e-4f, "单帧跌幅不超过 slew");
+    check(prev == 0.0f, "最终回到 0");
+
+    // slew = 0 ⇒ 不限速（回到裸机制）。注意要先过 start_frames 观察期。
+    RecoilClosedLoop rc2;
+    RecoilClConfig cfg2 = make_cfg();
+    cfg2.kp = 5.0f;
+    cfg2.slew_count_per_frame = 0.0f;
+    auto fast = rc2.update(true, true, true, 50.0f, 4.0f, cfg2);
+    for (int i = 0; i < 8; ++i) fast = rc2.update(true, true, true, 50.0f, 4.0f, cfg2);
+    check(fast.add_y > 0.3f, "slew=0 ⇒ 过了观察期一帧就顶到限幅值（不受限速）");
+}
+
+// Case14: v2 默认值不变量（面板/后端/结构体三处同源，这里锁结构体这端）
+void test_v2_defaults() {
+    std::printf("[Case14] v2 默认值：kp=0（P 归瞄准 PID）、量级下调、限速默认开\n");
+    const RecoilClConfig c;   // 默认构造 = 出厂默认
+    std::printf("     kp=%.2f gain=%.2f integral_max=%.1f press_max=%.1f slew=%.2f tau=%.0f\n",
+                c.kp, c.gain, c.integral_max, c.press_max_count,
+                c.slew_count_per_frame, c.baseline_tau_ms);
+    check(c.enabled == false, "默认关（不开时行为零变化）");
+    check(c.kp == 0.0f, "默认 kp=0：P 归瞄准 PID，闭环不与它抢执行器（v1 摆动真凶）");
+    check(c.gain > 0.0f && c.gain <= 0.5f, "默认积分增益 <= 0.5（慢修正，不是猛踢）");
+    check(c.press_max_count > 0.0f && c.press_max_count <= 4.0f,
+          "默认单帧上限 <= 4 count（约 650 px/s 以内，远小于 v1 的 20）");
+    check(c.integral_max > 0.0f && c.gain * c.integral_max <= c.press_max_count + 1e-3f,
+          "默认下积分项自己就吃不掉整个单帧预算（gain×integral_max <= press_max）");
+    check(c.slew_count_per_frame > 0.0f, "默认启用限速（阻尼）");
+    check(c.baseline_tau_ms > 0.0f, "默认启用基线（开火前静止位置 = 保持目标）");
+}
+
 }  // namespace
 
 int main() {
-    std::printf("=== test_recoil_closed_loop 开火期闭环纠偏（压枪 v1）===\n");
+    std::printf("=== test_recoil_closed_loop 开火期闭环纠偏（压枪 v2 保持型积分修正）===\n");
     test_disabled_and_no_fire();
     test_observation_window();
     test_obs_drop_resets_immediately();
@@ -307,6 +422,9 @@ int main() {
     test_kp_immediate_output_for_tap_fire();
     test_baseline_mode();
     test_baseline_closed_loop();
+    test_anti_windup();
+    test_slew_limit();
+    test_v2_defaults();
     std::printf("结果: %d failures\n", failures);
     return failures == 0 ? 0 : 1;
 }

@@ -1107,6 +1107,8 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("pid_output_y", JsonValue::number(status.metrics.pid_output_y));
     m.set("scheduler_input_x", JsonValue::number(status.metrics.scheduler_input_x));
     m.set("scheduler_input_y", JsonValue::number(status.metrics.scheduler_input_y));
+    // 控制域误差（平滑瞄准点 − 参考点）：开火期闭环纠偏的输入量，判闭环效果只看它
+    m.set("aim_control_y", JsonValue::number(status.metrics.aim_control_y));
     // 压枪 v1 闭环遥测（面板 control_trace.recoil_cl 消费）
     m.set("recoil_cl_add_y", JsonValue::number(status.metrics.recoil_cl_add_y));
     m.set("recoil_cl_integral", JsonValue::number(status.metrics.recoil_cl_integral));

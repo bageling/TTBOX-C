@@ -905,14 +905,16 @@ CTRL_BLOCKS = [
         ('ramp3_enabled', 'b', False), ('ramp3_duration_ms', 'n', 2000.0),
         ('ramp3_start', 'n', 1.0), ('ramp3_middle', 'n', 0.5), ('ramp3_end', 'n', 0.1),
     ]),
-    # 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）——
-    #   开火后每一帧按实测偏差反向补一份下压，连续纠偏让弹道收敛；
+    # 开火期闭环纠偏（压枪 v2「保持型积分修正」，2026-09-29 实机「开始乱晃」定障后重做）——
+    #   开火后每一帧按实测偏差（相对"开火前静止位置"）反向补一份下压，连续纠偏让弹道收敛；
     #   不选枪 / 不录枪 / 不预采数据，没有可靠实时观测时整套不动作（不猜）。
+    #   ★ v2：kp 默认 0（P 归瞄准 PID，闭环只补 PID 缺的积分）；量级整体下调，
+    #     新增 slew_count_per_frame 限速（阻尼）。
     #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilClConfig 一字不差。
     ('recoil_cl', 'recoil_cl', [
-        ('enabled', 'b', False), ('kp', 'n', 0.5), ('gain', 'n', 2.0),
-        ('integral_max', 'n', 100.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 20.0),
-        ('baseline_tau_ms', 'n', 1500.0),
+        ('enabled', 'b', False), ('kp', 'n', 0.0), ('gain', 'n', 0.25),
+        ('integral_max', 'n', 12.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 3.0),
+        ('slew_count_per_frame', 'n', 0.3), ('baseline_tau_ms', 'n', 2000.0),
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
@@ -2025,6 +2027,9 @@ def collect_web_state() -> dict:
                     'target_point': {'x': m.get('target_point_x', 0), 'y': m.get('target_point_y', 0)},
                     'reference': {'x': m.get('reference_x', 0), 'y': m.get('reference_y', 0)},
                     'error': {'x': m.get('aim_error_x', 0), 'y': m.get('aim_error_y', 0)},
+                    # control_y = 控制域误差（平滑瞄准点 − 参考点），闭环纠偏的**输入量**。
+                    # error.y 是原始目标点误差（含检测框跳变）⇒ 判闭环效果只看 control_y。
+                    'control_y': m.get('aim_control_y', 0),
                     'pid_output': {'x': m.get('pid_output_x', 0), 'y': m.get('pid_output_y', 0)},
                     'scheduler_input': {'x': m.get('scheduler_input_x', 0), 'y': m.get('scheduler_input_y', 0)},
                     # 压枪 v1 闭环遥测（2026-09-29）：压枪此前零观测面，这里补上。

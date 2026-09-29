@@ -1,10 +1,42 @@
-// RecoilClosedLoop.hpp — 开火期闭环纠偏引擎（压枪 v1，业主 2026-09-29 裁定方案 A）
+// RecoilClosedLoop.hpp — 开火期闭环纠偏引擎（压枪 v2「保持型积分修正」）
 //
 // 定位
 // ----
 // 这是「有实时偏移就纠偏，没有实时偏移就不猜」这句定案的直接实现：
-// 开火后**每一帧**看实际偏了多少（error_y，像素），下一帧反向注入 count 把它拉回来，
+// 开火后**每一帧**看实际偏了多少（control_y，像素），下一帧反向注入 count 把它拉回来，
 // 连续纠偏，让弹道自己收敛在一个小区域里。不选枪、不录枪、不预采数据。
+//
+// 为什么必须由本模块补这一环（结构性理由）
+// ----------------------------------------
+// 瞄准 PID 的 Y 轴**没有积分**：AimThread.cpp:25 `pid_y_.init(25.0, 25.0, 0.0, ...)`
+// 第 3 个实参是 predict，而它只乘在积分通道上
+// （Pid1Controller.hpp:83 `ki_raw = (raw_velocity_input * predict) * integral_gain`）
+// ⇒ predict_y = 0 把 K_i 整个乘成 0 ⇒ 默认配置下 Y 轴只有 P+D。
+// 后坐力是**斜坡扰动**（枪口匀速上抬 ⇒ 目标框在画面里匀速下移），斜坡只有 I 项吃得掉：
+// P 必留稳态误差、D 在稳态下不干活。本模块 = 把这一环补回来。
+//
+// ★★ v2 重做（2026-09-29 16:xx，实机「开始乱晃」定障）
+// ----------------------------------------------------
+// v1 上板（V1.0.02/V1.0.03 测试版）后业主实测「更垃圾、开始乱晃」。板端记录器数据定障，
+// V1.0.03 测窗 74 个开火采样：
+//   · add_y 合计 713.8 count，同口径是 V1.0.02 的 11.6 倍（每采样 9.65 vs 0.83）；
+//   · 27% 采样顶死在 press_max_count=20（单帧 20 count，比瞄准 PID 整段输出
+//     scheduler_input_y ≈ 1.4 还大 14 倍 ⇒ 闭环成了开火期的主导驱动）；
+//   · i_term 最大 108，而单帧上限只有 20 ⇒ 积分自己就超上限 5 倍，积起来即永久顶格。
+// 结构病根三条（与增益高低无关）：
+//   ① **P 项与瞄准 PID 抢同一个执行器**。AimThread.cpp:819 `scaled_y += recoil_add_y`
+//      与 PID 输出同域相加，而 PID 本来就在闭环地把 control_y 往 0 拉
+//      ⇒ 同一个误差上叠两个控制器，等效 P 增益翻数倍 ⇒ 必然摆动。
+//      v1 之所以"看起来没坏"，只是因为基线扣除前输出近 0（27 秒 17 count）。
+//   ② **积分无抗饱和**：输出被限幅后积分继续积 ⇒ 顶格输出带拖尾，弹道压过头再被拉回。
+//   ③ **输出无阻尼**：整段没有限速/微分，250Hz 下任何检测跳变都变成整帧猛踢。
+// v2 改法（保留业主第一原则，只改结构）：
+//   · kp 默认 **0** —— P 是瞄准 PID 的职责，闭环只补 PID 缺的积分；
+//   · 积分抗饱和三件套：条件积分（顶上限那帧不积）+ 结构上限（积分项单独不得超单帧上限）
+//     + 限幅后反算回写；
+//   · 新增 slew_count_per_frame 限速（单帧输出变化上限）= 阻尼，防整帧猛踢；
+//   · 量级整体下调：press_max_count 20→2（≈325 px/s 下压能力，按 0.65 px/count）、
+//     gain 2.0→0.15、integral_max 100→10、底子 τ 1500→2000ms。
 //
 // 观测量：偏差减去慢基线（2026-09-29 15:3x，实机数据定案）
 // ------------------------------------------------------
@@ -13,12 +45,12 @@
 //     静止时 err_y ≈ -10~-20px）；
 //   · 后坐力把偏差往正方向推，但被负底子抵住 ⇒「只在正偏差压」的门槛几乎永远过不去
 //     （实测开火采样只有 41% 为正）。
-// 修法：观测量换成 e_hp = err − baseline。baseline 是**没开火时**用慢 EMA 跟踪的
-// 偏差底子（时间常数 baseline_tau_ms，默认 1.5s）；开火期间 baseline 冻结（不在开火中
-// 学底子，防止长喷时把后坐力也学进去）。实机数据离线复算：e_hp 在开火采样中 98% 为正、
-// 中位 +56px —— 后坐力信号从被埋住变成清晰可见。换目标/换世代时 baseline 一并清掉
-// （不同目标的几何底子不同）；baseline 未就绪（刚换目标就开火）时以第一帧播种、该帧不压。
-// baseline_tau_ms = 0 可退回第一版原始偏差口径（留作对照/回退开关）。
+// 修法：观测量换成 e_hp = control_y − baseline。baseline 是**没开火时**用慢 EMA 跟踪的
+// 偏差底子（时间常数 baseline_tau_ms，默认 2s），几何含义是"开火前瞄点静止在哪"，
+// 本模块因此成为一个**保持型**控制器：开火期间把瞄点稳在开火前那个位置上。
+// baseline 开火期间冻结（防止长喷把后坐力学进底子）；换目标/换世代全量清；
+// baseline 未就绪（刚换目标就开火）时以第一帧播种、该帧不压。
+// baseline_tau_ms = 0 可退回"原始偏差"口径（留作对照/回退开关）。
 //
 // 为什么是闭环而不是前馈
 // ---------------------
@@ -26,15 +58,6 @@
 // 而不同枪的后坐力速度/方向/节奏/水平偏移都不同 ⇒ 那个比例根本不存在
 // （业主 2026-09-29 指出）。闭环不需要它：枪是哪把、几倍镜、什么节奏，
 // 全部由**实时实测的偏移**自己表达。
-//
-// 比例 + 积分（2026-09-29 14:2x 业主令「先做 1」）
-// ------------------------------------------------
-//     press = kp × e_hp  +  gain × ∫e_hp dt
-//              └ 立刻纠 ┘      └ 补稳态残差 ┘
-// 比例项这一帧看到多少偏移就按比例给多少，不等积分累积 ⇒ 点射每段开火第一帧就有输出。
-// 单向：e_hp 为负（含 PID 开火瞬间向下过冲的 -100px 级深谷）一律不压、不上推。
-// ★ 过冲护栏：kp 与标定值 px_per_count 的乘积应 < 1（一帧内不把偏移全额拉回）。
-// e_hp 进入 P/I 前钳在 +100px（实测真信号 p90 ≈ 98px；+200px 级的是检测框跳变毛刺）。
 //
 // 观测边界（诚实说明，勿在文档/面板上过度承诺）
 // ---------------------------------------------
@@ -106,21 +129,50 @@ public:
             if (e > 100.0f) e = 100.0f;   // 毛刺钳位（真信号 p90≈98px，+200px 级是检测跳变）
         }
 
-        // ---- 比例项：这一帧看到多少偏移就按比例给多少 ----
-        float p_term = cfg.kp * e;
-        if (p_term < 0.0f) p_term = 0.0f;   // 单向：偏移在上方时不下压也不上推
-
-        // ---- 积分项：吃掉比例项留下的稳态残差 ----
         const float dt_s = dt_ms > 0.0f ? dt_ms / 1000.0f : 0.004f;
-        integral_ += e * dt_s;
-        if (integral_ < 0.0f) integral_ = 0.0f;
-        if (cfg.integral_max > 0.0f && integral_ > cfg.integral_max) integral_ = cfg.integral_max;
+        const float press_cap = cfg.press_max_count > 0.0f
+                                    ? cfg.press_max_count
+                                    : std::numeric_limits<float>::infinity();
+
+        // ---- 比例项（默认 0；P 是瞄准 PID 的职责，非 0 即与 PID 抢执行器）----
+        float p_term = cfg.kp * e;
+        if (p_term < 0.0f) p_term = 0.0f;
+
+        // ---- 积分项（本模块存在的全部理由：Y 轴 PID 没有 I）----
+        // 抗饱和三件套：
+        //   ① 条件积分：上一帧输出已顶上限（saturated_）就不再继续积；
+        //   ② 结构上限：积分项**单独**不得超过单帧上限（i_cap = press_cap）；
+        //   ③ 反算回写：限幅后把积分拉回"刚好等于限幅值"的位置，去掉多余卷绕。
+        if (!saturated_) {
+            integral_ += e * dt_s;
+            if (integral_ < 0.0f) integral_ = 0.0f;
+            if (cfg.integral_max > 0.0f && integral_ > cfg.integral_max) integral_ = cfg.integral_max;
+        }
         float i_term = cfg.gain * integral_;
         if (i_term < 0.0f) i_term = 0.0f;
+        if (i_term > press_cap) {
+            i_term = press_cap;
+            if (cfg.gain > 0.0f) integral_ = press_cap / cfg.gain;   // ③ 反算回写
+        }
 
         float press = p_term + i_term;
         if (press < 0.0f) press = 0.0f;
-        if (cfg.press_max_count > 0.0f && press > cfg.press_max_count) press = cfg.press_max_count;
+        bool saturated = false;
+        if (press > press_cap) {
+            press = press_cap;
+            saturated = true;
+        }
+
+        // ---- 限速（阻尼）：单帧输出变化不超过 slew_count_per_frame ----
+        // 无阻尼的闭环在 250Hz 上会把任何检测跳变变成整帧猛踢（v1 摆动的直接手感受体）。
+        if (cfg.slew_count_per_frame > 0.0f) {
+            const float lo = add_y_ - cfg.slew_count_per_frame;
+            const float hi = add_y_ + cfg.slew_count_per_frame;
+            if (press < lo) press = lo;
+            if (press > hi) press = hi;
+            if (press < 0.0f) press = 0.0f;
+        }
+        saturated_ = saturated;
 
         add_y_ = press;
         p_term_ = p_term;
@@ -155,6 +207,7 @@ private:
         add_y_ = 0.0f;
         p_term_ = 0.0f;
         i_term_ = 0.0f;
+        saturated_ = false;
     }
 
     float integral_ = 0.0f;   // 累积偏移（px·s）
@@ -162,6 +215,7 @@ private:
     float add_y_ = 0.0f;      // 上一帧下压量（count，已限幅）
     float p_term_ = 0.0f;     // 上一帧比例项（限幅前，count）
     float i_term_ = 0.0f;     // 上一帧积分项（限幅前，count）
+    bool saturated_ = false;  // 上一帧输出是否顶到单帧上限（条件积分用）
     float baseline_ = std::numeric_limits<float>::quiet_NaN();  // 偏差底子（px；NaN=未就绪）
 };
 

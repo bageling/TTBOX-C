@@ -5617,14 +5617,16 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <div class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</div>
                     <div class="tile-subtitle">开火期闭环纠偏（自动适应，不用选枪）</div>
                     <div class="field-hint">开火后每一帧看实际偏了多少、下一帧反向补回来，连续纠偏让弹道自己收敛；不需要选枪、录枪或提前采数据。没有可靠的实时观测时整套不动作 —— 宁可前几发不压，也不拿上一次开火的经验去猜。</div>
+                    <div class="field-hint">它补的是瞄准本身补不了的那一环：纵向没有「积分」，枪口匀速上抬这种持续偏移只能靠积分吃掉。所以这套的正确用法是<b>慢修正</b>——慢慢把弹道拉回来，不是一帧猛踢。</div>
                     <div class="field-hint">开着它的时候，上面的三段查表整套停用（两套不会叠加，避免过压和来回摆）；关掉就完全走老引擎。想对比两套效果，只切这一个勾就行。</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="check-line"><input id="recoil_cl_enabled" data-config type="checkbox"> 启用闭环纠偏（顶替上面的三段查表）</label>
-                      <label class="field">即时纠偏比例<input id="recoil_cl_kp" data-config type="number" min="0" step="0.1"><span class="field-hint">这一帧看到多少像素偏移，就按这个比例立刻补下压，不等累计。点射靠的就是它。填大了会来回摆。</span></label>
-                      <label class="field">纠偏强度<input id="recoil_cl_gain" data-config type="number" min="0" step="0.5"><span class="field-hint">每累计 1 像素·秒的偏差补多少 count 下压。压不够就加，压过头就减。</span></label>
-                      <label class="field">积分上限 px·s<input id="recoil_cl_integral_max" data-config type="number" min="0" step="10"><span class="field-hint">偏差累计到这么多就不再涨，防止越压越狠。</span></label>
+                      <label class="field">即时纠偏比例<input id="recoil_cl_kp" data-config type="number" min="0" step="0.1"><span class="field-hint">默认 0，不要动。瞄准本身已经有一份比例纠正，这里再加一份就是两条腿抢同一个轮子 ⇒ 会来回摆（上一版摆动的真凶）。</span></label>
+                      <label class="field">纠偏强度<input id="recoil_cl_gain" data-config type="number" min="0" step="0.05"><span class="field-hint">每累计 1 像素·秒的偏差补多少 count 下压，也就是"修得快不快"。压不够就加，开始摆就减。</span></label>
+                      <label class="field">积分上限 px·s<input id="recoil_cl_integral_max" data-config type="number" min="0" step="1"><span class="field-hint">偏差累计到这么多就不再涨，防止越压越狠。</span></label>
                       <label class="field">起步观测帧数<input id="recoil_cl_start_frames" data-config type="number" min="1" step="1"><span class="field-hint">连续看清目标这么多帧后才开始压；前面几帧不压是故意的。</span></label>
-                      <label class="field">单帧下压上限<input id="recoil_cl_press_max_count" data-config type="number" min="0" step="1"><span class="field-hint">一帧最多补这么多 count（0 = 不限），作为安全阀。</span></label>
+                      <label class="field">单帧下压上限<input id="recoil_cl_press_max_count" data-config type="number" min="0" step="0.5"><span class="field-hint">一帧最多补这么多 count（0 = 不限），作为安全阀。按 0.65 px/count 算，3 ≈ 每秒 490 像素的下压能力。</span></label>
+                      <label class="field">单帧变化上限<input id="recoil_cl_slew_count_per_frame" data-config type="number" min="0" step="0.1"><span class="field-hint">每帧输出最多变这么多 count（0 = 不限）= 阻尼，防止一帧猛踢。这是压摆动的旋钮。</span></label>
                       <label class="field">底子学习速度 ms<input id="recoil_cl_baseline_tau_ms" data-config type="number" min="0" step="100"><span class="field-hint">没开火时学"平时偏差底子"的速度，越小跟得越快。0 = 不学底子（第一版口径，一般更差）。</span></label>
                     </div>
                   </div>
@@ -6749,12 +6751,13 @@ const BB_CTRL_MODULES = [
   ]],
   ["recoil_cl", [
     ["enabled", "b", false],
-    ["kp", "n", 0.5],
-    ["gain", "n", 2.0],
-    ["integral_max", "n", 100.0],
+    ["kp", "n", 0.0],
+    ["gain", "n", 0.25],
+    ["integral_max", "n", 12.0],
     ["start_frames", "i", 6],
-    ["press_max_count", "n", 20.0],
-    ["baseline_tau_ms", "n", 1500.0],
+    ["press_max_count", "n", 3.0],
+    ["slew_count_per_frame", "n", 0.3],
+    ["baseline_tau_ms", "n", 2000.0],
   ]],
   ["trigger2", [
     ["enabled", "b", false],
