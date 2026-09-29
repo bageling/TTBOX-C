@@ -2,6 +2,9 @@
 
 一台用 **AI 看画面、自动动鼠标** 的边缘计算盒子。
 
+当前出货版本：**`V1.0.01`**。版本号的写法有讲究（**不能改成纯数字**），原因见
+[第九节](#九版本与交付)。
+
 ```text
 电脑画面 ──HDMI 线──▶ TTBOX 盒子（RK3588）
                           │
@@ -89,6 +92,7 @@ http://<盒子IP>:8000
 | 网页 | Python 服务，端口 8000 |
 | 预览 | Python 服务，端口 8001 |
 | 鼠标注入 | 自研 `usbproxy` |
+| 出货版本 | `V1.0.01` |
 
 ### 板端服务
 
@@ -120,7 +124,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ├── releases/<版本>/            各版本运行树（历史留档，可回滚）
 ├── plugins -> current/plugins   过渡软链（兼容旧硬编码路径）
 ├── scripts -> current/scripts   过渡软链（同上）
-├── config/                      运行配置（真源 = /etc/ttbox/config.d/）
+├── config/                      随包携带的其它配置（显示 / 凭据），**不是运行参数写回目标**
 └── models/                      已安装模型
 ```
 
@@ -153,13 +157,15 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ├── config/             开发侧配置模板
 ├── deploy/             systemd 单元 / 出厂配置 / 依赖说明
 ├── docs/               文档中心（见 docs/README.md）
-└── tests/              板端集成 / 监控 / API 验收脚本
+├── tests/              板端集成 / 监控 / API 验收脚本
+├── preview_server.py   预览服务的独立入口（调试用）
+└── pyproject.toml      Python 侧工程配置（pytest 口径）
 ```
 
 各顶层目录的职责与「是否进 payload（release 树）」：
 
 | 目录 | 中文功能 | 职责 | 是否进 payload |
-|---|---|---|:--:|
+|---|---|---|---|
 | `core/` | 核心引擎 | C++ AI 核心唯一构建源树（采集 → 推理 → 瞄准 → 输出） | 仅 `bin/ttbox_core_main` |
 | `plugins/` | 插件 | 网页控制台(8000) / 预览(8001) / model / fan / wifi / network / monitor / log / system / upgrade | ✅ 整包 |
 | `framework/` | 框架 | 插件发现 / 安装 / 生命周期 / 权限；web 运行期硬依赖 | ✅ 整包 |
@@ -167,7 +173,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 | `usbproxy/` | 鼠标代理 | Raw Gadget 鼠标注入代理（含预编译 ELF） | ✅ 整包 |
 | `scripts/` | 运维脚本 | 构建/发布/运维 + edid 工具链（★FHS 锚定，**不可移动**） | **白名单点名**：`edid/` + `deploy/pack_manifest.txt` 里逐个列出的 `ttbox*.sh` / `ttbox_*.py` |
 | `deploy/` | 部署输入 | systemd 单元 / 出厂配置 / OTA 公钥 / 已启用 HDMI-RX 的 DTB | 仅 `systemd/*.{service,timer,path}` + `config/{00-factory,10-device,hardware_display}.json` + `keys/*.pub` + `dtb/*.dtb` |
-| `config/` | 配置模板 | 开发侧模板（运行期真值在 `/opt/ttbox/config`、`/etc/ttbox`） | ❌ |
+| `config/` | 配置模板 | 开发侧模板（运行期真值在 `/etc/ttbox/config.d/`） | ❌ |
 | `platform/` | 平台骨架 | V1 实验骨架，代码级不可达 | ❌（出厂即不随包，定案 H-26 / S1） |
 | `image/` | 出厂镜像 | 厂商整机镜像烘焙链（loop 挂载 + chroot 自检） | ❌ |
 | `tools/` | 离线工具 | 模型转换 / 许可签发 / OTA 签名（不在板端跑） | ❌ |
@@ -232,13 +238,14 @@ HDMI 画面
 
 ## 六、配置怎么改
 
-板端真正的运行配置：
+板端运行参数的**真源**是 `/etc/ttbox/config.d/`：
 
 ```text
-/opt/ttbox/config/default.json
+/etc/ttbox/config.d/00-factory.json   出厂基线（只读，装机器时落盘）
+/etc/ttbox/config.d/10-device.json    客户层（按文件名升序深合并，盖在基线之上）
 ```
 
-仓库里的 `config/default.json` 只是模板。
+**写回目标只有 `config.d/10-device.json` 这一个文件。**
 
 改配置推荐用网页：
 
@@ -246,18 +253,29 @@ HDMI 画面
 PUT /api/config
 ```
 
-它是"深合并"：只改你传的字段，其它参数不会被冲掉。
+它写回上面那个文件，而且是"深合并"：只改你传的字段，其它参数不会被冲掉。
 
-几个关键配置：
+> 别改错地方：
+> - `/opt/ttbox/config/` 里是**随包携带的其它配置**（`hardware_display.json` 显示配置、
+>   `default.json` Web 云端凭据），**不是运行参数的写回目标**。
+> - 仓库里的 `config/default.json` 只是**本机开发样例**，它的共享键必须与
+>   `deploy/config/00-factory.json` 同值（门禁断言防漂移）；出厂基线唯一 = `deploy/config/`。
+> - 运行期配置的**单一写入者是 Core**（`SET_CONFIG` IPC → `ConfigManager::persist`）。
+>   Web 侧不直接读写配置文件，读配置一律走 Core IPC（`GET_CONFIG`）。
+
+配置分两层，出厂配置里能看到的：
 
 | 配置 | 作用 |
 |---|---|
 | `output_enabled` | 总开关，是否允许鼠标输出 |
 | `mouse.enabled` | 鼠标注入开关 |
-| `mouse.aim_hotkey` / `aim_hotkey2` | 注入热键 |
+| `worker_cores` | 推理线程绑定的 CPU 核心，出厂值 `"1,2,4"` |
+| `capture_device` / `capture_width` / `capture_height` | HDMI 采集设备与分辨率 |
 | `rknn_external_dma_input` | 是否让 RGA 的 DMA-BUF 直连 NPU（**当前默认关**）。XOR `0x80` 重映射已实现并有单测（`core/src/rknn/InputQuant.hpp`，判定谓词 = INT8 ∧ NHWC ∧ AFFINE ∧ `zp == -128`；`core/tests/test_input_quant.cpp`）。默认仍关的原因不是缺代码，而是尚无通过板端实测的合格模型：该快路径只对满足上述谓词的 INT8 模型生效，当前主用模型是 FP16（分类为 `kCompatible`，零拷贝结构性不可用），打开开关对它没有任何效果。换 INT8 模型并经板端实测后再开。 |
-| `model_id` | 当前激活模型 |
-| `worker_cores` | 推理线程绑定的 CPU 核心 |
+
+另一层是**运行时档案** `runtime_profile`，开机由 Core 装配，热键、瞄具倍率、压枪这些都在里面，
+例如 `mouse.aim_hotkey` / `mouse.aim_hotkey2` / `mouse.aim_hotkey_mode`。它不在出厂配置文件里，
+读它同样走 `GET_CONFIG`，结果在 `data.runtime_profile` 段。
 
 路径 / 常量 / 配置键 / 环境变量的**唯一真源**是 [`docs/protocols/config-path-env-registry.md`](docs/protocols/config-path-env-registry.md)，
 由 `bash scripts/ttbox_conventions_gate.sh` 断言（退出码 0 = PASS）。
@@ -290,6 +308,10 @@ bash scripts/ttbox_build_release.sh   # 出货构建（先提交，否则留档 
 bash scripts/ttbox_pack_ota.sh        # 打包 + 签名
 ```
 
+> 出货构建必须显式带 `TTBOX_BUILD_DIR=build-aarch64-t148 -DCMAKE_SYSROOT=/root/sysroot
+> -DCMAKE_TOOLCHAIN_FILE=deploy/cmake/toolchain-aarch64.cmake`——脚本默认那套是 t114 且缺 sysroot，
+> 会直接 FATAL 退出。每次构建的留档写在 [`docs/build/release-records/`](docs/build/release-records/)。
+>
 > `usbproxy/usb-proxy` 是**入库的预编译 ELF**，不随版本重建。需要重建时在 WSL 里 `make`，
 > 产物按 [`docs/build/build-reproducibility.md`](docs/build/build-reproducibility.md) §11
 > 回收入库（重建 → 覆盖入库件 → 重算 `.sha256`）。
@@ -301,22 +323,33 @@ bash scripts/ttbox_pack_ota.sh        # 打包 + 签名
 ### 本机单元测试
 
 ```bash
+# C++ 侧
 cd core
-cmake --build build-win -j8
-ctest --test-dir build-win --output-on-failure
+cmake --build build-ascii -j8
+ctest --test-dir build-ascii --output-on-failure
+
+# Python 侧（必须显式列出三个目录并带 PYTHONPATH=.）
+PYTHONPATH=. python -m pytest framework/tests platform/tests plugins/web/tests -q
+
+# 口径门禁 + 文档链接
+bash scripts/ttbox_conventions_gate.sh
+python docs/check_links.py
 ```
 
-当前状态（2026-09-23 本机实测）：
+当前状态（2026-09-29 本机实测）：
 
 | 套件 | 结果 |
 |---|---|
-| Core CTest（构建目录 `core/build-ascii`） | **35 / 35 passed** |
-| `plugins/web/tests`（pytest） | **289 passed** |
-| `framework` + `platform`（pytest，`PYTHONPATH=.`） | **92 passed** |
+| Core CTest（构建目录 `core/build-ascii`） | **39 / 39 passed** |
+| C++ 单测断言（同一产物的汇总行） | **222 passed / 1 skipped / 0 failed** |
+| `framework/tests` + `platform/tests` + `plugins/web/tests`（pytest） | **563 passed** |
 | `scripts/ttbox_conventions_gate.sh` | **PASS**（退出码 0） |
 | `python docs/check_links.py` | **broken_count=0** |
 
-> 计数以命令实际输出为权威锚，本表不写死历史数字。
+> 计数以命令实际输出为权威锚，本表不写死历史数字。判据看 **0 failed**，别钉条数。
+>
+> C++ 单测是**一个单体二进制** `ttbox_core_tests`，不带参数跑全部；
+> `ctest -R 某个用例名` 会报 `No tests were found`，那是用法问题不是用例缺失。
 
 ### 板端常用验证
 
@@ -330,10 +363,56 @@ python3 core/tests/usbproxy_buttontest.py
 
 ---
 
-## 九、当前真实状态（2026-09-13 实测快照）
+## 九、版本与交付
+
+### 版本号为什么必须带字母前缀
+
+当前产品版本 **`V1.0.01`**，真源是 `core/include/ttbox/core/version.hpp::kCoreVersion`。
+
+**不要把它改成纯数字 `1.0.01`。** 原因是板子判"云端这个包能不能升"只看版本串排序，
+而这套排序规则在三个地方各写了一份（板端更新器 `scripts/ttbox_ota_updater.py`、
+面板 `plugins/web/bin/ttbox-web.py`、云端 bridge `ota.js`），规则是
+**字母段排在数字段之前**：
+
+| 比较 | 结果 |
+|---|---|
+| `V1.0.01` vs `1.5.70` | `V1.0.01` 更新，可以升 ✅ |
+| `1.0.01` vs `1.5.70` | `1.0.01` 更旧，判为降级、直接拒装 ❌ |
+
+麻烦的地方在于：**这两段判定代码跑在盒子已经装好的旧版本里**，改仓库源码救不了现网的盒子。
+只要新旧版本之间要跨这条线，新版本就必须带字母前缀。回归锁在
+[`plugins/web/tests/test_web_ota_version_scheme.py`](plugins/web/tests/test_web_ota_version_scheme.py)。
+
+CMake 的 `project(VERSION)` 只认数字，所以 `core/CMakeLists.txt` 里写的是**去掉前缀的数字镜像**
+`1.0.01`。口径门禁第 ⑥ 项断言「`kCoreVersion` 去掉前导字母 == CMake VERSION」，不一致就红。
+
+> 副作用：手工把版本退回 `1.5.x` 会被 OTA 判成降级、装不上去。
+> 唯一例外是健康检查失败后的**自动回滚**——那是保命路径，不走这道闸。
+
+### 出货链路
+
+```text
+改代码 → 提交 → 本机全绿 → WSL 交叉构建（留档）→ 打包签名 → 云端入库 → 切 latest → 板端点「检查更新」
+```
+
+| 步骤 | 命令 / 位置 |
+|---|---|
+| 交叉构建 | `bash scripts/ttbox_build_release.sh`，留档写进 [`docs/build/release-records/`](docs/build/release-records/) |
+| 打包签名 | `bash scripts/ttbox_pack_ota.sh`，产物 `ttbox-<版本>.ota.tgz` |
+| 云端发布 | 云端管理页「版本管理」；`/ota/latest` 决定盒子拉哪个包 |
+
+> 板子**不会自己拉云端**。OTA 只由面板上「检查更新」按钮触发，没点就不会检查。
+
+已知副作用：云端版本管理页是按 `versionCode` 倒序排的，而 `V1.0.01` 的 versionCode
+（100001）比 `1.5.xx`（105xxx）小，所以在列表里排最后一行。这不影响功能
+（盒子只认 `/ota/latest` 那一个字段）。
+
+---
+
+## 十、一次实测快照（2026-09-13）
 
 > 注意：本表是 **2026-09-13 的一次实测快照**，不等于当前默认值。之后有过变更的条目已在表内直接标注。
-> 若与配置默认值或代码冲突，以 `config/default.json`、`deploy/config/` 与源码为准。
+> 若与配置默认值或代码冲突，以 `deploy/config/00-factory.json`、`/etc/ttbox/config.d/` 与源码为准。
 
 | 项目 | 数据 |
 |---|---|
@@ -348,7 +427,7 @@ python3 core/tests/usbproxy_buttontest.py
 
 ---
 
-## 十、文档
+## 十一、文档
 
 文档中心只保留**与代码有引用关系**的文档。入口与"谁引用谁"的对照表见
 [`docs/README.md`](docs/README.md)；分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)。
@@ -358,6 +437,7 @@ python3 core/tests/usbproxy_buttontest.py
 | 协议与规格 | [`docs/protocols/`](docs/protocols/) |
 | 配置/常量/路径口径 | [`docs/protocols/config-path-env-registry.md`](docs/protocols/config-path-env-registry.md) |
 | 构建可复现 | [`docs/build/build-reproducibility.md`](docs/build/build-reproducibility.md) |
+| 出货构建留档 | [`docs/build/release-records/`](docs/build/release-records/) |
 | 板端依赖与出货约束 | [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md) |
 | 服务账号约定 | [`platform/supervisor/README.md`](platform/supervisor/README.md) |
 | 历史交接 | [`docs/handover/`](docs/handover/) |
@@ -367,7 +447,7 @@ python3 core/tests/usbproxy_buttontest.py
 
 ---
 
-## 十一、常见问题
+## 十二、常见问题
 
 **网页打不开？**
 检查 `ttbox-web` 服务是否 active，检查防火墙，确认浏览器地址是 `http://<盒子IP>:8000`。
@@ -381,8 +461,15 @@ python3 core/tests/usbproxy_buttontest.py
 **模型库选项乱跳？**
 不要手动改 `model_id` 配置。模型切换只走网页模型库或 `/api/models/select` 接口。
 
+**面板上点了「检查更新」但没反应？**
+板子不会自己定时去云端拉包，只有点按钮才会查。查完如果云端版本比板端新，才会出升级入口。
+
+**改配置没生效？**
+确认改的是 `/etc/ttbox/config.d/10-device.json`（真源 + 唯一写回目标）。改 `/opt/ttbox/config/default.json`
+或者仓库里的 `config/default.json` 都不会影响运行期行为。
+
 **板端文件装在哪个目录？**
-TTBOX 的一切代码、配置、模型和运行状态都在 `/opt/ttbox` 内，不依赖其它目录。
+TTBOX 的一切代码、配置、模型和运行状态都在 `/opt/ttbox` 内，运行参数真源在 `/etc/ttbox/config.d/`。
 
 ---
 

@@ -225,9 +225,12 @@ bash scripts/ttbox_conventions_gate.sh --selftest   # 门禁 + 负向控制（�
 #       ② 无未登记 RUNTIME/BUILD env
 #       ③ 无同义异名 env（TTBOX_CONFIG_PATH / TTBOX_MODEL_ROOT / TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT / TTBOX_WEB_HOST）
 #       ④ V-03 共享键同值（config/default.json 与 deploy/config/default.json.prod ↔ 00-factory.json）
-#       ⑤ 跨语言同值常量（socket / 端口 8000 / EDID attempts 12 / 心跳 60·180）
-#       ⑥ 版本同值（version.hpp == CMakeLists）
+#       ⑤ 跨语言同值常量（socket×3 / 端口 8000 / EDID attempts 2 / 心跳 60·180）
+#       ⑥ 版本同值（version.hpp::kCoreVersion **去掉字母前缀** == CMakeLists project VERSION；
+#          产品版本走 V 线时为 "V1.0.01"，CMake 只解析数字 ⇒ 那边写数字镜像 "1.0.01"）
 #       ⑦ 无补丁残迹（hardware_display.json 单点；systemd_units.py / runner.py 已删）
+#       ⑧ 出货 Python 无绝对路径 sys.path.insert
+#       ⑨ 无 TTBOX_PROJECT_ROOT 兜底 #define（强制由 CMake -D 注入）
 # 退出码 0 = PASS
 ```
 
