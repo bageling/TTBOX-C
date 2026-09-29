@@ -17,6 +17,8 @@
 //   ⑨ ★ v2 新增不变量（2026-09-29 16:xx 实机「开始乱晃」定障后补）：
 //      抗饱和（积分项单独不得超单帧上限 + 限幅后反算回写 + 饱和期停止累积）、
 //      输出限速（单帧变化上限 = 阻尼）、以及"v1 那套参数再也积不到 5 倍上限"的回归保护。
+//   ⑩ ★ V1.0.06 新增不变量（2026-09-29 20:57 实机「一会儿压得狠、一会儿压根不压」定障）：
+//      基线学习的**几何门槛** —— |err_y| > 40px 的帧整帧不学，防开火间隙转头/瞄地面把零点带跑；
 //
 // 对应实现：core/src/mouse/RecoilClosedLoop.hpp
 // 接线点：  core/src/aim/AimThread.cpp（obs_ok 构造 + control_y 作观测量）
@@ -301,6 +303,59 @@ void test_baseline_closed_loop() {
     check(peak_hp < 0.5f * open_loop, "峰值远小于开环累计");
 }
 
+// Case15: 基线学习的几何门槛（V1.0.06 新增）—— 只有"目标就在画面中心附近"的帧才学底子
+//
+// 2026-09-29 20:57 实机定障：`track_baseline` 以 τ=2000ms 慢学"没开火时瞄在哪"当零点，但**没有几何门槛**
+// ⇒ 开火间隙转头/瞄地面时瞄点跑到画面边缘，归一域偏差冲到 ±300px，EMA 被拉走且 2 秒回不来
+// ⇒ 下一段开火直接拿着跑偏的零点压（实测 13 段 base 从 -281 跨到 +0.7，顶格率 0% ↔ 88%，
+//   即业主所感「一会儿压得狠、一会儿压根不压」）。
+// 修法：|err_y| > 40px 的帧**整帧不学**（不是钳位 —— 钳位会把 -281 学成 -40，仍偏离真实零点）。
+void test_baseline_geometry_gate() {
+    std::printf("[Case15] 基线几何门槛：大偏差帧整帧不学（含边界 40px）\n");
+    RecoilClConfig cfg = make_cfg();
+    cfg.baseline_tau_ms = 1500.0f;
+
+    // ① 全程大偏差 ⇒ 底子始终未就绪（NaN），不会被带跑
+    {
+        RecoilClosedLoop rc;
+        for (int i = 0; i < 400; ++i) rc.track_baseline(300.0f, 4.0f, cfg);
+        check(!(rc.baseline() == rc.baseline()), "全是大正偏差 ⇒ 底子仍未就绪（NaN != NaN）");
+        for (int i = 0; i < 400; ++i) rc.track_baseline(-300.0f, 4.0f, cfg);
+        check(!(rc.baseline() == rc.baseline()), "反方向大偏差同样不学");
+    }
+
+    // ② 门槛内正常学
+    RecoilClosedLoop rc;
+    for (int i = 0; i < 300; ++i) rc.track_baseline(-15.0f, 4.0f, cfg);
+    check(rc.baseline() > -18.0f && rc.baseline() < -12.0f, "门槛内（15px）照常收敛到 -15px 附近");
+
+    // ③ 底子已就绪后再来大偏差 ⇒ 底子一动不动（复现开火间隙转头那一下）
+    const float bl = rc.baseline();
+    for (int i = 0; i < 300; ++i) rc.track_baseline(280.0f, 4.0f, cfg);
+    check(rc.baseline() == bl, "已就绪后的大偏差不改变底子");
+    for (int i = 0; i < 300; ++i) rc.track_baseline(-280.0f, 4.0f, cfg);
+    check(rc.baseline() == bl, "两个方向的大偏差都不改变底子");
+
+    // ④ 边界：恰好 40px 学进去，40.1px 不学
+    {
+        RecoilClosedLoop r_in;
+        r_in.track_baseline(40.0f, 4.0f, cfg);
+        check(r_in.baseline() == 40.0f, "恰好 40px：学（门槛含等于）");
+        RecoilClosedLoop r_out;
+        r_out.track_baseline(40.1f, 4.0f, cfg);
+        check(!(r_out.baseline() == r_out.baseline()), "40.1px：不学（整帧跳过）");
+    }
+
+    // ⑤ 门槛不影响"开火中冻结"：门槛只是不学，不改冻结语义
+    {
+        RecoilClosedLoop r2;
+        for (int i = 0; i < 300; ++i) r2.track_baseline(-15.0f, 4.0f, cfg);
+        const float b0 = r2.baseline();
+        for (int i = 0; i < 50; ++i) r2.update(true, true, true, 60.0f, 4.0f, cfg);
+        check(r2.baseline() == b0, "开火（update）期间底子不变");
+    }
+}
+
 // Case12: 抗饱和（v2 新增）—— 积分项单独不得超单帧上限 + 反算回写 + 饱和期停止累积
 //
 // v1 的实机故障：integral_max=100、gain=2.0 ⇒ 积分项最大 200，而单帧上限只有 20
@@ -430,6 +485,7 @@ int main() {
     test_anti_windup();
     test_slew_limit();
     test_v2_defaults();
+    test_baseline_geometry_gate();
     std::printf("结果: %d failures\n", failures);
     return failures == 0 ? 0 : 1;
 }

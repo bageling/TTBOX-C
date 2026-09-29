@@ -199,6 +199,18 @@ private:
     // 修法：PID 输入误差除以 M（等价于 kp/M），kp 保持腰射值即可通吃各倍镜。
     // 无档命中 / 未配置时 = 1.0 ⇒ 与加此机制前逐字节一致。
     float active_zoom_scale_ = 1.0f;
+    // ---- V1.0.06：压枪观测的「短暂丢目标容忍」----
+    // 定障（2026-09-29 21:00 实机，MR277 + 无框瞄具）：开火段内 has_tgt/nbox 每 60~90ms
+    // （约一个推理帧的节奏）跳一次 0，而 RecoilClosedLoop::update() 只要 obs_ok=false 就
+    // reset_fire() 清积分 ⇒ 积分永远爬不过 start_frames ⇒ 输出≈0
+    //（实测 8 秒开火窗内 intg 峰值仅 1.1，而满格需要 12；顶格率全段 0%）。
+    // 修法：锁定中若目标**短暂**丢失，容忍窗内沿用上一次有效观测继续压；超窗即严格清零。
+    // 依据：实测丢失间隔 60~90ms ⇒ 取 150ms 可覆盖连续两次丢帧，又不至于"打幽灵"。
+    // ★ 只放宽压枪这一路；瞄准侧不动 —— TargetSelector 在无检测时仍立即返回 invalid，
+    //   那是"不允许凭旧坐标产生移动"的安全红线（见 TargetSelector.cpp:131）。
+    static constexpr uint64_t kClObsHoldUs = 150000ull;   // 150 ms
+    uint64_t last_cl_obs_us_ = 0;    // 最近一次"有目标 && 框高稳定"的时刻（0 = 尚未起算）
+    float last_cl_err_y_ = 0.0f;     // 该时刻的归一域误差（容忍窗内沿用）
     // ---- V3 阶段 5：拟人化抖动前馈扣除（2026-09-28）----
     // 两条拟人化链（humanize / personal_trajectory）都只往输出里"加"抖动，
     // 但抖动会在 response_delay_ms（实测 51ms）之后出现在采集画面里，被 PID 当成

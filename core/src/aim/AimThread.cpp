@@ -38,6 +38,8 @@ void AimThread::reset_runtime_state() {
     personal_shader_.reset();
     recoil_.reset();
     recoil_cl_.reset();        // 压枪 v1：闭环积分与观测计数随世代清零
+    last_cl_obs_us_ = 0;       // V1.0.06：短暂丢失容忍窗随之清零（跨世代不继承）
+    last_cl_err_y_ = 0.0f;
     // BB 对标第二批（2026-09-24）：新模块状态同样必须随世代清零，禁止 A 模型状态漏到 B
     lead_pred_.reset();
     humanize_shaper_.reset();
@@ -417,6 +419,8 @@ void AimThread::loop() {
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                     recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）
                     recoil_cl_.reset();  // 压枪 v1：换目标 ⇒ 旧目标的观测作废，重新累积
+                    last_cl_obs_us_ = 0;  // V1.0.06：容忍窗基准一并作废，防跨目标沿用旧误差
+                    last_cl_err_y_ = 0.0f;
                     lead_pred_.reset();       // BB 提前量：新目标重新收帧/清零积分
                     anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
                     humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
@@ -731,19 +735,36 @@ void AimThread::loop() {
             //   active_zoom_scale_ 默认 1.0 ⇒ 腰射与未配置档位逐字节不变。
             const float cl_zoom = (std::isfinite(active_zoom_scale_) && active_zoom_scale_ > 0.0f)
                                       ? active_zoom_scale_ : 1.0f;
-            const float cl_err_y = control_y / cl_zoom;   // 归一域误差（px，腰射当量）
+            const float cl_err_y_now = control_y / cl_zoom;   // 归一域误差（px，腰射当量）
             const bool cl_hotkey = RecoilController::fire_hotkey_active(hotkey_bits, recoil_cfg);
             // 没开火但有目标：慢 EMA 学"偏差底子"（静态瞄准偏移）。★底子与误差同域（都归一过）。
             // 开火期间不学（冻结），防长喷把后坐力本身学进底子 —— 见 RecoilClosedLoop.hpp 文件头。
             if (target_ok && !cl_hotkey) {
-                recoil_cl_.track_baseline(cl_err_y, dt_ms, recoil_cl_cfg);
+                recoil_cl_.track_baseline(cl_err_y_now, dt_ms, recoil_cl_cfg);
             }
+            // ★★ V1.0.06：新鲜观测 = 有目标 && 框高稳定；若非新鲜但距上次新鲜仍在容忍窗内，
+            //   沿用上次归一域误差继续压（不清积分）。定障与取值依据见 AimThread.hpp kClObsHoldUs。
             bool cl_obs_ok = false;
-            if (target_ok && cl_hotkey) {
-                const float cl_box_h = selected.box.y2 - selected.box.y1;
-                const float cl_box_h_ema = tracker_.state().box_h_ema;
-                cl_obs_ok = (cl_box_h_ema <= 0.0f) ||
-                            (std::abs(cl_box_h - cl_box_h_ema) <= 0.35f * cl_box_h_ema);
+            float cl_err_y = cl_err_y_now;
+            if (cl_hotkey) {
+                bool obs_fresh = false;
+                if (target_ok) {
+                    const float cl_box_h = selected.box.y2 - selected.box.y1;
+                    const float cl_box_h_ema = tracker_.state().box_h_ema;
+                    obs_fresh = (cl_box_h_ema <= 0.0f) ||
+                                (std::abs(cl_box_h - cl_box_h_ema) <= 0.35f * cl_box_h_ema);
+                }
+                if (obs_fresh) {
+                    last_cl_obs_us_ = task.timestamp_us;
+                    last_cl_err_y_ = cl_err_y_now;
+                    cl_obs_ok = true;
+                } else if (last_cl_obs_us_ != 0 && task.timestamp_us > last_cl_obs_us_ &&
+                           (task.timestamp_us - last_cl_obs_us_) <= kClObsHoldUs) {
+                    cl_obs_ok = true;      // 容忍窗内：沿用上次有效观测（不清积分、不切目标）
+                    cl_err_y = last_cl_err_y_;
+                }
+            } else {
+                last_cl_obs_us_ = 0;       // 松开开火键 ⇒ 下次开火重新起算
             }
             const auto cl_out = recoil_cl_.update(
                 recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, cl_err_y, dt_ms, recoil_cl_cfg);

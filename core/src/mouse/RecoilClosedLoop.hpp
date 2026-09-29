@@ -32,8 +32,8 @@
 //   ③ **输出无阻尼**：整段没有限速/微分，250Hz 下任何检测跳变都变成整帧猛踢。
 // v2 改法（保留业主第一原则，只改结构）：
 //   · kp 默认 **0** —— P 是瞄准 PID 的职责，闭环只补 PID 缺的积分；
-//   · 积分抗饱和三件套：条件积分（顶上限那帧不积）+ 结构上限（积分项单独不得超单帧上限）
-//     + 限幅后反算回写；
+//   · 积分抗饱和两件套：结构上限（积分项单独不得超单帧上限）+ 限幅后反算回写
+//     （★ V1.0.06 去掉"饱和期停止累积"的粘滞开关 —— 它会把反向偏差也挡掉，见 update 注释）；
 //   · 新增 slew_count_per_frame 限速（单帧输出变化上限）= 阻尼，防整帧猛踢；
 //   · 量级整体下调：press_max_count 20→2（≈325 px/s 下压能力，按 0.65 px/count）、
 //     gain 2.0→0.15、integral_max 100→10、底子 τ 1500→2000ms。
@@ -96,6 +96,15 @@ public:
     // 开火期间不调用（baseline 冻结）。target 丢失期间也不调用（基线保持）。
     void track_baseline(float err_y_px, float dt_ms, const RecoilClConfig& cfg) {
         if (!(cfg.baseline_tau_ms > 0.0f)) return;   // 基线关闭：原始偏差口径
+        // ★★ V1.0.06 几何门槛：只学「目标就在画面中心附近」的帧。
+        // 定障（2026-09-29 20:57 实机，MR277 + 无框瞄具）：开火间隙转头/瞄地面时瞄准点跑到
+        // 画面边缘，归一域偏差会冲到 ±300px；τ=2s 的慢 EMA 一旦被拉走，要 2 秒以上才回得来
+        // ⇒ 下一次开火直接拿着跑偏的底子当零点（实测 13 个开火段的 base 从 -281 跨到 +0.7，
+        //   顶格率随之 0% ↔ 88%，即业主所感「一会儿压得狠、一会儿压根不压」）。
+        // 正常静态瞄偏实测量级为 -10 ~ -23px（全程 p50 = -21.9）⇒ 门槛取 40px。
+        // 超门槛的帧**整帧不学**（而非钳位）——钳位会把 -281 学成 -40，仍偏离真实零点；
+        // 整帧跳过则等待真正的静止帧来把 EMA 拉回。
+        if (!(std::abs(err_y_px) <= kBaselineGatePx)) return;
         if (!std::isfinite(baseline_)) { baseline_ = err_y_px; return; }
         const float dt_s = dt_ms > 0.0f ? dt_ms / 1000.0f : 0.004f;
         const float alpha = dt_s / (cfg.baseline_tau_ms / 1000.0f);
@@ -139,28 +148,36 @@ public:
         if (p_term < 0.0f) p_term = 0.0f;
 
         // ---- 积分项（本模块存在的全部理由：Y 轴 PID 没有 I）----
-        // 抗饱和三件套：
-        //   ① 条件积分：上一帧输出已顶上限（saturated_）就不再继续积；
-        //   ② 结构上限：积分项**单独**不得超过单帧上限（i_cap = press_cap）；
-        //   ③ 反算回写：限幅后把积分拉回"刚好等于限幅值"的位置，去掉多余卷绕。
-        if (!saturated_) {
-            integral_ += e * dt_s;
-            if (integral_ < 0.0f) integral_ = 0.0f;
-            if (cfg.integral_max > 0.0f && integral_ > cfg.integral_max) integral_ = cfg.integral_max;
-        }
+        // 抗饱和两件套：
+        //   ① 结构上限：积分项**单独**不得超过单帧上限（i_cap = press_cap）；
+        //   ② 反算回写：限幅后把积分拉回"输出刚好等于上限"的位置，去掉多余卷绕。
+        // ★★ V1.0.06（2026-09-29 21:xx）：**删掉"上一帧饱和就不再积"的粘滞开关**。
+        //   板端配置恰好 integral_max × gain == press_max_count（12 × 0.25 = 3）⇒ 原判据
+        //   用严格大于时回写永不执行（i_term 只会**等于** cap，实测 intg 只有 0 与 12 两个
+        //   稳态）；改成"含等于"能把回写救活，但粘滞开关同时也被打开了 —— 积分一旦被
+        //   回写到 cap/gain 就永久钉住，**连反向偏差也一起挡掉**（误差变号也降不下来），
+        //   手感受体就是"压完不撒手"。Case12 的反向偏差段正是逮这个的。
+        //   结论：只留反算回写（它本身就限住增长），不要粘滞开关。
+        integral_ += e * dt_s;
+        if (integral_ < 0.0f) integral_ = 0.0f;
+        if (cfg.integral_max > 0.0f && integral_ > cfg.integral_max) integral_ = cfg.integral_max;
+
         float i_term = cfg.gain * integral_;
         if (i_term < 0.0f) i_term = 0.0f;
-        if (i_term > press_cap) {
-            i_term = press_cap;
-            if (cfg.gain > 0.0f) integral_ = press_cap / cfg.gain;   // ③ 反算回写
-        }
 
         float press = p_term + i_term;
         if (press < 0.0f) press = 0.0f;
         bool saturated = false;
-        if (press > press_cap) {
+        if (press >= press_cap) {
             press = press_cap;
             saturated = true;
+            // ② 反算回写：把积分拉到"这个 P 项下输出刚好等于上限"的位置。
+            // p_term 已经占掉多少预算，积分就只补剩下的（p_term 单独超上限 ⇒ 积分为 0）。
+            if (cfg.gain > 0.0f) {
+                const float cap_i = (press_cap - p_term) / cfg.gain;
+                integral_ = cap_i > 0.0f ? cap_i : 0.0f;
+                i_term = cfg.gain * integral_;
+            }
         }
 
         // ---- 限速（阻尼）：单帧输出变化不超过 slew_count_per_frame ----
@@ -201,6 +218,10 @@ public:
     }
 
 private:
+    // ---- V1.0.06 常量 ----
+    // 基线学习的几何门槛（px，归一域）：超出即整帧不学。取值依据见 track_baseline 注释。
+    static constexpr float kBaselineGatePx = 40.0f;
+
     void reset_fire() {
         integral_ = 0.0f;
         obs_frames_ = 0;
@@ -215,7 +236,9 @@ private:
     float add_y_ = 0.0f;      // 上一帧下压量（count，已限幅）
     float p_term_ = 0.0f;     // 上一帧比例项（限幅前，count）
     float i_term_ = 0.0f;     // 上一帧积分项（限幅前，count）
-    bool saturated_ = false;  // 上一帧输出是否顶到单帧上限（条件积分用）
+    // 上一帧输出是否顶到单帧上限。**只作遥测**，不参与控制 —— V1.0.06 起抗饱和
+    // 完全交给「反算回写」（粘滞开关会在饱和后把反向偏差也挡掉，见 update 注释）。
+    bool saturated_ = false;
     float baseline_ = std::numeric_limits<float>::quiet_NaN();  // 偏差底子（px；NaN=未就绪）
 };
 
