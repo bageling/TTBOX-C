@@ -223,3 +223,66 @@ TEST(runtime_profile_personal_motion_validate_bounds) {
     p.mouse.personal_motion.knots = {1.2f};
     CHECK(!p.validate(&err));
 }
+
+// ★ 2026-09-29 出货前补的升级路径护栏（1.5.70）：
+//   1.5.69 删掉了一代提前量 Lead1 与 v7.26 扳机 AutoTrigger 的整段配置
+//   （RuntimeProfile 的 lead1 / trigger 三段 + recoil_y_offset_px / target_height_px
+//   等死接线）。★ 而 config.d **不被 OTA 覆盖** ⇒ 板端老配置里这些键还在，
+//   盒子从 1.5.68 直升上来时 from_json 必须原样忽略它们、照常加载并通过 validate。
+//   此前没有任何用例钉这条路径，故补上（删键类版本升级的通用护栏）。
+TEST(runtime_profile_legacy_removed_keys_still_load) {
+    // 模拟板端 1.5.68 写下的 mouse 段：含 1.5.69 已删的全部键
+    const char* legacy = R"JSON({
+      "model_id": "EP",
+      "capture": {"width": 640, "height": 640, "offset_x": 0, "offset_y": 0},
+      "inference": {"confidence": 0.35, "iou": 0.45, "max_detections": 30},
+      "mouse": {
+        "enabled": true,
+        "sensitivity": 1.25,
+        "kp_x": 0.5, "kp_y": 0.4,
+        "lead1": {"enabled": true, "frames": 3, "gain": 1.4, "max_offset": 44,
+                  "activation_distance": 120},
+        "lead1_enabled": true,
+        "lead1_frames": 3,
+        "trigger": {"enabled": true, "fire_button": "left", "fire_interval": 5,
+                    "confidence": 0.6, "fire_count": 2, "fire_random": 0.2},
+        "trigger_enabled": true,
+        "recoil_y_offset_px": 7,
+        "target_height_px": 120,
+        "trigger_recoil_offset_px": 3,
+        "personal_motion": {"speed_blend": 0.3, "reaction_blend": 0.2,
+                            "max_reaction_delay_ms": 40}
+      }
+    })JSON";
+
+    auto res = json_parse(legacy);
+    CHECK(res.ok);
+    if (!res.ok) return;
+
+    RuntimeProfile p = RuntimeProfile::from_json(res.value);
+
+    // ① 还在用的键照常读出来（删键不能连累正常字段）
+    CHECK(p.model_id == "EP");
+    CHECK_EQ(p.capture.width, 640u);
+    CHECK_EQ(p.capture.height, 640u);
+    CHECK(p.mouse.enabled);
+    CHECK_EQ(p.mouse.sensitivity, 1.25f);
+    CHECK_EQ(p.mouse.kp_x, 0.5f);
+    CHECK_EQ(p.inference.confidence, 0.35f);
+    CHECK_EQ(p.inference.max_detections, 30);
+
+    // ② 合法老配置必须能通过校验（否则升级即拒载 / 服务起不来）
+    std::string err;
+    CHECK(p.validate(&err));
+
+    // ③ 序列化回去不再吐出这些已删键（防止它们经面板合并再被写回配置）
+    const std::string out = p.to_json().dump();
+    CHECK(out.find("lead1") == std::string::npos);
+    CHECK(out.find("\"trigger\":") == std::string::npos);
+    CHECK(out.find("recoil_y_offset_px") == std::string::npos);
+    CHECK(out.find("target_height_px") == std::string::npos);
+    CHECK(out.find("trigger_recoil_offset_px") == std::string::npos);
+    // 反向：仍在用的二代（lead2 / trigger2）不能连坐被删
+    CHECK(out.find("\"lead2\"") != std::string::npos);
+    CHECK(out.find("\"trigger2\"") != std::string::npos);
+}
