@@ -228,7 +228,7 @@ ok "断言4 双向核对: 无混入、无漏装"
 
 # ---- 断言 5：版本号一致性（S7）----
 [ -n "$VER" ] || die "版本号为空"
-ok "断言5 版本号: ${VER}（真源 core/CMakeLists.txt）"
+ok "断言5 版本号: ${VER}（真源 core/include/ttbox/core/version.hpp::kCoreVersion）"
 
 # ---- RELEASE_MANIFEST.json（schema 与 fhs_init gen_manifest 一致）----
 info "生成 RELEASE_MANIFEST.json ..."
