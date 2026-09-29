@@ -9,6 +9,9 @@ namespace {
 // V1.0.08：贴裁剪区下边界时，身高最多按可见框高的多少倍外推。
 // 取 3.0 是给极端近身留余量；正常情况由框宽约束，这个上限只防异常框。
 constexpr float kClipBottomMaxStretch = 3.0f;
+// 身高宽比的合理区间（挡异常框 / 退化框，如 w=h 的近方形框外推出 3 倍身高）。
+constexpr float kMinHOverW = 0.8f;
+constexpr float kMaxHOverW = 12.0f;
 }  // namespace
 
 void class_offset_for(const AimPointProfile& prof, int class_id,
@@ -28,22 +31,38 @@ void class_offset_for(const AimPointProfile& prof, int class_id,
 }
 
 bool aim_point_at(const DetectionBox& box, int class_id, const AimPointProfile& prof,
-                  float* tx, float* ty, float crop_bottom_px) {
+                  float* tx, float* ty, float crop_bottom_px, float clipped_h_over_w) {
     const float w = box.x2 - box.x1;
     float h = box.y2 - box.y1;
     if (w <= 0.0f || h <= 0.0f) return false;
     float ox = prof.offset_x;
     float oy = prof.offset_y;
     class_offset_for(prof, class_id, &ox, &oy);
-    // V1.0.08：框底贴到裁剪区下边界 ⇒ 下半身在 crop 之外，可见框高偏小 ⇒ 落点相对人体
-    // 上飘（越近越严重）。此时改用**框宽**反推身高：宽度不随纵向裁剪失真，而人体框
-    // 宽/高 在板端三批记录里都稳定在 0.32（p10-p90 = 0.30~0.34）。
-    // 只放大不缩小，且最多放大 kClipBottomMaxStretch 倍（防蹲姿/异常框把落点推到脚下）。
-    if (prof.clip_bottom_extrapolate && crop_bottom_px > 0.0f && prof.body_w_over_h > 0.05f &&
+    // V1.0.08/09：框底贴到裁剪区下边界 ⇒ 下半身在 crop 之外，可见框高偏小 ⇒ 落点相对
+    // 人体上飘（越近截得越多，所以是「走进目标才飘」而不是「一直偏」）。
+    // 定障实测（板端常驻记录器 + 离线复算，2026-09-29）：
+    //   · 裁剪区 = 画面中心 416x416 ⇒ 下边界 = 720 + 208 = **928**（cls5 原始框 y2 在
+    //     928 出现巨峰 102 帧，且「走近」段选中框 y2 从 832 一路涨到 928 就钉死不动、
+    //     而 y1 继续上冒 ⇒ 框底被截）。
+    //   · 选中框贴到 928 的帧占 5.8%（351/6069 对齐帧）；这些帧落点相对真实胸口
+    //     上飘 p50≈65px、p90≈173px、最大≈240px —— 在 300~400px 高的身体上就是 20%，
+    //     0.31 的胸口位直接变成 0.10 的头部（= 业主症状「走进目标就跑到头上」）。
+    // 修法：用**框宽**反推身高（宽度不随纵向裁剪失真）。
+    //   ★ 比值优先取调用方自校准值 clipped_h_over_w（同一目标最近一次未截断帧的 h/w）——
+    //     本模型 cls5 的框宽高比在 0.29~0.52 之间漂（远距离常只框上半身），写死会过度
+    //     修正；同一目标的比值按距离等比缩放，最稳。没有自校准值时退回配置兜底。
+    //   只放大不缩小，且最多放大 kClipBottomMaxStretch 倍（防蹲姿/异常框把落点推到脚下）。
+    if (prof.clip_bottom_extrapolate && crop_bottom_px > 0.0f &&
         box.y2 >= crop_bottom_px - prof.clip_bottom_margin_px) {
-        const float h_from_w = w / prof.body_w_over_h;
-        const float h_cap = h * kClipBottomMaxStretch;
-        h = std::min(std::max(h_from_w, h), h_cap);
+        float h_over_w = clipped_h_over_w;
+        if (!(h_over_w >= kMinHOverW && h_over_w <= kMaxHOverW)) {
+            h_over_w = prof.body_w_over_h > 0.05f ? 1.0f / prof.body_w_over_h : 0.0f;
+        }
+        if (h_over_w >= kMinHOverW && h_over_w <= kMaxHOverW) {
+            const float h_from_w = w * h_over_w;
+            const float h_cap = h * kClipBottomMaxStretch;
+            h = std::min(std::max(h_from_w, h), h_cap);
+        }
     }
     *tx = box.x1 + ox * w;
     *ty = box.y1 + oy * h;

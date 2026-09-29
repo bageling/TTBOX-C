@@ -237,7 +237,9 @@ void AimThread::loop() {
                         scfg.search_radius_px =
                             static_cast<float>(cap.width < cap.height ? cap.width : cap.height) * 0.5f;
                         // V1.0.08：裁剪区下边界（框/准星同一坐标系）= 帧高/2 + 裁剪偏移 + 半宽。
-                        // 板端 1440/2 + 0 + 320 = 1040，与实测一致。框底贴到它 ⇒ 框高被截断。
+                        // 板端实测（2026-09-29）：帧 2560x1440、capture 416x416 居中
+                        // ⇒ 1440/2 + 0 + 208 = **928**，与 cls5 原始框 y2 在 928 的巨峰吻合。
+                        // 框底贴到它 ⇒ 框高被截断 ⇒ 落点相对人体上飘。
                         crop_bottom_px_ =
                             task.frame_height > 0
                                 ? static_cast<float>(task.frame_height) * 0.5f +
@@ -384,8 +386,25 @@ void AimThread::loop() {
                 ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
             if (target_ok) {
+                // ---- V1.0.09：框底被裁剪区下边界截断时的身高反推比（按目标自校准）----
+                // 未截断帧：h/w 就是真实比例 ⇒ 记下来（本目标 EMA + 跨目标 EMA）。
+                // 截断帧：用记住的比例 × 当前框宽反推身高（宽度不随纵向裁剪失真）。
+                // 为什么不用固定比例：cls5 框宽高比实测 0.29~0.52（远距离常只框上半身），
+                // 写死会过度修正；同一目标的比例按距离等比缩放，可直接外推。
+                float clipped_h_over_w = 0.0f;
+                {
+                    const bool box_bottom_clipped =
+                        crop_bottom_px_ > 0.0f &&
+                        selected.box.y2 >= crop_bottom_px_ - aim_point.clip_bottom_margin_px;
+                    clip_ratio_tracker_.observe(selected.box.x2 - selected.box.x1,
+                                                selected.box.y2 - selected.box.y1,
+                                                box_bottom_clipped, selected.target_id);
+                    if (box_bottom_clipped) {
+                        clipped_h_over_w = clip_ratio_tracker_.ratio_for(selected.target_id);
+                    }
+                }
                 if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty,
-                                  crop_bottom_px_)) {
+                                  crop_bottom_px_, clipped_h_over_w)) {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
                 }

@@ -10,6 +10,7 @@
 #include "pipeline/AimTargetMailbox.hpp"
 #include "output/IHidOutput.hpp"
 #include "mouse/AimStateMachine.hpp"
+#include "mouse/ClipHeightRatio.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
@@ -203,6 +204,10 @@ private:
     // = 帧高/2 + capture.offset_y + search_radius（板端实测 1440/2 + 0 + 320 = 1040）。
     // 只给「框底被裁剪区截断 ⇒ 落点外推」用；<0 = 未知（不做外推）。
     float crop_bottom_px_ = -1.0f;
+    // ---- V1.0.09：被截断时的身高反推比（h/w），按目标自校准 ----
+    // 状态机抽在 ClipHeightRatio.hpp（纯状态、可单测）。为什么不能写死一个「人体宽高比」：
+    // 本模型 cls5 的框宽高比在 0.29~0.52 之间漂（远距离常只框上半身），写死会过度修正。
+    ClipHeightRatioTracker clip_ratio_tracker_;
     // ---- V1.0.06：压枪观测的「短暂丢目标容忍」----
     // 定障（2026-09-29 21:00 实机，MR277 + 无框瞄具）：开火段内 has_tgt/nbox 每 60~90ms
     // （约一个推理帧的节奏）跳一次 0，而 RecoilClosedLoop::update() 只要 obs_ok=false 就
