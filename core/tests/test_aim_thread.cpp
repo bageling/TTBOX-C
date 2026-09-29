@@ -264,9 +264,9 @@ TEST(aim_thread_recoil_keeps_pressing_without_target_when_no_target_always) {
     CHECK(output->sum_y() != 0);
 }
 
-// 自动扳机（v7.26）接线：开启 + 有目标 ⇒ 必须真的发出"按下"命令，并在按压时长后"抬起"。
+// 自动扳机（2.0）接线：开启 + 有目标 ⇒ 必须真的发出"按下"命令，并在按压时长后"抬起"。
 //
-// 为什么单独锁这条：TriggerController（两套状态机 + BB 标定值）此前**全仓无人 include**，
+// 为什么单独锁这条：TriggerController 此前**全仓无人 include**，
 // AimThread 也不跑它 ⇒ 面板上的自动扳机开关是死的。模块级单测能把状态机测透，
 // 却盖不住"根本没人调用它"—— 这正是"单测绿、集成死"那一类坑。
 TEST(aim_thread_trigger_fires_and_releases_when_enabled) {
@@ -277,21 +277,19 @@ TEST(aim_thread_trigger_fires_and_releases_when_enabled) {
     std::atomic<uint16_t> buttons{0};
 
     profile->mouse.enabled = true;
-    // 扳机常满足：key1/key2/key3 置 0 表示"该键不参与判定"（见 AutoTrigger::key_down）
-    profile->mouse.trigger.enabled = true;
-    profile->mouse.trigger.key1 = 0;
-    profile->mouse.trigger.key2 = 0;
-    profile->mouse.trigger.key3 = 0;
-    profile->mouse.trigger.rifle_mode = true;
-    // 连发间隔 20ms > 按压时长 4ms ⇒ 按下后必定有"不开火"的帧走到抬起分支。
-    // （反过来 interval < press_duration 时语义就是"一直按住"，那是配出来的，不是缺陷。）
-    profile->mouse.trigger.rifle_interval = 20.0f;
-    profile->mouse.trigger.confidence = 0.0f;          // 置信门放开（框 score 0.9 也够）
-    profile->mouse.trigger.dist_threshold = 10000.0f;  // 距离门放开
-    profile->mouse.trigger.crosshair_check = false;
-    profile->mouse.trigger.click_key = 0x01;           // 左键（掩码）
-    profile->mouse.trigger.press_duration = 4.0f;      // 4ms 后抬起（帧间隔 1ms ⇒ 必然抬到）
-    profile->mouse.trigger.recoil_enabled = true;
+    // 扳机常满足：key1/key2 置 0 表示"该键不参与判定"（见 AutoTrigger2::key_down）
+    profile->mouse.trigger2.enabled = true;
+    profile->mouse.trigger2.key1 = 0;
+    profile->mouse.trigger2.key2 = 0;
+    profile->mouse.trigger2.fire_button = 0x01;    // 左键（掩码）
+    profile->mouse.trigger2.confidence = 0.0f;     // 置信门放开（框 score 0.9 也够）
+    profile->mouse.trigger2.first_err = 10000.0f;  // 首枪误差门放开
+    profile->mouse.trigger2.first_delay = 0.0f;    // 进入即打，不必等
+    // 连发间隔 60 帧 ≈ 100ms > 按压时长 4ms ⇒ 按下后必定有"不开火"的帧走到抬起分支。
+    // （间隔小于按压时长时语义就是"一直按住"，那是配出来的行为，不是缺陷。）
+    profile->mouse.trigger2.fire_interval = 60.0f;
+    profile->mouse.trigger2.fire_random = 0.0f;
+    profile->mouse.trigger2.press_duration = 4.0f; // 4ms 后抬起（帧间隔 1ms ⇒ 必然抬到）
     config.update(profile);
 
     AimThread thread;
@@ -334,7 +332,7 @@ TEST(aim_thread_trigger_stays_silent_when_disabled) {
 
     profile->mouse.enabled = true;
     profile->mouse.aim_profiles[0].hotkey = 0x02;
-    // trigger / trigger2 都用结构体默认（enabled=false）
+    // trigger2 用结构体默认（enabled=false）
     config.update(profile);
 
     AimThread thread;
@@ -417,8 +415,9 @@ TEST(aim_thread_bezier_warp_changes_output_when_enabled) {
     CHECK(std::fabs(r_on - r_off) > 0.05);      // ★ 接线后输出方向真的偏了
 }
 
-// ── 扳机联动两项（2026-09-26 接线）：trigger.y_offset 与 trigger2.move_throttle_frames ──
-// 这两格面板早就有，但 core 从不读（配置键在 core/src 里 0 消费点）。
+// ── 扳机联动（2026-09-26 接线）：trigger2.move_throttle_frames ──
+// 这一格面板早就有，但 core 从不读（配置键在 core/src 里 0 消费点）。
+// ★ 2026-09-29：另一项 trigger.y_offset 已随 v7.26 整段删除，对应用例一并撤下。
 namespace {
 struct TriggerLinkageResult {
     int64_t sum_x = 0;
@@ -427,8 +426,8 @@ struct TriggerLinkageResult {
     uint64_t fires = 0;
 };
 
-// y_offset：压枪联动偏移（目标框高 × 比例）；throttle：开火后不发位移的帧数
-TriggerLinkageResult run_trigger_linkage(float y_offset, int throttle) {
+// throttle：开火后不发位移的帧数
+TriggerLinkageResult run_trigger2_linkage(int throttle) {
     AimTargetMailbox mailbox(1);
     auto output = std::make_shared<CountingHidOutput>();
     auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
@@ -439,25 +438,16 @@ TriggerLinkageResult run_trigger_linkage(float y_offset, int throttle) {
 
     profile->mouse.enabled = true;
     profile->mouse.aim_profiles[0].hotkey = 0x02;
-    profile->mouse.trigger.enabled = true;
-    profile->mouse.trigger.key1 = 0;
-    profile->mouse.trigger.key2 = 0;
-    profile->mouse.trigger.key3 = 0;
-    profile->mouse.trigger.rifle_mode = true;
-    profile->mouse.trigger.rifle_interval = 20.0f;
-    profile->mouse.trigger.confidence = 0.0f;
-    profile->mouse.trigger.dist_threshold = 10000.0f;
-    profile->mouse.trigger.crosshair_check = false;
-    profile->mouse.trigger.click_key = 0x01;
-    profile->mouse.trigger.press_duration = 4.0f;
-    profile->mouse.trigger.recoil_enabled = true;
-    profile->mouse.trigger.y_offset = y_offset;
-    profile->mouse.trigger2.enabled = (throttle > 0);
+    profile->mouse.trigger2.enabled = true;
     profile->mouse.trigger2.key1 = 0;
     profile->mouse.trigger2.key2 = 0;
     profile->mouse.trigger2.fire_button = 0x01;
     profile->mouse.trigger2.confidence = 0.0f;
     profile->mouse.trigger2.first_err = 10000.0f;
+    profile->mouse.trigger2.first_delay = 0.0f;
+    profile->mouse.trigger2.fire_interval = 60.0f;   // 100ms 一发 ⇒ 节流窗（4 帧）能跑完
+    profile->mouse.trigger2.fire_random = 0.0f;
+    profile->mouse.trigger2.press_duration = 4.0f;
     profile->mouse.trigger2.move_throttle_frames = throttle;
     profile->mouse.output_deadzone = 0.0f;
     config.update(profile);
@@ -483,22 +473,11 @@ TriggerLinkageResult run_trigger_linkage(float y_offset, int throttle) {
 }
 }  // namespace
 
-// y_offset：开火后瞄准点要额外往下压「框高 × 比例」⇒ 输出的 Y 分量必须变多。
-// 比的是 sum_y 的**差值**（同一段帧、同样配置，只改这一格），不是绝对值绝对值会随
-// 取帧抖动漂 —— 那是上一轮写贝塞尔用例时踩过的假阳性。
-TEST(aim_thread_trigger_y_offset_adds_downward_bias) {
-    const auto off = run_trigger_linkage(0.0f, 0);
-    const auto on = run_trigger_linkage(1.0f, 0);
-    CHECK(off.fires > 0);            // 前提：两边都真的开了枪（否则比的是空跑）
-    CHECK(on.fires > 0);
-    CHECK(on.sum_y > off.sum_y);     // ★ 比例 1.0 ⇒ 下压更多
-}
-
 // move_throttle_frames：开火后若干帧不送位移（防扣扳机抖动）。
 // ★ 同时锁「位移不丢」：节流帧的位移退回 remainder，所以累计位移不该被吃掉一大截。
 TEST(aim_thread_trigger2_move_throttle_suspends_output) {
-    const auto off = run_trigger_linkage(0.0f, 0);
-    const auto on = run_trigger_linkage(0.0f, 4);
+    const auto off = run_trigger2_linkage(0);
+    const auto on = run_trigger2_linkage(4);
     CHECK(on.fires > 0);
     CHECK(on.zero_frames > off.zero_frames);   // ★ 节流 ⇒ 零位移帧变多
     // 只锁「链路没被锁死」：节流结束后必须继续有输出。

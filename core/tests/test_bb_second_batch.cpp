@@ -3,13 +3,12 @@
 // 覆盖：
 //   A. RecoilController BB 三段查表引擎（开关/延迟/距离门/三段边界/超时末段/
 //      最大下压截断/垂直修正渐变）
-//   B. Lead1 帧窗口投票（开关/激活/距离熔断/摆动熔断）
 //   C. Lead2 积分累积（开关/冷却/钳制/死区衰减/Y 抑制）
 //   D. HumanizeShaper（开关/过冲单调/制动/噪声有界/低通）
 //   E. AntiOvershoot（开关/内圈衰减帧数/越界冷却复位）
 //   F. SpeedAdaptiveKp（开关/静止乘子/移动乘子）
 //   G. GlobalWave（开关/幅度有界）
-//   H. RuntimeProfile 新键往返（recoil_bb / lead1 / lead2 / humanize /
+//   H. RuntimeProfile 新键往返（recoil_bb / lead2 / humanize /
 //      anti_overshoot / speed_adaptive_kp / global_wave）
 //
 // ★ 全默认（enabled=false）零输出是硬约束：逐模块都有 "默认关 ⇒ 行为零变化" 用例。
@@ -239,125 +238,6 @@ void test_bb_vertical_ramp() {
         v12 = o.vert_y;
     }
     check(std::fabs(v12 - 4.0f / kPpc) < 1e-3f, "渐变跑满 ⇒ 固定 end");
-}
-
-// ============================ B. Lead1 ============================
-
-void test_lead1_disabled_zero() {
-    std::printf("[B1] Lead1 默认关 ⇒ 零输出\n");
-    Lead1 l;
-    Lead1Config cfg;  // enabled=false
-    float sum = 0.0f;
-    for (int i = 0; i < 40; ++i) {
-        Lead1::Input in;
-        in.move_x = 20.0f;
-        in.dtt = 10.0f;
-        in.now_ms = static_cast<uint32_t>(i * 10);
-        in.has_box = true;
-        in.box_cx = static_cast<float>(i * 10);
-        in.box_cy = 0.0f;
-        in.box_w = 40.0f;
-        in.box_h = 40.0f;
-        sum += std::fabs(l.update(cfg, in));
-    }
-    check(sum == 0.0f, "lead1.enabled=false ⇒ 恒零输出");
-}
-
-void test_lead1_activate() {
-    std::printf("[B2] Lead1 稳定右移 ⇒ 窗口满后激活出正偏移\n");
-    Lead1 l;
-    Lead1Config cfg;
-    cfg.enabled = true;
-    cfg.frames = 10;
-    cfg.direction_ratio = 70.0f;      // 10 帧需 ≥7 帧同向
-    cfg.displacement_ratio = 2.0f;
-    cfg.displacement_min = 10.0f;
-    cfg.displacement_max = 40.0f;
-    cfg.dead_zone = 5.0f;
-    cfg.settle_ms = 10.0f;
-    cfg.hold_ms = 50.0f;
-    cfg.activation_distance = 40.0f;
-    float last = 0.0f;
-    // 帧间隔 20ms，框每帧右移 20px（> dead_zone=5）；mx 恒 +2px/帧。
-    // ★ 注意 displacement_min/max 判的是窗口内主向位移的**总和**（10 帧 × 2px = 20px，
-    //   落在 [10,40] 内），不是平均值 —— 这是 BB 的原始语义。
-    for (int i = 0; i < 60; ++i) {
-        Lead1::Input in;
-        in.move_x = 2.0f;
-        in.dtt = 10.0f;
-        in.now_ms = static_cast<uint32_t>(i * 20);
-        in.has_box = true;
-        in.box_cx = static_cast<float>(i * 20);
-        in.box_cy = 0.0f;
-        in.box_w = 40.0f;
-        in.box_h = 40.0f;
-        last = l.update(cfg, in);
-    }
-    check(last > 0.0f, "10 帧同向右移 ⇒ 正向提前量");
-    check(last <= cfg.displacement_max * cfg.strength,
-          "提前量受 max_count/strength 约束（远小于 displacement_max）");
-}
-
-void test_lead1_distance_breaker() {
-    std::printf("[B3] Lead1 距离超限熔断\n");
-    Lead1 l;
-    Lead1Config cfg;
-    cfg.enabled = true;
-    cfg.frames = 3;
-    cfg.direction_ratio = 60.0f;
-    cfg.displacement_ratio = 1.0f;
-    cfg.displacement_min = 5.0f;
-    cfg.displacement_max = 100.0f;
-    cfg.dead_zone = 0.0f;
-    cfg.settle_ms = 0.0f;
-    cfg.activation_distance = 40.0f;
-    for (int i = 0; i < 10; ++i) {
-        Lead1::Input in;
-        in.move_x = 20.0f;
-        in.dtt = 10.0f;
-        in.now_ms = static_cast<uint32_t>(i * 20);
-        l.update(cfg, in);
-    }
-    Lead1::Input far;
-    far.move_x = 20.0f;
-    far.dtt = 200.0f;   // 远超 40
-    far.now_ms = 400;
-    const float o = l.update(cfg, far);
-    check(o == 0.0f, "dtt > activation_distance ⇒ 熔断清零");
-}
-
-void test_lead1_oscillation_cancel() {
-    std::printf("[B4] Lead1 方向摆动熔断\n");
-    Lead1 l;
-    Lead1Config cfg;
-    cfg.enabled = true;
-    cfg.frames = 3;
-    cfg.direction_ratio = 60.0f;
-    cfg.displacement_ratio = 1.0f;
-    cfg.displacement_min = 5.0f;
-    cfg.displacement_max = 100.0f;
-    cfg.dead_zone = 0.0f;
-    cfg.settle_ms = 0.0f;
-    cfg.hold_ms = 0.0f;             // 立即重收
-    cfg.oscillation_cancel = 2;
-    cfg.activation_distance = 1000.0f;
-    uint32_t t = 0;
-    float last = 0.0f;
-    // 交替方向：右 3 帧 → 左 3 帧 → … 每 3 帧成一个判定窗。
-    // 连续两次反向激活（oscillation_cancel=2）即熔断；熔断后计数清零、重新累计，
-    // 故熔断发生在第 3、6、9… 个窗尾部 —— 跑 9 轮正好停在熔断那一轮。
-    for (int round = 0; round < 9; ++round) {
-        const float v = (round % 2 == 0) ? 30.0f : -30.0f;
-        for (int i = 0; i < 3; ++i) {
-            Lead1::Input in;
-            in.move_x = v;
-            in.dtt = 10.0f;
-            in.now_ms = t;
-            t += 20;
-            last = l.update(cfg, in);
-        }
-    }
-    check(std::fabs(last) < 1e-6f, "连续反向激活达 oscillation_cancel ⇒ 熔断归零");
 }
 
 // ============================ C. Lead2 ============================
@@ -728,9 +608,6 @@ void test_profile_roundtrip() {
     p.mouse.recoil_bb.drift_freq = 2.5f;
     p.mouse.vertical_correction.ramp1_enabled = true;
     p.mouse.vertical_correction.ramp1_start = 1.25f;
-    p.mouse.lead1.enabled = true;
-    p.mouse.lead1.frames = 12;
-    p.mouse.lead1.direction_ratio = 66.0f;
     p.mouse.lead2.enabled = true;
     p.mouse.lead2.gain = 0.075f;
     p.mouse.lead2.decay = 0.9f;
@@ -778,9 +655,6 @@ void test_profile_roundtrip() {
     check(q.mouse.vertical_correction.ramp1_enabled &&
               std::fabs(q.mouse.vertical_correction.ramp1_start - 1.25f) < 1e-4f,
           "vertical_correction 渐变键往返一致");
-    check(q.mouse.lead1.enabled && q.mouse.lead1.frames == 12 &&
-              std::fabs(q.mouse.lead1.direction_ratio - 66.0f) < 1e-4f,
-          "lead1 键往返一致");
     check(q.mouse.lead2.enabled && std::fabs(q.mouse.lead2.gain - 0.075f) < 1e-5f &&
               std::fabs(q.mouse.lead2.decay - 0.9f) < 1e-5f,
           "lead2 键往返一致");
@@ -820,7 +694,7 @@ void test_profile_defaults_zero_behavior() {
     ttbox::core::RuntimeProfile p;
     std::string err;
     check(p.validate(&err), "RuntimeProfile 默认值校验通过");
-    check(!p.mouse.recoil_bb.enabled && !p.mouse.lead1.enabled && !p.mouse.lead2.enabled &&
+    check(!p.mouse.recoil_bb.enabled && !p.mouse.lead2.enabled &&
               !p.mouse.humanize.enabled && !p.mouse.anti_overshoot.enabled &&
               !p.mouse.speed_adaptive_kp.enabled && !p.mouse.global_wave.enabled,
           "第二批模块默认全关（输出链逐字节不变的前提）");
@@ -844,8 +718,8 @@ void test_profile_defaults_zero_behavior() {
     bad.mouse.global_wave.smooth = 1.5f;
     check(!bad.validate(&err), "global_wave.smooth=1.5 ⇒ 校验拒绝");
     ttbox::core::RuntimeProfile bad2;
-    bad2.mouse.lead1.frames = 0;
-    check(!bad2.validate(&err), "lead1.frames=0 ⇒ 校验拒绝");
+    bad2.mouse.lead2.gain = -0.1f;
+    check(!bad2.validate(&err), "lead2.gain<0 ⇒ 校验拒绝");
     ttbox::core::RuntimeProfile bad3;
     bad3.mouse.anti_overshoot.inner_strength = 150.0f;
     check(!bad3.validate(&err), "anti_overshoot.inner_strength=150 ⇒ 校验拒绝");
@@ -956,11 +830,6 @@ int main() {
     test_bb_distance_gate();
     test_bb_max_down_clamp();
     test_bb_vertical_ramp();
-
-    test_lead1_disabled_zero();
-    test_lead1_activate();
-    test_lead1_distance_breaker();
-    test_lead1_oscillation_cancel();
 
     test_lead2_disabled_zero();
     test_lead2_cooldown_then_integrate();

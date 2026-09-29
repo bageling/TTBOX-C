@@ -49,7 +49,6 @@ void AimThread::reset_runtime_state() {
     trigger_.reset();
     trigger_release_btn_ = 0;
     trigger_release_at_ms_ = 0;
-    trigger_recoil_offset_px_ = 0.0f;
     trigger_throttle_frames_ = 0;
     bezier_.reset();
     last_injection_allowed_ = false;
@@ -109,7 +108,6 @@ void AimThread::loop() {
             // ---- BB 对标第二批（2026-09-24）：默认全关 ⇒ 不跑即零输出，行为零变化 ----
             RecoilBbConfig recoil_bb_cfg;           // 三段查表压枪引擎（默认关）
             VerticalCorrectionConfig vc_cfg;        // 垂直修正 + 力度渐变
-            Lead1Config lead1_cfg;                  // 提前量一代（帧窗口投票）
             Lead2Config lead2_cfg;                  // 提前量二代（积分累积）
             HumanizeShaperConfig humanize_cfg;      // BB 拟人化整形链
             AntiOvershootConfig anti_over_cfg;      // 抗过冲
@@ -291,7 +289,6 @@ void AimThread::loop() {
                 // BB 对标第二批：每周期重读（改配置即时生效，无需重启）
                 recoil_bb_cfg = frame_profile->mouse.recoil_bb;
                 vc_cfg = frame_profile->mouse.vertical_correction;
-                lead1_cfg = frame_profile->mouse.lead1;
                 lead2_cfg = frame_profile->mouse.lead2;
                 humanize_cfg = frame_profile->mouse.humanize;
                 anti_over_cfg = frame_profile->mouse.anti_overshoot;
@@ -444,17 +441,13 @@ void AimThread::loop() {
                 // ★ 叠加在**控制误差**上、而不是塞进 tracker 之前的瞄准点：
                 //   BB 原版是 `at.x += offset` 后立刻算 `fx = at.x - chX` —— 偏移不经任何滤波
                 //   直接进 PID。若加在 tracker 之前，会被 One-Euro 低通吃掉大半，等于没效果。
-                // ★ 一代天然滞后一帧（本帧投票 → 下帧用），二代同帧生效；两代默认都关。
+                // ★ 二代同帧生效（一代 2026-09-29 已删）；默认关。
                 dtt_px = std::hypot(ex, ey);
-                const float box_cx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                const float box_cy = (selected.box.y1 + selected.box.y2) * 0.5f;
-                const float box_w = selected.box.x2 - selected.box.x1;
-                const float box_h = selected.box.y2 - selected.box.y1;
-                if (lead1_cfg.enabled || lead2_cfg.enabled) {
+                if (lead2_cfg.enabled) {
                     const float lead_dx = lead_pred_.prepare_x_offset(
-                        ref_x, ref_y, tx, ty, lead_last_move_y_, now_ms32, lead1_cfg, lead2_cfg);
+                        ref_x, ref_y, tx, ty, lead_last_move_y_, now_ms32, lead2_cfg);
                     if (lead_dx != 0.0f) control_x += lead_dx;
-                } else if (lead_pred_.lead1_offset() != 0.0f) {
+                } else if (lead_pred_.lead2().offset() != 0.0f) {
                     lead_pred_.reset();  // 关掉后清掉残留偏移，保证零输出
                 }
                 if (frame_profile) {
@@ -487,14 +480,7 @@ void AimThread::loop() {
                     control_x = bw.dx;
                     control_y = bw.dy;
                 }
-                // ---- 扳机压枪联动偏移（trigger.y_offset，2026-09-26 接线）----
-                // 面板早就有这一格，但 core 从不读它（假开关）。语义：开火后把瞄准点
-                // 往下压「目标框高 × 比例」，目标越近（框越大）压得越多。
-                // 单位与 control_y 同为像素 ⇒ 直接进 PID，走的是正式输出链（不是旁路）。
-                if (trigger_recoil_offset_px_ != 0.0f) {
-                    control_y += trigger_recoil_offset_px_;
-                    trigger_recoil_offset_px_ = 0.0f;   // 只在开火的下一帧生效一次
-                }
+                // 2026-09-29：扳机压枪联动偏移（trigger.y_offset）已随 v7.26 一并删除。
                 // ---- V3 阶段 5：拟人化抖动前馈扣除（默认关 ⇒ 与本机制加入前逐字节一致）----
                 // 把"到期的抖动 count"换算成像素、加回控制误差 ⇒ PID 看不见自己发的抖动。
                 // 量纲：jitter(count) × px_per_count = 画面像素位移。
@@ -553,14 +539,6 @@ void AimThread::loop() {
                 }
                 // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
-                // ---- BB 提前量反馈环：把本帧横向输出喂给一代做"帧窗口投票"，
-                //      产出的 offset 供**下一帧**的 control_x 使用（一代天生滞后一帧）。
-                //      喂的是 aibox_x（PID 域），与 continuous_lead 的量纲约定一致：
-                //      阈值必须与用户灵敏度解耦，不能喂 scaled_x。
-                if (lead1_cfg.enabled) {
-                    lead_pred_.feed_move_x(aibox_x, dtt_px, now_ms32, true, box_cx, box_cy,
-                                           box_w, box_h, lead1_cfg);
-                }
                 // 二代提前量的 Y 轴抑制读"上一帧纵向输出"，此处记下本帧值供下一帧用。
                 lead_last_move_y_ = aibox_y;
                 const float out_gain = out_sensitivity * out_scale;
@@ -589,11 +567,11 @@ void AimThread::loop() {
                 //   截断成 int32 只丢 <1 count 的残差，对"累计同向距离"判定无实质影响。
                 //
                 // ★★ 新老互斥（业主 2026-09-24 裁定「新版替老版，界面只留一套」）：
-                //   新版提前量（lead1/lead2）只要有一代开启，老的持续提前量就**不参与输出**，
+                //   新版提前量（lead2）开启时，老的持续提前量就**不参与输出**，
                 //   否则两条 X 轴偏移会叠加（老的在 scaled_x 上、新的在 control_x 上，
                 //   同一功能的两个补丁同时生效 ⇒ 提前量翻倍且互相打架）。
                 //   切到新版时把老引擎的累计/渐入电平清掉，避免关掉新版后残留一个旧偏置。
-                if (!lead1_cfg.enabled && !lead2_cfg.enabled) {
+                if (!lead2_cfg.enabled) {
                     scaled_x += continuous_lead_.apply(static_cast<int32_t>(aibox_x),
                                                        static_cast<int32_t>(aibox_y),
                                                        dt_ms, lead_cfg);
@@ -639,8 +617,6 @@ void AimThread::loop() {
                 tin.stop_detect_found = frame_profile->mouse.trigger2.stop_detect_enabled
                                             ? task.stop_detect_hit
                                             : true;
-                // 压枪联动偏移的换算基数（trigger.y_offset = 框高的比例）
-                tin.target_height_px = selected.valid ? (selected.box.y2 - selected.box.y1) : 0.0f;
                 trig_cmd = trigger_.update(frame_profile->mouse, tin);
 
                 // ---- 按下/抬起：拆成两条命令，绝不在控制线程里 sleep ----
@@ -657,8 +633,6 @@ void AimThread::loop() {
                     const float hold_ms = trig_cmd.press_duration_ms > 1.0f
                                               ? trig_cmd.press_duration_ms : 10.0f;
                     trigger_release_at_ms_ = now_ms32 + static_cast<uint32_t>(hold_ms);
-                    // 压枪联动偏移：下一帧叠进 control_y（本帧的 control 已经算完了）
-                    trigger_recoil_offset_px_ = trig_cmd.recoil_y_offset_px;
                     // 移动节流：只有 2.0 那套有这个参数，开火后若干帧不发位移（防开火抖动）
                     if (trig_cmd.fired_by_trigger2 &&
                         frame_profile->mouse.trigger2.move_throttle_frames > 0) {
@@ -992,8 +966,7 @@ void AimThread::loop() {
             }
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             status_.trigger_fire_count = trigger_fire_count_;
-            status_.trigger_active = trigger_.auto_trigger().activated() ||
-                                     trigger_.auto_trigger2().activated();
+            status_.trigger_active = trigger_.auto_trigger2().activated();
             status_.trigger_button = trig_cmd.button;
             uint32_t active_tracks = 0;
             for (const auto& te : selector_.tracks()) {

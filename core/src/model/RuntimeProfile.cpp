@@ -214,21 +214,8 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse 选靶评分权重不能为负";
         return false;
     }
-    // 自动扳机（BB 对标，2026-09-24）：时长/距离/计数类不得为负；置信度与比例类限 [0,1]。
-    if (mouse.trigger.dist_threshold < 0.0f || mouse.trigger.fire_delay < 0.0f ||
-        mouse.trigger.fire_random < 0.0f || mouse.trigger.first_delay_min < 0.0f ||
-        mouse.trigger.first_delay_max < 0.0f || mouse.trigger.rifle_interval < 0.0f ||
-        mouse.trigger.press_duration < 0.0f || mouse.trigger.stability_frames < 0 ||
-        mouse.trigger.click_count < 0) {
-        if (error) *error = "trigger 时长/距离/计数不能为负";
-        return false;
-    }
-    if (mouse.trigger.confidence < 0.0f || mouse.trigger.confidence > 1.0f ||
-        mouse.trigger.aim_confidence < 0.0f || mouse.trigger.aim_confidence > 1.0f ||
-        mouse.trigger.y_offset < 0.0f || mouse.trigger.y_offset > 1.0f) {
-        if (error) *error = "trigger 置信度/偏移比例超出 [0,1]";
-        return false;
-    }
+    // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 整段删除 ⇒ 对应的两段校验一并删除。
+    // 旧配置里残留的 `mouse.trigger` 段会被下面的解析逻辑直接忽略。
     // ---- BB 对标第二批（2026-09-24）：压枪三段查表 / 提前量 / 拟人化 / 三个小件 ----
     // 规则：ms 与 px 类参数 <0 拒绝；比例/系数类越界拒绝。
     if (mouse.recoil_bb.preset_total_time_ms[0] < 0.0f ||
@@ -252,24 +239,16 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "recoil_bb.smooth / y_suppress_strength 超出 [0,1]";
         return false;
     }
-    if (mouse.lead1.frames < 1 || mouse.lead1.oscillation_cancel < 1 ||
-        mouse.lead1.activation_distance < 0.0f || mouse.lead1.settle_ms < 0.0f ||
-        mouse.lead1.hold_ms < 0.0f || mouse.lead1.dead_zone < 0.0f ||
-        mouse.lead1.filter_base < 0.0f || mouse.lead1.filter_box_mid < 0.0f ||
-        mouse.lead1.displacement_ratio < 0.0f ||
-        mouse.lead2.gain < 0.0f || mouse.lead2.max_offset < 0.0f ||
+    // 提前量：一代 Lead1 已于 2026-09-29 删除，校验只剩二代。
+    if (mouse.lead2.gain < 0.0f || mouse.lead2.max_offset < 0.0f ||
         mouse.lead2.activation_distance < 0.0f || mouse.lead2.dead_zone < 0.0f ||
         mouse.lead2.hold_ms < 0.0f || mouse.lead2.cooldown_ms < 0.0f ||
         mouse.lead2.y_suppress_min < 0.0f || mouse.lead2.y_suppress_max < 0.0f) {
-        if (error) *error = "lead1/lead2 帧数、时长、距离不能为负";
+        if (error) *error = "lead2 时长、距离不能为负";
         return false;
     }
-    if (mouse.lead1.smooth < 0.0f || mouse.lead1.smooth > 1.0f ||
-        mouse.lead1.strength < 0.0f || mouse.lead1.direction_ratio < 0.0f ||
-        mouse.lead1.direction_ratio > 100.0f || mouse.lead1.filter_min_ratio < 0.0f ||
-        mouse.lead1.filter_max_ratio < 0.0f || mouse.lead2.decay < 0.0f ||
-        mouse.lead2.decay > 1.0f) {
-        if (error) *error = "lead1/lead2 平滑系数或比例越界";
+    if (mouse.lead2.decay < 0.0f || mouse.lead2.decay > 1.0f) {
+        if (error) *error = "lead2.decay 越界";
         return false;
     }
     if (mouse.humanize.smooth_factor < 0.0f || mouse.humanize.smooth_factor > 0.99f ||
@@ -625,26 +604,7 @@ JsonValue RuntimeProfile::to_json() const {
         vc.set("ramp3_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_end)));
         m.set("vertical_correction", std::move(vc));
 
-        JsonValue l1 = JsonValue::object();
-        l1.set("enabled", JsonValue::boolean(mouse.lead1.enabled));
-        l1.set("frames", JsonValue::number(static_cast<double>(mouse.lead1.frames)));
-        l1.set("direction_ratio", JsonValue::number(static_cast<double>(mouse.lead1.direction_ratio)));
-        l1.set("displacement_ratio", JsonValue::number(static_cast<double>(mouse.lead1.displacement_ratio)));
-        l1.set("strength", JsonValue::number(static_cast<double>(mouse.lead1.strength)));
-        l1.set("smooth", JsonValue::number(static_cast<double>(mouse.lead1.smooth)));
-        l1.set("hold_ms", JsonValue::number(static_cast<double>(mouse.lead1.hold_ms)));
-        l1.set("activation_distance", JsonValue::number(static_cast<double>(mouse.lead1.activation_distance)));
-        l1.set("settle_ms", JsonValue::number(static_cast<double>(mouse.lead1.settle_ms)));
-        l1.set("displacement_min", JsonValue::number(static_cast<double>(mouse.lead1.displacement_min)));
-        l1.set("displacement_max", JsonValue::number(static_cast<double>(mouse.lead1.displacement_max)));
-        l1.set("dead_zone", JsonValue::number(static_cast<double>(mouse.lead1.dead_zone)));
-        l1.set("oscillation_cancel", JsonValue::number(static_cast<double>(mouse.lead1.oscillation_cancel)));
-        l1.set("filter_base", JsonValue::number(static_cast<double>(mouse.lead1.filter_base)));
-        l1.set("filter_box_mid", JsonValue::number(static_cast<double>(mouse.lead1.filter_box_mid)));
-        l1.set("filter_min_ratio", JsonValue::number(static_cast<double>(mouse.lead1.filter_min_ratio)));
-        l1.set("filter_max_ratio", JsonValue::number(static_cast<double>(mouse.lead1.filter_max_ratio)));
-        m.set("lead1", std::move(l1));
-
+        // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 不再序列化 lead1 段。
         JsonValue l2 = JsonValue::object();
         l2.set("enabled", JsonValue::boolean(mouse.lead2.enabled));
         l2.set("gain", JsonValue::number(static_cast<double>(mouse.lead2.gain)));
@@ -718,32 +678,8 @@ JsonValue RuntimeProfile::to_json() const {
         gw.set("smooth", JsonValue::number(static_cast<double>(mouse.global_wave.smooth)));
         m.set("global_wave", std::move(gw));
     }
-    // 自动扳机（BB 对标，2026-09-24）：两套独立状态机，默认全关。
-    // 运行时状态（激活态 / 发数 / 计时器）不落盘，这里只持久化配置。
-    JsonValue tg = JsonValue::object();
-    tg.set("enabled", JsonValue::boolean(mouse.trigger.enabled));
-    tg.set("key1", JsonValue::number(static_cast<double>(mouse.trigger.key1)));
-    tg.set("key2", JsonValue::number(static_cast<double>(mouse.trigger.key2)));
-    tg.set("key3", JsonValue::number(static_cast<double>(mouse.trigger.key3)));
-    tg.set("with_aim", JsonValue::boolean(mouse.trigger.with_aim));
-    tg.set("aim_confidence", JsonValue::number(static_cast<double>(mouse.trigger.aim_confidence)));
-    tg.set("confidence", JsonValue::number(static_cast<double>(mouse.trigger.confidence)));
-    tg.set("dist_threshold", JsonValue::number(static_cast<double>(mouse.trigger.dist_threshold)));
-    tg.set("stability_frames", JsonValue::number(static_cast<double>(mouse.trigger.stability_frames)));
-    tg.set("crosshair_check", JsonValue::boolean(mouse.trigger.crosshair_check));
-    tg.set("fire_delay", JsonValue::number(static_cast<double>(mouse.trigger.fire_delay)));
-    tg.set("fire_random", JsonValue::number(static_cast<double>(mouse.trigger.fire_random)));
-    tg.set("first_delay_min", JsonValue::number(static_cast<double>(mouse.trigger.first_delay_min)));
-    tg.set("first_delay_max", JsonValue::number(static_cast<double>(mouse.trigger.first_delay_max)));
-    tg.set("rifle_mode", JsonValue::boolean(mouse.trigger.rifle_mode));
-    tg.set("rifle_interval", JsonValue::number(static_cast<double>(mouse.trigger.rifle_interval)));
-    tg.set("click_count", JsonValue::number(static_cast<double>(mouse.trigger.click_count)));
-    tg.set("click_key", JsonValue::number(static_cast<double>(mouse.trigger.click_key)));
-    tg.set("press_duration", JsonValue::number(static_cast<double>(mouse.trigger.press_duration)));
-    tg.set("recoil_enabled", JsonValue::boolean(mouse.trigger.recoil_enabled));
-    tg.set("y_offset", JsonValue::number(static_cast<double>(mouse.trigger.y_offset)));
-    tg.set("status_log", JsonValue::boolean(mouse.trigger.status_log));
-    m.set("trigger", std::move(tg));
+    // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 删除 ⇒ 不再序列化 trigger 段；
+    // 只剩 2.0（Trigger2Config）一套。运行时状态（激活态 / 发数 / 计时器）不落盘。
     JsonValue tg2 = JsonValue::object();
     tg2.set("enabled", JsonValue::boolean(mouse.trigger2.enabled));
     tg2.set("key1", JsonValue::number(static_cast<double>(mouse.trigger2.key1)));
@@ -1092,26 +1028,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             v.ramp3_middle = static_cast<float>(obj_num(*vc, "ramp3_middle", 0.5));
             v.ramp3_end = static_cast<float>(obj_num(*vc, "ramp3_end", 0.1));
         }
-        if (const JsonValue* l1 = m->find("lead1"); l1 && l1->is_object()) {
-            auto& c = p.mouse.lead1;
-            c.enabled = obj_bool(*l1, "enabled", false);
-            c.frames = static_cast<int>(obj_int(*l1, "frames", 10));
-            c.direction_ratio = static_cast<float>(obj_num(*l1, "direction_ratio", 70.0));
-            c.displacement_ratio = static_cast<float>(obj_num(*l1, "displacement_ratio", 2.0));
-            c.strength = static_cast<float>(obj_num(*l1, "strength", 0.5));
-            c.smooth = static_cast<float>(obj_num(*l1, "smooth", 0.5));
-            c.hold_ms = static_cast<float>(obj_num(*l1, "hold_ms", 50.0));
-            c.activation_distance = static_cast<float>(obj_num(*l1, "activation_distance", 40.0));
-            c.settle_ms = static_cast<float>(obj_num(*l1, "settle_ms", 10.0));
-            c.displacement_min = static_cast<float>(obj_num(*l1, "displacement_min", 10.0));
-            c.displacement_max = static_cast<float>(obj_num(*l1, "displacement_max", 40.0));
-            c.dead_zone = static_cast<float>(obj_num(*l1, "dead_zone", 5.0));
-            c.oscillation_cancel = static_cast<int>(obj_int(*l1, "oscillation_cancel", 3));
-            c.filter_base = static_cast<float>(obj_num(*l1, "filter_base", 0.3));
-            c.filter_box_mid = static_cast<float>(obj_num(*l1, "filter_box_mid", 1000.0));
-            c.filter_min_ratio = static_cast<float>(obj_num(*l1, "filter_min_ratio", 0.3));
-            c.filter_max_ratio = static_cast<float>(obj_num(*l1, "filter_max_ratio", 3.0));
-        }
+        // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
         if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {
             auto& c = p.mouse.lead2;
             c.enabled = obj_bool(*l2, "enabled", false);
@@ -1165,32 +1082,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             c.freq = static_cast<float>(obj_num(*gw, "freq", 1.0));
             c.smooth = static_cast<float>(obj_num(*gw, "smooth", 0.50));
         }
-        // 自动扳机（BB 对标，2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）。
-        // 键位只取低 5 位（鼠标五键位图：左1 右2 中4 侧8 侧16），越界位掩掉。
-        if (const JsonValue* tg = m->find("trigger"); tg && tg->is_object()) {
-            p.mouse.trigger.enabled = obj_bool(*tg, "enabled", false);
-            p.mouse.trigger.key1 = static_cast<uint8_t>(obj_int(*tg, "key1", 4) & 0x1F);
-            p.mouse.trigger.key2 = static_cast<uint8_t>(obj_int(*tg, "key2", 0) & 0x1F);
-            p.mouse.trigger.key3 = static_cast<uint8_t>(obj_int(*tg, "key3", 0) & 0x1F);
-            p.mouse.trigger.with_aim = obj_bool(*tg, "with_aim", true);
-            p.mouse.trigger.aim_confidence = static_cast<float>(obj_num(*tg, "aim_confidence", 0.40));
-            p.mouse.trigger.confidence = static_cast<float>(obj_num(*tg, "confidence", 0.40));
-            p.mouse.trigger.dist_threshold = static_cast<float>(obj_num(*tg, "dist_threshold", 50.0));
-            p.mouse.trigger.stability_frames = static_cast<int>(obj_int(*tg, "stability_frames", 0));
-            p.mouse.trigger.crosshair_check = obj_bool(*tg, "crosshair_check", false);
-            p.mouse.trigger.fire_delay = static_cast<float>(obj_num(*tg, "fire_delay", 10.0));
-            p.mouse.trigger.fire_random = static_cast<float>(obj_num(*tg, "fire_random", 1.0));
-            p.mouse.trigger.first_delay_min = static_cast<float>(obj_num(*tg, "first_delay_min", 20.0));
-            p.mouse.trigger.first_delay_max = static_cast<float>(obj_num(*tg, "first_delay_max", 30.0));
-            p.mouse.trigger.rifle_mode = obj_bool(*tg, "rifle_mode", true);
-            p.mouse.trigger.rifle_interval = static_cast<float>(obj_num(*tg, "rifle_interval", 50.0));
-            p.mouse.trigger.click_count = static_cast<int>(obj_int(*tg, "click_count", 50));
-            p.mouse.trigger.click_key = static_cast<uint8_t>(obj_int(*tg, "click_key", 1) & 0x1F);
-            p.mouse.trigger.press_duration = static_cast<float>(obj_num(*tg, "press_duration", 50.0));
-            p.mouse.trigger.recoil_enabled = obj_bool(*tg, "recoil_enabled", true);
-            p.mouse.trigger.y_offset = static_cast<float>(obj_num(*tg, "y_offset", 0.8));
-            p.mouse.trigger.status_log = obj_bool(*tg, "status_log", false);
-        }
+        // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 删除 ⇒ 旧配置里的 `trigger` 段
+        // 直接忽略，只解析 2.0（`trigger2`）。键位只取低 5 位（左1 右2 中4 侧8 侧16）。
         if (const JsonValue* tg = m->find("trigger2"); tg && tg->is_object()) {
             p.mouse.trigger2.enabled = obj_bool(*tg, "enabled", false);
             p.mouse.trigger2.key1 = static_cast<uint8_t>(obj_int(*tg, "key1", 16) & 0x1F);

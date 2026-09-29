@@ -269,7 +269,7 @@ int main() {
 
     // Case7: 新老提前量互斥（业主 2026-09-24 裁定「新版替老版，界面只留一套」）。
     // 判据：同样目标与热键下，只开老的持续提前量时 X 输出更大（多了偏置）；
-    //       把新版一代打开（strength=0，它自己不产生偏移，只验互斥）后，老的必须让路
+    //       把新版二代打开（先把激活距离设 0 ⇒ 它自己不产生偏移，只验互斥）后，老的必须让路
     //       ⇒ X 输出回落到纯 PID 量级。若互斥守卫被删（老的照跑），两组输出相同，本用例必红。
     {
         auto max_abs_x = [](const std::vector<Action>& acts) {
@@ -281,14 +281,14 @@ int main() {
             }
             return best;
         };
-        auto run_case = [&](bool lead1_on) -> int {
+        auto run_case = [&](bool lead2_on) -> int {
             TestCtx ctx(false);
             auto& m = ctx.profile->mouse;
             m.continuous_lead.enabled = true;
             m.continuous_lead.enter_distance = 1.0f;   // 极易触发（误差≈140 count/帧）
             m.continuous_lead.scale = 1.0f;
-            m.lead1.enabled = lead1_on;
-            m.lead1.strength = 0.0f;                   // 新版自身零偏移，只验"老的有没有让路"
+            m.lead2.enabled = lead2_on;
+            m.lead2.activation_distance = 0.0f;        // 新版自身零偏移，只验"老的有没有让路"
             ctx.reapply();
             if (!ctx.start()) { std::printf("[FAIL] start\n"); return -1; }
             ctx.buttons.store(0x02);

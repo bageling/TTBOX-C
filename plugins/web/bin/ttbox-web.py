@@ -839,15 +839,6 @@ CONTROLLER_BOOLS = {
 #   面板首次回填显示的就是它，对不上会让"没存过配置"的设备显示成另一套参数。
 # ★ 本表只做搬运，不做校验；越界值由 Core 的 RuntimeProfile::validate 拦。
 CTRL_BLOCKS = [
-    ('lead1', 'lead1', [
-        ('enabled', 'b', False), ('frames', 'i', 10), ('direction_ratio', 'n', 70.0),
-        ('displacement_ratio', 'n', 2.0), ('strength', 'n', 0.5), ('smooth', 'n', 0.5),
-        ('hold_ms', 'n', 50.0), ('activation_distance', 'n', 40.0), ('settle_ms', 'n', 10.0),
-        ('displacement_min', 'n', 10.0), ('displacement_max', 'n', 40.0),
-        ('dead_zone', 'n', 5.0), ('oscillation_cancel', 'i', 3), ('filter_base', 'n', 0.3),
-        ('filter_box_mid', 'n', 1000.0), ('filter_min_ratio', 'n', 0.3),
-        ('filter_max_ratio', 'n', 3.0),
-    ]),
     ('lead2', 'lead2', [
         ('enabled', 'b', False), ('gain', 'n', 0.05), ('max_offset', 'n', 25.0),
         ('decay', 'n', 0.95), ('activation_distance', 'n', 100.0), ('dead_zone', 'n', 1.0),
@@ -913,19 +904,6 @@ CTRL_BLOCKS = [
         ('ramp2_start', 'n', 1.0), ('ramp2_middle', 'n', 0.5), ('ramp2_end', 'n', 0.1),
         ('ramp3_enabled', 'b', False), ('ramp3_duration_ms', 'n', 2000.0),
         ('ramp3_start', 'n', 1.0), ('ramp3_middle', 'n', 0.5), ('ramp3_end', 'n', 0.1),
-    ]),
-    # 自动扳机 v7.26（key1/key2 长按组合 + key3 点按激活）
-    ('trigger', 'trigger', [
-        ('enabled', 'b', False), ('key1', 'key', 4), ('key2', 'key', 0), ('key3', 'key', 0),
-        ('with_aim', 'b', True), ('aim_confidence', 'n', 0.40), ('confidence', 'n', 0.40),
-        ('dist_threshold', 'n', 50.0), ('stability_frames', 'i', 0),
-        ('crosshair_check', 'b', False), ('fire_delay', 'n', 10.0), ('fire_random', 'n', 1.0),
-        ('first_delay_min', 'n', 20.0), ('first_delay_max', 'n', 30.0),
-        ('rifle_mode', 'b', True), ('rifle_interval', 'n', 50.0), ('click_count', 'i', 50),
-        ('click_key', 'key', 1), ('press_duration', 'n', 50.0),
-        ('recoil_enabled', 'b', True), ('y_offset', 'n', 0.8),
-        # ★ status_log（输出开火状态日志）已从面板撤掉：core 没有任何实现消费它，
-        #   摆着就是"点了没反应"的假开关。配置键保留在结构体里，但不再搬运。
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [

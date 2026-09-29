@@ -5617,61 +5617,10 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <article class="module-tile">
                   <div class="module-title">
                     <h3>自动开火</h3>
-                    <label class="switch"><input id="trigger_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">按住「长按键」才进入自动开火状态；如果额外选了「点按激活键」，那就还要再点一下那个键才真的开始打，选「不使用」就是按住长键直接打。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">长按键 1<select id="trigger_key1" data-config></select><span class="field-hint">按住它 = 进入自动开火状态。通常设成开镜键或右键。</span></label>
-                      <label class="field">长按键 2<select id="trigger_key2" data-config></select><span class="field-hint">「不使用」= 只看长按键 1。</span></label>
-                      <label class="field">点按激活键<select id="trigger_key3" data-config></select><span class="field-hint">「不使用」= 长键按住即开火。</span></label>
-                      <label class="field">多确定才打<input id="trigger_confidence" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">识别出来的人把握低于这个数就不开枪。调高更保守（少误射），调低更容易开枪。</span></label>
-                      <label class="field">离准星多远才打 px<input id="trigger_dist_threshold" data-config type="number" min="0" step="5"><span class="field-hint">准星离人超过这个像素数就不开枪。调大更容易开枪，调小更严格（必须瞄得准才打）。</span></label>
-                      <label class="field">先稳几帧才打<input id="trigger_stability_frames" data-config type="number" min="0" step="1"><span class="field-hint">非连发模式下先稳这么多帧才打第一枪；0 = 立刻打。</span></label>
-                    </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="trigger_with_aim" data-config type="checkbox"> 激活时附带自瞄</label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">附带自瞄置信度<input id="trigger_aim_confidence" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">附带自瞄时，把握低于这个数的人不跟。可以设得比「多确定才打」低一点，这样先跟上了再看准不开枪。</span></label>
-                    </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="trigger_crosshair_check" data-config type="checkbox"> 中心必须被目标框覆盖</label>
-                    </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="trigger_recoil_enabled" data-config type="checkbox"> 开火时联动压枪</label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">联动偏移比例<input id="trigger_y_offset" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">压枪量按目标框高度的这个比例换算。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>连点 / 连发</strong>
-                    <label class="switch"><input id="trigger_rifle_mode" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">这个开关 = 连发模式。开启：每隔「连发间隔」打一发；关闭：按「点击次数」打完就停。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">连发间隔 ms<input id="trigger_rifle_interval" data-config type="number" min="1" step="5"><span class="field-hint">连发模式下隔多久打一发（1000 毫秒 = 1 秒）。要贴合枪本身的射速。</span></label>
-                      <label class="field">点击次数<input id="trigger_click_count" data-config type="number" min="1" step="1"><span class="field-hint">非连发模式下最多打几发就停。</span></label>
-                      <label class="field">开火间隔 ms<input id="trigger_fire_delay" data-config type="number" min="0" step="1"><span class="field-hint">非连发模式下两发之间的基准间隔。</span></label>
-                      <label class="field">间隔随机 ±ms<input id="trigger_fire_random" data-config type="number" min="0" step="1"><span class="field-hint">每次间隔在这个范围内上下浮动，节奏不那么机械、更像人。</span></label>
-                      <label class="field">第一枪最快多久 ms<input id="trigger_first_delay_min" data-config type="number" min="0" step="1"><span class="field-hint">进入状态后，第一枪至少等这么久才打。</span></label>
-                      <label class="field">第一枪最慢多久 ms<input id="trigger_first_delay_max" data-config type="number" min="0" step="1"><span class="field-hint">第一枪最多等这么久（在最快和最慢之间随机），配合上面那格用。</span></label>
-                      <label class="field">点击按键<select id="trigger_click_key" data-config></select><span class="field-hint">模拟点击用哪个键，通常左键。</span></label>
-                      <label class="field">按压时长 ms<input id="trigger_press_duration" data-config type="number" min="1" step="5"><span class="field-hint">每次点下去按住多久。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <h3>自动开火 2.0</h3>
                     <label class="switch"><input id="trigger2_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
-                    <div class="field-hint">第二套扳机：首枪误差门 + 精度模拟 + 停手检测。与上面那套可以各自独立开。</div>
+                    <div class="field-hint">首枪误差门 + 精度模拟 + 停手检测；按住长键进入状态，首枪过后不限距离。</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">长按键 1<select id="trigger2_key1" data-config></select><span class="field-hint">按住它 = 进入这套自动开火状态。</span></label>
                       <label class="field">长按键 2<select id="trigger2_key2" data-config></select><span class="field-hint">「不使用」= 只看长按键 1。</span></label>
@@ -5725,34 +5674,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <div class="assist-grid control-group-grid">
                 <article class="module-tile">
                   <div class="module-title">
-                    <strong>提前量 · 一代（帧窗口投票）</strong>
-                    <label class="switch"><input id="lead1_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">连续若干帧里横向位移以同一方向为主，就按平滑速度给瞄准点加一点提前量。只作用于横轴。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">投票窗口帧数<input id="lead1_frames" data-config type="number" min="1" step="1"><span class="field-hint">看最近多少帧的位移方向。</span></label>
-                      <label class="field">主向占比 %<input id="lead1_direction_ratio" data-config type="number" min="0" max="100" step="1"><span class="field-hint">同向帧占比超过它才算「主向」。越低越容易触发。</span></label>
-                      <label class="field">主反位移倍率<input id="lead1_displacement_ratio" data-config type="number" min="0" step="0.1"><span class="field-hint">主向位移要达到反向位移的这么多倍。</span></label>
-                      <label class="field">提前量强度<input id="lead1_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">偏移 = 平滑速度 × 强度 × 方向；0 等于不开。</span></label>
-                      <label class="field">速度平滑<input id="lead1_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">越大越滞后也越稳。</span></label>
-                      <label class="field">保持时长 ms<input id="lead1_hold_ms" data-config type="number" min="0" step="10"><span class="field-hint">激活后偏置保持多久。</span></label>
-                      <label class="field">触发距离 px<input id="lead1_activation_distance" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标超过它就不触发。</span></label>
-                      <label class="field">冷却 ms<input id="lead1_settle_ms" data-config type="number" min="0" step="5"><span class="field-hint">进入触发距离后先安静这么久。</span></label>
-                      <label class="field">位移下限 px<input id="lead1_displacement_min" data-config type="number" min="0" step="1"><span class="field-hint">窗口内主向位移总和低于它不激活。</span></label>
-                      <label class="field">位移上限 px<input id="lead1_displacement_max" data-config type="number" min="0" step="1"><span class="field-hint">超过它也不激活（位移太大通常是目标瞬移）。</span></label>
-                      <label class="field">收帧死区 px<input id="lead1_dead_zone" data-config type="number" min="0" step="1"><span class="field-hint">框中心移动小于它就不收这一帧。</span></label>
-                      <label class="field">反向熔断次数<input id="lead1_oscillation_cancel" data-config type="number" min="1" step="1"><span class="field-hint">连续这么多次激活方向相反就熔断归零。</span></label>
-                      <label class="field">单帧过滤基数 px<input id="lead1_filter_base" data-config type="number" min="0" step="0.1"><span class="field-hint">抖动过滤阈值基准。</span></label>
-                      <label class="field">框面积中值<input id="lead1_filter_box_mid" data-config type="number" min="0" step="50"><span class="field-hint">按框面积调整过滤强度；远小目标允许更小的位移参与投票。</span></label>
-                      <label class="field">小目标比例下限<input id="lead1_filter_min_ratio" data-config type="number" min="0" step="0.1"><span class="field-hint">框很小（远处的人）时，抖动过滤门槛最多放宽到「单帧过滤基数」的多少倍。</span></label>
-                      <label class="field">大目标比例上限<input id="lead1_filter_max_ratio" data-config type="number" min="0" step="0.1"><span class="field-hint">框很大（贴脸的人）时，过滤门槛最多收紧到多少倍。一般不用动。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>提前量 · 二代（积分累积）</strong>
+                    <strong>提前量</strong>
                     <label class="switch"><input id="lead2_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
@@ -6611,25 +6533,6 @@ const CONTROLLER_DEFAULTS = {
 //   这两行说明原本写在表体里，2026-09-29 移出 —— 表内注释会让上面的同步用例直接炸。
 // ---------------------------------------------------------------------------
 const BB_CTRL_MODULES = [
-  ["lead1", [
-    ["enabled", "b", false],
-    ["frames", "i", 10],
-    ["direction_ratio", "n", 70.0],
-    ["displacement_ratio", "n", 2.0],
-    ["strength", "n", 0.5],
-    ["smooth", "n", 0.5],
-    ["hold_ms", "n", 50.0],
-    ["activation_distance", "n", 40.0],
-    ["settle_ms", "n", 10.0],
-    ["displacement_min", "n", 10.0],
-    ["displacement_max", "n", 40.0],
-    ["dead_zone", "n", 5.0],
-    ["oscillation_cancel", "i", 3],
-    ["filter_base", "n", 0.3],
-    ["filter_box_mid", "n", 1000.0],
-    ["filter_min_ratio", "n", 0.3],
-    ["filter_max_ratio", "n", 3.0],
-  ]],
   ["lead2", [
     ["enabled", "b", false],
     ["gain", "n", 0.05],
@@ -6726,29 +6629,6 @@ const BB_CTRL_MODULES = [
     ["ramp3_middle", "n", 0.5],
     ["ramp3_end", "n", 0.1],
   ]],
-  ["trigger", [
-    ["enabled", "b", false],
-    ["key1", "key", 4],
-    ["key2", "key", 0],
-    ["key3", "key", 0],
-    ["with_aim", "b", true],
-    ["aim_confidence", "n", 0.4],
-    ["confidence", "n", 0.4],
-    ["dist_threshold", "n", 50.0],
-    ["stability_frames", "i", 0],
-    ["crosshair_check", "b", false],
-    ["fire_delay", "n", 10.0],
-    ["fire_random", "n", 1.0],
-    ["first_delay_min", "n", 20.0],
-    ["first_delay_max", "n", 30.0],
-    ["rifle_mode", "b", true],
-    ["rifle_interval", "n", 50.0],
-    ["click_count", "i", 50],
-    ["click_key", "key", 1],
-    ["press_duration", "n", 50.0],
-    ["recoil_enabled", "b", true],
-    ["y_offset", "n", 0.8],
-  ]],
   ["trigger2", [
     ["enabled", "b", false],
     ["key1", "key", 16],
@@ -6809,8 +6689,8 @@ const BB_CTRL_MODULES = [
 // 每个分区管哪些模块（「恢复本页默认值」按这张表取值）。
 const BB_SECTION_MODULES = {
   "assist-section-recoil": ["recoil_bb", "vc"],
-  "assist-section-trigger": ["trigger", "trigger2"],
-  "assist-section-lead": ["lead1", "lead2"],
+  "assist-section-trigger": ["trigger2"],
+  "assist-section-lead": ["lead2"],
   "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "bezier"],
   "assist-section-selector": ["selector"],
 };
@@ -14032,10 +13912,6 @@ async function main() {
   fillOptions($("recoil_hotkey2"), OPTIONAL_POINTER_HOTKEYS);
   fillOptions($("hotkey_guard_toggle_hotkey"), POINTER_HOTKEYS);
   // 自动开火 / 自动开火 2.0 的按键下拉（长按键必须有键；「不使用」只在可选位出现）
-  fillOptions($("trigger_key1"), POINTER_HOTKEYS);
-  fillOptions($("trigger_key2"), OPTIONAL_POINTER_HOTKEYS);
-  fillOptions($("trigger_key3"), OPTIONAL_POINTER_HOTKEYS);
-  fillOptions($("trigger_click_key"), POINTER_HOTKEYS);
   fillOptions($("trigger2_key1"), POINTER_HOTKEYS);
   fillOptions($("trigger2_key2"), OPTIONAL_POINTER_HOTKEYS);
   fillOptions($("trigger2_fire_button"), POINTER_HOTKEYS);

@@ -163,12 +163,10 @@ private:
     uint8_t trigger_release_btn_ = 0;      // 待抬起的键位掩码（0 = 无）
     uint32_t trigger_release_at_ms_ = 0;   // 抬起时刻（now_ms 时基）
     uint64_t trigger_fire_count_ = 0;
-    // 扳机开火联动的两件小事（此前面板有开关、core 不读 = 假开关）：
-    //   ① 压枪联动偏移（trigger.y_offset）：本帧开火时把「目标框高 × 比例」叠进 control_y，
-    //      下一帧生效（扳机决策晚于 control 计算，差一帧 ≈ 4ms）。
-    float trigger_recoil_offset_px_ = 0.0f;
-    //   ② 移动节流（trigger2.move_throttle_frames）：开火后这么多帧内不发鼠标位移，
-    //      位移退回 remainder（不丢量），用于压掉开火瞬间的抖动。
+    // 扳机开火联动（此前面板有开关、core 不读 = 假开关）：
+    //   移动节流（trigger2.move_throttle_frames）：开火后这么多帧内不发鼠标位移，
+    //   位移退回 remainder（不丢量），用于压掉开火瞬间的抖动。
+    //   ★ 2026-09-29：另一件「压枪联动偏移（trigger.y_offset）」已随 v7.26 一并删除。
     int trigger_throttle_frames_ = 0;
     // ---- BB 对标第二批（2026-09-24）----
     // 全部构件默认 enabled=false ⇒ 不跑即零输出，输出链与本批加入前逐字节一致。

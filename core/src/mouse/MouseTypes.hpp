@@ -290,48 +290,15 @@ struct RecoilConfig {
     float humanize_jitter_frequency = 8.0f; // X 轴微动变化频率（Hz）
 };
 
-// ---------------------------------------------------------------------------
-// 自动扳机 v7.26（对齐 BB `auto_trigger_*`，见 bb-port/01-选靶与扳机.md §2）
-//
-// 激活：长按组合键 (key1 ∧ key2) 按下后，由 key3 的**按下边沿**激活；
-//       key3 = 0 表示"常满足"⇒ 长键按下即激活（无需点按）。
-// 发射：rifle_mode（默认开）= 每 rifle_interval ms 连射一发；
-//       非连发 = 受 click_count 上限的计数模式。
-// 开枪门（每帧校验）：有锁定目标 ∧ conf ≥ confidence ∧ dtt ≤ dist_threshold
-//       ∧（可选）中心被任一检测框覆盖。
-// ★ 键位是**位掩码**，与 MouseProfile.aim_hotkey 同域：
-//   1=left 2=right 4=middle 8=back 16=forward。BB 编号 1/2/3/5/6 → 0x01/0x02/0x04/0x08/0x10。
-// ★ 默认 enabled=false ⇒ 不开时 AimThread 完全不跑本模块，输出链与本参数加入前一致。
-// ---------------------------------------------------------------------------
-struct TriggerConfig {
-    bool enabled = false;            // 总开关
-    uint8_t key1 = 0x04;             // 长按组合键1（BB 默认 3=中键 → 0x04）
-    uint8_t key2 = 0x00;             // 长按组合键2（0 = 常满足，不参与判定）
-    uint8_t key3 = 0x00;             // 点按激活键（0 = 常满足 ⇒ 按住长键即激活）
-    bool with_aim = true;            // 激活时附带自瞄（改用 aim_confidence 作检测门）
-    float aim_confidence = 0.40f;    // 附带自瞄时的检测置信
-    float confidence = 0.40f;        // 开枪所需的目标置信
-    float dist_threshold = 50.0f;    // 目标到中心的最大允许误差（px）
-    int stability_frames = 0;        // 非连发模式需先稳定的帧数（0 = 立即）
-    bool crosshair_check = false;    // 中心须落在某检测框内才开枪
-    float fire_delay = 10.0f;        // 开火间隔基准（ms，非连发模式）
-    float fire_random = 1.0f;        // 开火间隔随机 ±（ms）
-    float first_delay_min = 20.0f;   // 首枪最小延迟（ms）
-    float first_delay_max = 30.0f;   // 首枪最大延迟（ms）
-    bool rifle_mode = true;          // true = 连发（按 rifle_interval）；false = 计数模式
-    float rifle_interval = 50.0f;    // 连发间隔（ms）
-    int click_count = 50;            // 计数模式的最大发数（rifle_mode 下不生效）
-    uint8_t click_key = 0x01;        // 开火键位掩码（BB 默认 {1}=左键）
-    float press_duration = 50.0f;    // 单次点击的按下保持时长（ms）
-    bool recoil_enabled = true;      // 首枪是否触发压枪
-    float y_offset = 0.8f;           // 激活期间覆盖的垂直瞄准比例（距顶比例）
-    bool status_log = false;         // 打印状态日志（诊断用）
-};
+// 2026-09-29：自动扳机 v7.26（TriggerConfig）已整段删除 —— 业主裁定「自动开火只留 2.0」。
+//   它的字段（key1/key2/key3/rifle_mode/click_count…）与 2.0 高度重合，两套并在同一次
+//   发布里只会让用户选错。旧配置里残留的 `mouse.trigger` 段会被 RuntimeProfile 忽略。
+//   2.0 的定义见下方 Trigger2Config。
 
 // ---------------------------------------------------------------------------
 // BB 扳机 2.0（对齐 BB `auto_trigger2_*`，见 bb-port/01-选靶与扳机.md §3）
 //
-// 与 v7.26 的核心差异：
+// 与已删除的 v7.26 的核心差异：
 //   · 组合键**按住即连发**（无点按激活态）；
 //   · **首枪门**：需 dtt < first_err（可选 precision 需先稳定 N 帧）；
 //     首枪之后**不再校验距离**，只要有锁定就按间隔继续打；
@@ -433,31 +400,9 @@ struct VerticalCorrectionConfig {
     float ramp3_start = 1.0f, ramp3_middle = 0.5f, ramp3_end = 0.1f;
 };
 
-// ---------------------------------------------------------------------------
-// 提前量一代：帧窗口投票法（BB `lead_prediction_*`，见 03 号 §1）
-// 只作用于 X 轴（横向）。输入是「本帧自瞄横向输出 mx」，输出是叠加到瞄准点 at.x
-// 的偏移量（下一帧生效 —— 脚本本身也有一帧延迟）。
-// ★ filter_box_* 用**像素面积**判定远处小目标，允许更小的单帧位移参与投票。
-// ---------------------------------------------------------------------------
-struct Lead1Config {
-    bool enabled = false;            // 总开关
-    int frames = 10;                 // 投票窗口帧数 N
-    float direction_ratio = 70.0f;   // 主导方向占比阈值（%）
-    float displacement_ratio = 2.0f; // 主导位移 ≥ 反向位移 × 该倍率
-    float strength = 0.5f;           // 提前量强度（偏移 = 平滑速度 × 强度 × 方向）
-    float smooth = 0.5f;             // 速度指数平滑系数（0~1，越大越滞后）
-    float hold_ms = 50.0f;           // 激活后保持偏移时长（ms）
-    float activation_distance = 40.0f; // 准星到目标距离超它不触发（px）
-    float settle_ms = 10.0f;         // 进入激活距离后的冷却（ms）
-    float displacement_min = 10.0f;  // 主导位移下限（px）
-    float displacement_max = 40.0f;  // 主导位移上限（px）
-    float dead_zone = 5.0f;          // 目标框中心移动小于它不收帧（px）
-    int oscillation_cancel = 3;      // 连续几次激活方向相反即熔断
-    float filter_base = 0.3f;        // 单帧位移过滤基数（px）
-    float filter_box_mid = 1000.0f;  // 动态过滤的框面积中值（px²）
-    float filter_min_ratio = 0.3f;   // 小目标过滤下限比例
-    float filter_max_ratio = 3.0f;   // 大目标过滤上限比例
-};
+// 2026-09-29：提前量一代（Lead1Config，帧窗口投票法）已整段删除 —— 业主裁定
+//   「提前量只留 2.0」。一代与二代原本是**相加**关系（不是替代），删掉之后二代自己
+//   照常工作，只是不再有"投票法"那一份额外偏移。旧配置残留的 `mouse.lead1` 段会被忽略。
 
 // ---------------------------------------------------------------------------
 // 提前量二代：积分累积法（BB `lead2_*`，见 03 号 §2）
@@ -699,8 +644,7 @@ struct MouseProfile {
     // 全部默认 false ⇒ 不开时 AimThread 不跑这些模块，输出链与本批加入前逐字节一致。
     RecoilBbConfig recoil_bb;               // 压枪三段查表引擎（recoil.enabled 且 recoil_bb.enabled 才走）
     VerticalCorrectionConfig vertical_correction;  // 垂直修正 + 力度渐变（叠加进最终位移）
-    Lead1Config lead1;                      // 提前量一代（帧窗口投票，X 轴）
-    Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）
+    Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）；一代 2026-09-29 已删
     HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
     // BB 927 原版里这两个是**独立开关**，不归 humanize.enabled 管（照搬，2026-09-28）。
     SpeedFluctuationConfig speed_fluctuation;  // 移动速度波动（作用在位移上，拟人化之前）
@@ -712,8 +656,7 @@ struct MouseProfile {
     // 两套状态机互相独立，可分别开启；都只产出"要开火"的决策（TriggerCmd），
     // 真正的点击由 AimThread 拿到决策后调 output->mouse_click 注入 —— 决策与注入分离。
     // 默认 enabled=false ⇒ 不开时 AimThread 不跑扳机，输出链与加入前逐字节一致。
-    TriggerConfig trigger;                  // 自动扳机 v7.26
-    Trigger2Config trigger2;                // BB 扳机 2.0
+    Trigger2Config trigger2;                // BB 扳机 2.0（v7.26 已删，2026-09-29）
     // ---- 贝塞尔弧线（2026-09-26 接线）----
     // 此前 `BezierTrajectory` 与它的配置**三层全死**：无人 include、MouseProfile 无成员、
     // 配置不解析。接线走 HEX(`safety.lua`) 验证过的 **warp 用法**：在**误差域**加一个
