@@ -1028,6 +1028,8 @@ void AimThread::loop() {
             status_.recoil_cl_integral = recoil_cl_.integral_px_s();
             status_.recoil_cl_state = recoil_cl_.state();
             status_.recoil_cl_obs_frames = recoil_cl_.obs_frames();
+            status_.recoil_cl_p_term = recoil_cl_.p_term();
+            status_.recoil_cl_i_term = recoil_cl_.i_term();
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;

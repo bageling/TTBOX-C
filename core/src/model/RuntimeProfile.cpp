@@ -241,7 +241,8 @@ bool RuntimeProfile::validate(std::string* error) const {
     }
     // 开火期闭环纠偏（压枪 v1，2026-09-29）：增益/限幅/安全阀不能为负；
     // start_frames 必须 >= 1 —— 0 会退化成"第一帧就压"，与「先观测再压」定案冲突。
-    if (mouse.recoil_cl.gain < 0.0f || mouse.recoil_cl.integral_max < 0.0f ||
+    if (mouse.recoil_cl.kp < 0.0f || mouse.recoil_cl.gain < 0.0f ||
+        mouse.recoil_cl.integral_max < 0.0f ||
         mouse.recoil_cl.press_max_count < 0.0f || mouse.recoil_cl.start_frames < 1) {
         if (error) *error = "recoil_cl 参数越界（start_frames 需 >= 1）";
         return false;
@@ -614,6 +615,7 @@ JsonValue RuntimeProfile::to_json() const {
         // 开火期闭环纠偏（压枪 v1，2026-09-29）：默认 enabled=false ⇒ 不开时行为零变化。
         JsonValue rcl = JsonValue::object();
         rcl.set("enabled", JsonValue::boolean(mouse.recoil_cl.enabled));
+        rcl.set("kp", JsonValue::number(static_cast<double>(mouse.recoil_cl.kp)));
         rcl.set("gain", JsonValue::number(static_cast<double>(mouse.recoil_cl.gain)));
         rcl.set("integral_max", JsonValue::number(static_cast<double>(mouse.recoil_cl.integral_max)));
         rcl.set("start_frames", JsonValue::number(static_cast<double>(mouse.recoil_cl.start_frames)));
@@ -1049,6 +1051,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         if (const JsonValue* rcl = m->find("recoil_cl"); rcl && rcl->is_object()) {
             auto& c = p.mouse.recoil_cl;
             c.enabled = obj_bool(*rcl, "enabled", false);
+            c.kp = static_cast<float>(obj_num(*rcl, "kp", 0.5));
             c.gain = static_cast<float>(obj_num(*rcl, "gain", 2.0));
             c.integral_max = static_cast<float>(obj_num(*rcl, "integral_max", 100.0));
             c.start_frames = static_cast<int>(obj_int(*rcl, "start_frames", 6));

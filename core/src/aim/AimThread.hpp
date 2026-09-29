@@ -113,6 +113,8 @@ public:
         float recoil_cl_integral = 0.0f; // 闭环积分量（px·s）
         int recoil_cl_state = 0;         // 0=未开火/无观测 1=观测中 2=正在压
         int recoil_cl_obs_frames = 0;    // 本次开火内的连续有效观测帧数
+        float recoil_cl_p_term = 0.0f;   // 上一帧比例项贡献（限幅前，count）
+        float recoil_cl_i_term = 0.0f;   // 上一帧积分项贡献（限幅前，count）
     };
     AimThread() = default;
     ~AimThread() { stop(); }

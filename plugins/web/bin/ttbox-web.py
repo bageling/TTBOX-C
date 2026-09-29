@@ -910,8 +910,8 @@ CTRL_BLOCKS = [
     #   不选枪 / 不录枪 / 不预采数据，没有可靠实时观测时整套不动作（不猜）。
     #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilClConfig 一字不差。
     ('recoil_cl', 'recoil_cl', [
-        ('enabled', 'b', False), ('gain', 'n', 2.0), ('integral_max', 'n', 100.0),
-        ('start_frames', 'i', 6), ('press_max_count', 'n', 20.0),
+        ('enabled', 'b', False), ('kp', 'n', 0.5), ('gain', 'n', 2.0),
+        ('integral_max', 'n', 100.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 20.0),
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
@@ -2031,6 +2031,8 @@ def collect_web_state() -> dict:
                     #   state: 0=未开火/无观测 1=观测中 2=正在压。
                     'recoil_cl': {
                         'add_y': m.get('recoil_cl_add_y', 0),
+                        'p_term': m.get('recoil_cl_p_term', 0),
+                        'i_term': m.get('recoil_cl_i_term', 0),
                         'integral': m.get('recoil_cl_integral', 0),
                         'state': m.get('recoil_cl_state', 0),
                         'obs_frames': m.get('recoil_cl_obs_frames', 0),

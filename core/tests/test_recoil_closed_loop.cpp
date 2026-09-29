@@ -1,13 +1,15 @@
 // test_recoil_closed_loop.cpp — 开火期闭环纠偏（压枪 v1）单元测试
 //
 // 锁的是业主 2026-09-29 定案的原则与实现不变量：
-//   ①「有实时观测就压，没有实时观测就不猜」—— 开关关 / 未开火 / 观测不合格
+//   ①「有实时偏移就纠偏，没有实时偏移就不猜」—— 开关关 / 未开火 / 观测不合格
 //      ⇒ 立即清零，不留保持窗、不留跨开火记忆；
 //   ②「前几发不压」是设计内代价 —— start_frames 观察期内零输出；
 //   ③ 单向：只下压（积分下限钳 0），永远不会把准星往上推；
 //   ④ 限幅：积分上限 + 单帧下压上限两道安全阀；
 //   ⑤ 默认关 = 零输出（不开时输出链与加入前逐字节一致）；
-//   ⑥ 真闭环仿真：后坐力持续把偏差推大时，注入能把偏差压回收敛区。
+//   ⑥ 真闭环仿真：后坐力持续把偏差推大时，注入能把偏差压回收敛区；
+//   ⑦ 比例项（kp，2026-09-29 业主令「先做 1」）：短促点射里起压第一帧就有可观输出，
+//      不依赖积分爬升 —— 纯积分在同场景下首帧输出只有它的十几分之一。
 //
 // 对应实现：core/src/mouse/RecoilClosedLoop.hpp
 // 接线点：  core/src/aim/AimThread.cpp（obs_ok 构造 + control_y 作观测量）
@@ -29,6 +31,7 @@ void check(bool cond, const char* msg) {
 RecoilClConfig make_cfg() {
     RecoilClConfig c;
     c.enabled = true;
+    c.kp = 0.5f;
     c.gain = 2.0f;
     c.integral_max = 100.0f;
     c.start_frames = 6;
@@ -99,6 +102,7 @@ void test_one_way_down_only() {
         if (out.add_y < 0.0f) { check(false, "输出出现负值（把准星上推了）"); return; }
     }
     check(rc.integral_px_s() >= 0.0f, "负偏差下积分钳在 0");
+    check(rc.p_term() == 0.0f, "负偏差下比例项也钳在 0（单向）");
     check(rc.add_y() >= 0.0f, "输出恒 >= 0");
 }
 
@@ -178,6 +182,40 @@ void test_closed_loop_converges() {
     check(err >= 0.0f, "偏差不为负（单向注入没有把准星推过目标）");
 }
 
+// Case9: 比例项 —— 短促点射里起压第一帧就有输出（2026-09-29 业主令「先做 1」）
+//
+// 纯积分要"从 0 爬起来"：点射一次只按住 ~120ms，每次松手清零后都要重新起步，
+// 累计下压量只有长按同长度的零头。比例项 = 看到多少偏移就立刻按比例补，不等累积。
+void test_kp_immediate_output_for_tap_fire() {
+    std::printf("[Case9] 比例项：点射起压第一帧就有输出（kp=0 vs kp=0.5）\n");
+
+    struct R { float sum; float first_press; };
+    auto run_tap = [](float kp) -> R {
+        RecoilClosedLoop rc;
+        RecoilClConfig cfg = make_cfg();
+        cfg.kp = kp;
+        const float err = 2.0f;   // 点射典型偏移：目标框在准星下方 2px
+        R r{0.0f, 0.0f};
+        bool got_first = false;
+        for (int i = 0; i < 30; ++i) {   // 按住 120ms（主循环 4ms/帧 ⇒ 30 帧）
+            const auto out = rc.update(true, true, true, err, 4.0f, cfg);
+            r.sum += out.add_y;
+            if (!got_first && out.add_y > 0.0f) { r.first_press = out.add_y; got_first = true; }
+        }
+        return r;
+    };
+
+    const R no_kp = run_tap(0.0f);      // 纯积分（改前）
+    const R with_kp = run_tap(0.5f);    // 比例 + 积分（改后）
+    std::printf("     kp=0 首帧 %.4f 累计 %.3f | kp=0.5 首帧 %.4f 累计 %.3f\n",
+                no_kp.first_press, no_kp.sum, with_kp.first_press, with_kp.sum);
+    check(with_kp.first_press > 0.5f, "kp=0.5：起压首帧输出就不小（不是从 0 爬）");
+    check(with_kp.first_press > 10.0f * no_kp.first_press,
+          "比例项让首帧输出比纯积分大 10 倍以上");
+    check(with_kp.sum > 5.0f * no_kp.sum, "整段点射累计下压远大于纯积分（5 倍以上）");
+    check(no_kp.sum >= 0.0f && with_kp.sum > 0.0f, "两种配置都不出现负输出");
+}
+
 }  // namespace
 
 int main() {
@@ -190,6 +228,7 @@ int main() {
     test_reset();
     test_accumulates_on_positive_error();
     test_closed_loop_converges();
+    test_kp_immediate_output_for_tap_fire();
     std::printf("结果: %d failures\n", failures);
     return failures == 0 ? 0 : 1;
 }

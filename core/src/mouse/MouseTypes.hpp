@@ -426,6 +426,10 @@ struct VerticalCorrectionConfig {
 // ---------------------------------------------------------------------------
 struct RecoilClConfig {
     bool enabled = false;            // 总开关（默认关；不开时行为零变化）
+    float kp = 0.5f;                 // 比例增益（count / px）：本帧看到多少偏移就立刻按比例补
+                                     //   业主令「有实时偏移就纠偏」/「没有实时偏移就不猜」
+                                     //   ⇒ 点射每一段开火的第一帧就有输出，不等积分爬升；
+                                     //   ★待实测整定；过冲护栏 kp × px_per_count < 1
     float gain = 2.0f;               // 闭环积分增益（count / (px·s)）—— ★待实测整定
     float integral_max = 100.0f;     // 积分限幅（px·s）；实际下压量 = gain × clamp(积分)
     int start_frames = 6;            // 起压前最少连续有效观测帧数（前几发不压 = 设计内代价）
