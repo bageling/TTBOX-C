@@ -2467,6 +2467,69 @@ html[data-theme="light"] .danger-button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* 2026-09-29 重排：长卡按内容量跨轨，宽卡内部自动多列，把卡片高度从纵向堆叠里救出来。
+   定尺布局下 .assist-grid 恒 4 轨（主内容区 1348px，每轨约 328px）：
+   is-wide = 2 轨（约 664px）、is-three = 3 轨（约 1000px）、is-full = 整行；行内跨度相加恒 4。 */
+#assist-page .assist-section .assist-grid > .module-tile.is-wide {
+  grid-column: span 2;
+}
+
+#assist-page .assist-section .assist-grid > .module-tile.is-three {
+  grid-column: span 3;
+}
+
+#assist-page .assist-section .assist-grid > .module-tile.is-full {
+  grid-column: 1 / -1;
+}
+
+/* 宽卡内部：字段自动排成 3~6 列（下限 200px，宽轨不会把标签挤到换行）。 */
+#assist-page .assist-section .assist-grid > .module-tile.is-wide .assist-field-pair,
+#assist-page .assist-section .assist-grid > .module-tile.is-three .assist-field-pair,
+#assist-page .assist-section .assist-grid > .module-tile.is-full .assist-field-pair {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* 卡片内分组小标题：比 .module-title 轻一档，只做视觉分段。 */
+#assist-page .assist-section .tile-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0.06em;
+}
+
+#assist-page .assist-section .tile-subtitle::before {
+  content: "";
+  width: 3px;
+  height: 11px;
+  border-radius: 2px;
+  background: rgba(121, 214, 197, 0.7);
+}
+
+/* 勾选合并成一行，省掉每项独占一行的竖向开销。 */
+#assist-page .assist-section .check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 22px;
+}
+
+/* 勾选并进字段栅格时贴底，和同行输入框下沿齐平。 */
+#assist-page .assist-section .assist-field-pair > .check-line {
+  align-self: end;
+}
+
+/* 勾选挂在小标题行内：跟标题同排，不占字段栅格。 */
+#assist-page .assist-section .tile-subtitle > .check-line {
+  min-height: 18px;
+  margin-left: 2px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 #assist-page .assist-section .field {
   gap: 7px;
   color: var(--muted-strong);
@@ -5491,6 +5554,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <label class="switch"><input id="recoil_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
+                    <div class="tile-subtitle">触发键</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">主按键<select id="recoil_hotkey" data-config></select><span class="field-hint">压枪的主要触发键，通常保持左键。</span></label>
                       <label class="field">副按键<select id="recoil_hotkey2" data-config></select><span class="field-hint">可选第二触发键；「不使用」时只看主按键。</span></label>
@@ -5503,22 +5567,24 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       </label>
                       <label class="field">目标距离上限 px<input id="recoil_bb_distance_limit" data-config type="number" min="0" step="5"><span class="field-hint">目标离准星超过它就不压；0 为不限。</span></label>
                     </div>
+                    <div class="tile-subtitle">下压量</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">开火后延迟 ms<input id="recoil_bb_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按下热键后先等这么久再压，避免单点时误压。</span></label>
                       <label class="field">一阶平滑<input id="recoil_bb_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">每帧下压量与上一帧混合，越大越柔；0 为不平滑。</span></label>
                       <label class="field">最大下压距离 px<input id="recoil_bb_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">从准星起最多下压这么多像素就停；0 为不限。</span></label>
                       <label class="field">扳机联动倍率<input id="recoil_bb_adv_mult" data-config type="number" min="0" max="2" step="0.05"><span class="field-hint">自动扳机开火时整体压枪量的倍率，默认 0.9。</span></label>
                     </div>
-                    <div class="check-field">
+                    <div class="check-row">
                       <label class="check-line"><input id="recoil_bb_no_target_always" data-config type="checkbox"> 无目标时也压枪</label>
-                      <span class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</span>
                     </div>
+                    <div class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</div>
                   </div>
                 </article>
-                <article class="module-tile">
+                <article class="module-tile is-wide">
                   <div class="module-title"><strong>三段查表</strong></div>
                   <div class="assist-section-body">
                     <div class="field-hint">开火时长按「总时长」三等分，每段用各自的垂直/水平量。三个预设互不影响，切换预设只换下面这组数值。</div>
+                    <div class="tile-subtitle">预设与总时长</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">当前预设
                         <select id="recoil_bb_preset" data-config>
@@ -5530,6 +5596,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       </label>
                       <label class="field">总时长 ms<input id="recoil_bb_seg_total" data-config type="number" min="1" step="50"><span class="field-hint">该预设按住多久算压完；超过后固定用第 3 段继续压。</span></label>
                     </div>
+                    <div class="tile-subtitle">每段每帧量（垂直 / 水平）</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">第 1 段垂直 px<input id="recoil_bb_seg_v1" data-config type="number" step="0.1"><span class="field-hint">开火最开始那 1/3 时间，每帧往下压多少（正数 = 向下压）。</span></label>
                       <label class="field">第 1 段水平 px<input id="recoil_bb_seg_h1" data-config type="number" step="0.1"><span class="field-hint">同时间段每帧左右修正多少：正数 = 往右，负数 = 往左。</span></label>
@@ -5537,6 +5604,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">第 2 段水平 px<input id="recoil_bb_seg_h2" data-config type="number" step="0.1"><span class="field-hint">正数 = 往右，负数 = 往左。</span></label>
                       <label class="field">第 3 段垂直 px<input id="recoil_bb_seg_v3" data-config type="number" step="0.1"><span class="field-hint">最后 1/3 时间每帧下压量。按住超过「总时长」后也一直用这一段。</span></label>
                       <label class="field">第 3 段水平 px<input id="recoil_bb_seg_h3" data-config type="number" step="0.1"><span class="field-hint">正数 = 往右，负数 = 往左。</span></label>
+                    </div>
+                    <div class="tile-subtitle">全局倍率</div>
+                    <div class="field-grid compact assist-field-pair">
                       <label class="field">垂直全局倍率<input id="recoil_bb_global_vert" data-config type="number" min="0" max="3" step="0.05"><span class="field-hint">上面三段的下压量统一乘这个数：1 = 不变，小于 1 压得轻，大于 1 压得重。压过头了调小它最快。</span></label>
                       <label class="field">水平全局倍率<input id="recoil_bb_global_horiz" data-config type="number" min="0" max="3" step="0.05"><span class="field-hint">三段水平修正统一乘这个数，用法同上。</span></label>
                     </div>
@@ -5556,7 +5626,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     </div>
                   </div>
                 </article>
-                <article class="module-tile">
+                <article class="module-tile is-full">
                   <div class="module-title">
                     <strong>垂直修正</strong>
                     <label class="switch"><input id="vc_enabled" data-config type="checkbox"><span></span></label>
@@ -5569,39 +5639,29 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">等多久开始 ms<input id="vc_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按下开火键后先等这么久再开始压（1000 毫秒 = 1 秒）。单点时不想被压到就调大。</span></label>
                       <label class="field">最多压到多少 px<input id="vc_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">从准星起最多往下压这么多像素就停住；0 = 不限制。</span></label>
                     </div>
-                    <div class="check-field">
+                    <div class="field-grid compact assist-field-pair">
                       <label class="check-line"><input id="vc_no_target" data-config type="checkbox"> 无目标时也修正</label>
-                    </div>
-                    <div class="check-field">
+                      <label class="field">屏蔽乘子<input id="vc_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
                       <label class="check-line"><input id="vc_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路（垂直修正）</label>
                     </div>
+                    <div class="tile-subtitle">力度渐变（三段只能生效一个，排在上面的优先）</div>
+                    <div class="field-hint">让下压力度在开火过程中慢慢变化（都是倍率：1 = 不变）。时间过半取「起始→中段」的中间值，跑满时长后固定用「末段」。</div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="field">屏蔽乘子<input id="vc_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
-                    </div>
-                    <div class="module-title"><strong>力度渐变</strong></div>
-                    <div class="field-hint">让下压力度在开火过程中慢慢变化（都是倍率：1 = 不变）。三段只能生效一个，排在上面的优先。时间过半取「起始→中段」的中间值，跑满时长后固定用「末段」。</div>
-                    <div class="check-field">
                       <label class="check-line"><input id="vc_ramp1_enabled" data-config type="checkbox"> 渐变 1</label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
                       <label class="field">时长 ms<input id="vc_ramp1_duration_ms" data-config type="number" min="0" step="50"><span class="field-hint">这段渐变跑多久（1000 毫秒 = 1 秒）。</span></label>
                       <label class="field">起始<input id="vc_ramp1_start" data-config type="number" step="0.05"><span class="field-hint">刚开火时下压力度乘多少。1 = 不变，1.4 = 开头压得重一点。</span></label>
                       <label class="field">中段<input id="vc_ramp1_middle" data-config type="number" step="0.05"><span class="field-hint">开火到一半时的倍率。</span></label>
                       <label class="field">末段<input id="vc_ramp1_end" data-config type="number" step="0.05"><span class="field-hint">这段跑完之后的倍率，之后一直用它。设 0.01 = 后面基本不再压。</span></label>
                     </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="vc_ramp2_enabled" data-config type="checkbox"> 渐变 2</label>
-                    </div>
                     <div class="field-grid compact assist-field-pair">
+                      <label class="check-line"><input id="vc_ramp2_enabled" data-config type="checkbox"> 渐变 2</label>
                       <label class="field">时长 ms<input id="vc_ramp2_duration_ms" data-config type="number" min="0" step="50"></label>
                       <label class="field">起始<input id="vc_ramp2_start" data-config type="number" step="0.05"></label>
                       <label class="field">中段<input id="vc_ramp2_middle" data-config type="number" step="0.05"></label>
                       <label class="field">末段<input id="vc_ramp2_end" data-config type="number" step="0.05"></label>
                     </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="vc_ramp3_enabled" data-config type="checkbox"> 渐变 3</label>
-                    </div>
                     <div class="field-grid compact assist-field-pair">
+                      <label class="check-line"><input id="vc_ramp3_enabled" data-config type="checkbox"> 渐变 3</label>
                       <label class="field">时长 ms<input id="vc_ramp3_duration_ms" data-config type="number" min="0" step="50"></label>
                       <label class="field">起始<input id="vc_ramp3_start" data-config type="number" step="0.05"></label>
                       <label class="field">中段<input id="vc_ramp3_middle" data-config type="number" step="0.05"></label>
@@ -5614,7 +5674,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 
             <section id="assist-section-trigger" class="assist-section" data-assist-section hidden>
               <div class="assist-grid control-group-grid">
-                <article class="module-tile">
+                <article class="module-tile is-full">
                   <div class="module-title">
                     <h3>自动开火</h3>
                     <label class="switch"><input id="trigger2_enabled" data-config type="checkbox"><span></span></label>
@@ -5625,40 +5685,39 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">长按键 1<select id="trigger2_key1" data-config></select><span class="field-hint">按住它 = 进入这套自动开火状态。</span></label>
                       <label class="field">长按键 2<select id="trigger2_key2" data-config></select><span class="field-hint">「不使用」= 只看长按键 1。</span></label>
                       <label class="field">开火按键<select id="trigger2_fire_button" data-config></select><span class="field-hint">模拟按哪个键开枪，通常左键。</span></label>
+                    </div>
+                    <div class="tile-subtitle">第一枪</div>
+                    <div class="field-grid compact assist-field-pair">
                       <label class="field">多确定才打<input id="trigger2_confidence" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">识别把握低于这个数就不开枪。</span></label>
                       <label class="field">第一枪要求多准 px<input id="trigger2_first_err" data-config type="number" min="0" step="1"><span class="field-hint">准星离人小于这个像素数才允许打第一枪。调大更容易开枪，调小必须瞄得很准才打。</span></label>
                       <label class="field">第一枪延迟 ms<input id="trigger2_first_delay" data-config type="number" min="0" step="5"><span class="field-hint">进入状态后先等这么久再打第一枪。</span></label>
+                      <label class="field">重锁重置 ms<input id="trigger2_retarget_reset_ms" data-config type="number" min="0" step="50"><span class="field-hint">换目标后多少毫秒内重新走首枪门。</span></label>
+                    </div>
+                    <div class="tile-subtitle">连发节奏</div>
+                    <div class="field-grid compact assist-field-pair">
                       <label class="field">连发间隔（帧）<input id="trigger2_fire_interval" data-config type="number" min="1" step="1"><span class="field-hint">隔多少帧打一发（按画面帧算，不是毫秒）。</span></label>
                       <label class="field">间隔随机（帧）<input id="trigger2_fire_random" data-config type="number" min="0" step="1"><span class="field-hint">间隔上下浮动这么多帧，节奏更像人。</span></label>
                       <label class="field">每次发数<input id="trigger2_fire_count" data-config type="number" min="1" step="1"><span class="field-hint">一轮打几发。</span></label>
                       <label class="field">按压时长 ms<input id="trigger2_press_duration" data-config type="number" min="1" step="5"><span class="field-hint">每发按下去保持多久再松开。太短游戏可能不认。</span></label>
                       <label class="field">移动节流帧<input id="trigger2_move_throttle_frames" data-config type="number" min="0" step="1"><span class="field-hint">开火后多少帧内不再修正鼠标，防抖。</span></label>
-                      <label class="field">重锁重置 ms<input id="trigger2_retarget_reset_ms" data-config type="number" min="0" step="50"><span class="field-hint">换目标后多少毫秒内重新走首枪门。</span></label>
                     </div>
-                    <div class="check-field">
+                    <div class="tile-subtitle">联动</div>
+                    <div class="check-row">
                       <label class="check-line"><input id="trigger2_with_aim" data-config type="checkbox"> 附带自瞄</label>
-                    </div>
-                    <div class="check-field">
                       <label class="check-line"><input id="trigger2_with_crosshair" data-config type="checkbox"> 中心须被目标框覆盖</label>
-                    </div>
-                    <div class="check-field">
                       <label class="check-line"><input id="trigger2_with_simple_recoil" data-config type="checkbox"> 联动简易压枪</label>
-                    </div>
-                    <div class="check-field">
                       <label class="check-line"><input id="trigger2_with_adv_recoil" data-config type="checkbox"> 联动进阶压枪</label>
-                    </div>
-                    <div class="check-field">
                       <label class="check-line"><input id="trigger2_precision_enabled" data-config type="checkbox"> 精度模拟</label>
-                      <span class="field-hint">在作用半径内按持续帧数逐步收束，降低连续空枪。</span>
                     </div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="field">作用半径 px<input id="trigger2_precision_range" data-config type="number" min="0" step="1"></label>
-                      <label class="field">持续帧数<input id="trigger2_precision_frames" data-config type="number" min="1" step="1"></label>
+                      <label class="field">作用半径 px<input id="trigger2_precision_range" data-config type="number" min="0" step="1"><span class="field-hint">开「精度模拟」后，在这半径内按持续帧数逐步收束落点，降低连续空枪。</span></label>
+                      <label class="field">持续帧数<input id="trigger2_precision_frames" data-config type="number" min="1" step="1"><span class="field-hint">收束多少帧后达到最稳。</span></label>
                     </div>
-                    <div class="check-field">
+                    <div class="tile-subtitle">停手检测</div>
+                    <div class="check-row">
                       <label class="check-line"><input id="trigger2_stop_detect_enabled" data-config type="checkbox"> 准星不见了就停手</label>
-                      <span class="field-hint">开启后，画面中心那一小块里**找不到**你指定的准星颜色就不开枪（准星被挡住、切枪没了、进动画了都能自动停手）。关着的时候不看颜色，正常打。</span>
                     </div>
+                    <div class="field-hint">开启后，画面中心那一小块里找不到你指定的准星颜色就不开枪（准星被挡住、切枪没了、进动画了都能自动停手）。关着的时候不看颜色，正常打。</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">准星颜色编号<input id="trigger2_stop_detect_color_id" data-config type="number" min="0" step="1"><span class="field-hint">0=红 1=绿 2=青 3=黄 4=白 5=粉。选跟你游戏里准星一样的那个颜色。</span></label>
                       <label class="field">颜色容差<input id="trigger2_stop_detect_tolerance" data-config type="number" min="0" step="1"><span class="field-hint">颜色差多少以内都算同一个色。准星有半透明、发光边就调大（比如 80~120）；老是误判就调小。</span></label>
@@ -5672,21 +5731,28 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 
             <section id="assist-section-lead" class="assist-section" data-assist-section hidden>
               <div class="assist-grid control-group-grid">
-                <article class="module-tile">
+                <article class="module-tile is-three">
                   <div class="module-title">
                     <strong>提前量</strong>
                     <label class="switch"><input id="lead2_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
                     <div class="field-hint">把横向误差按帧积分累积成偏移（误差越大攒得越快），死区内自动衰减。纵向输出越大，横向提前量越小，防斜拉。</div>
+                    <div class="tile-subtitle">攒与放</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">攒得多快<input id="lead2_gain" data-config type="number" min="0" step="0.005"><span class="field-hint">每帧把「差多少」按比例攒进提前量里。攒得越快提前量涨得越快。</span></label>
                       <label class="field">最多提前多少 px<input id="lead2_max_offset" data-config type="number" min="0" step="1"><span class="field-hint">提前量最多攒到这个像素数就封顶，防止瞄到天上去。</span></label>
                       <label class="field">放掉的速度<input id="lead2_decay" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">准星已经很接近目标时，每帧把攒的提前量乘上这个数慢慢放掉。0.95 = 慢慢放，越小放得越快。</span></label>
+                    </div>
+                    <div class="tile-subtitle">瞄准门限</div>
+                    <div class="field-grid compact assist-field-pair">
                       <label class="field">多远才开始 px<input id="lead2_activation_distance" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标超过这个距离才启用提前量；贴脸时不启用。</span></label>
                       <label class="field">多近算瞄到了 px<input id="lead2_dead_zone" data-config type="number" min="0" step="0.5"><span class="field-hint">误差小于这个像素就算「已经瞄到」，开始放掉提前量。</span></label>
                       <label class="field">保持时长 ms<input id="lead2_hold_ms" data-config type="number" min="0" step="5"><span class="field-hint">算出来之后至少保持这么久再变，防止一帧一变抖来抖去。</span></label>
                       <label class="field">冷却 ms<input id="lead2_cooldown_ms" data-config type="number" min="0" step="10"><span class="field-hint">放掉之后隔这么久才重新开始攒。</span></label>
+                    </div>
+                    <div class="tile-subtitle">Y 轴抑制</div>
+                    <div class="field-grid compact assist-field-pair">
                       <label class="field">Y 抑制下限 px/帧<input id="lead2_y_suppress_min" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出小于它不抑制。</span></label>
                       <label class="field">Y 抑制上限 px/帧<input id="lead2_y_suppress_max" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出大于它则完全抑制横向提前量。</span></label>
                     </div>
@@ -5712,13 +5778,14 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 
             <section id="assist-section-humanize" class="assist-section" data-assist-section hidden>
               <div class="assist-grid control-group-grid">
-                <article class="module-tile">
+                <article class="module-tile is-three">
                   <div class="module-title">
                     <strong>移动整形链</strong>
                     <label class="switch"><input id="humanize_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
                     <div class="field-hint">按固定顺序处理每一步：低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。全关时输出与不开完全一致。</div>
+                    <div class="tile-subtitle">整形链</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">低通系数<input id="humanize_smooth_factor" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">把本帧输出向上一帧靠；0 为关闭。开了会更柔但更迟钝。</span></label>
                       <label class="field">过冲强度<input id="humanize_overshoot" data-config type="number" min="0" step="0.05"><span class="field-hint">离目标越远越容易冲过头一点；0 为关闭。</span></label>
@@ -5727,20 +5794,22 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">反应慢半拍 ms<input id="humanize_delay_ms" data-config type="number" min="0" step="5"><span class="field-hint">看到目标后先愣这么久才开始动（1000 毫秒 = 1 秒）。调大更像人，但跟枪会变慢。</span></label>
                       <label class="field">反应时间随机 ±ms<input id="humanize_delay_random_ms" data-config type="number" min="0" step="5"><span class="field-hint">每次的反应时间在上下这个范围内浮动，不至于每次都一模一样。</span></label>
                     </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="speed_fluctuation_enabled" data-config type="checkbox"> 速度波动</label>
-                      <span class="field-hint">整段移动的速度曲线做轻微起伏，看起来更像手在动。</span>
+                    <div class="tile-subtitle">
+                      <span>速度波动</span>
+                      <label class="check-line"><input id="speed_fluctuation_enabled" data-config type="checkbox"> 开启</label>
                     </div>
+                    <div class="field-hint">整段移动的速度曲线做轻微起伏，看起来更像手在动。</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">起步速度<input id="speed_fluctuation_start_speed" data-config type="number" min="0" step="0.05"><span class="field-hint">刚开始动的时候有多快（1 = 全速）。设小一点就是「先慢慢起手」。</span></label>
                       <label class="field">加速段占多少<input id="speed_fluctuation_accel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的前面多少比例用来加速（0.2 = 前 20%）。</span></label>
                       <label class="field">减速段占多少<input id="speed_fluctuation_decel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的最后多少比例用来减速收尾（0.2 = 后 20%）。</span></label>
                       <label class="field">起伏有多大<input id="speed_fluctuation_intensity" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">速度忽快忽慢的程度。0 就是匀速，0.15 是轻微起伏，再大就明显一顿一顿了。</span></label>
                     </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="accuracy_sim_enabled" data-config type="checkbox"> 精度模拟</label>
-                      <span class="field-hint">不是每次都钉在正中，按概率把落点推到框边或四角。</span>
+                    <div class="tile-subtitle">
+                      <span>精度模拟</span>
+                      <label class="check-line"><input id="accuracy_sim_enabled" data-config type="checkbox"> 开启</label>
                     </div>
+                    <div class="field-hint">不是每次都钉在正中，按概率把落点推到框边或四角。</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">完美命中概率 %<input id="accuracy_sim_perfect_rate" data-config type="number" min="0" max="100" step="1"><span class="field-hint">有多少比例的次数是正正好好瞄在中间的。90 = 十次里有九次准、一次故意偏一点。想更像人就往下调。</span></label>
                       <label class="field">偏移强度<input id="accuracy_sim_offset_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">占框半径的比例。</span></label>
@@ -5802,7 +5871,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     </div>
                   </div>
                 </article>
-                <article class="module-tile">
+                <article class="module-tile is-wide">
                   <div class="module-title">
                     <strong>弧线拉枪</strong>
                     <label class="switch"><input id="bezier_enabled" data-config type="checkbox"><span></span></label>
@@ -5816,8 +5885,8 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">幅度上限<input id="bezier_peak_max" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">抽到的弧度最高到这儿。下限和上限拉得越开，每次的弯法越不一样（更随机）；设成一样就是每次都同一个弯。</span></label>
                       <label class="field">最小单步 px<input id="bezier_min_move" data-config type="number" min="0" max="5" step="0.05"><span class="field-hint">一次要挪的距离小于它就跳过这一步（省掉没意义的小碎步），挪的量会合到下一步里，不会走丢。</span></label>
                     </div>
-                    <div class="check-field">
-                      <span class="field-hint">往哪边弯（多选 = 每次随机挑一个方向；一个都不选 = 退化成直线）：</span>
+                    <div class="field-hint">往哪边弯（多选 = 每次随机挑一个方向；一个都不选 = 退化成直线）：</div>
+                    <div class="check-row">
                       <label class="check-line"><input id="bezier_dir_up" data-config type="checkbox"> 向上鼓</label>
                       <label class="check-line"><input id="bezier_dir_down" data-config type="checkbox"> 向下鼓</label>
                       <label class="check-line"><input id="bezier_dir_left" data-config type="checkbox"> 向左鼓</label>
@@ -5856,7 +5925,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     </div>
                   </div>
                 </article>
-                <article class="module-tile">
+                <article class="module-tile is-wide">
                   <div class="module-title">
                     <strong>头身稳定过滤</strong>
                     <label class="switch"><input id="selector_head_body_stable" data-config type="checkbox"><span></span></label>
