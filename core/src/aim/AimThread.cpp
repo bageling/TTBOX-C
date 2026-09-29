@@ -658,7 +658,18 @@ void AimThread::loop() {
             // 本来就不消费它们（见 RecoilController.hpp 的 has_target 分支）。
             float recoil_add_x = 0.0f;
             float recoil_add_y = 0.0f;
-            {
+            // ★★ 两套压枪**互斥**（2026-09-29 14:3x 业主令）：开火期闭环纠偏 enabled ⇒
+            //   老引擎（BB 三段查表 / 老速率模型）**整段不跑**。理由两条：
+            //     ① 两套叠加会过压 + 来回摆；
+            //     ② 叠加时分不清"压得好"是谁的功劳，A/B 对比无从谈起。
+            //   闭环关闭 ⇒ 老引擎照旧（闭环内部第一原则会直接清零返回 0，不残留输出）。
+            //   闭环接管期间每帧复位老引擎：它的时钟（bb_clock_ms_）与残差是按 dt 自维护的，
+            //   停跑期间会滞留陈值，复位保证"切回老引擎"时不是从一段陈旧状态接着跑。
+            const bool recoil_cl_takeover = recoil_cl_cfg.enabled;
+            if (recoil_cl_takeover) {
+                recoil_.reset();
+            }
+            if (!recoil_cl_takeover) {
                 if (recoil_bb_cfg.enabled) {
                     // BB 三段查表引擎（含垂直修正 + 力度渐变）。
                     // ★ adv 倍率已真接线：扳机首枪发出 recoil_adv ⇒ 走 recoil_bb.adv_mult（默认 0.9）。
@@ -709,7 +720,8 @@ void AimThread::loop() {
             }
             const auto cl_out = recoil_cl_.update(
                 recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, control_y, dt_ms, recoil_cl_cfg);
-            // 与老压枪同域相加（两套都开就是叠加；面板上已提示与三段查表二选一）。
+            // 与老压枪同域相加 —— 但两套**互斥**（见上面的 recoil_cl_takeover）：
+            // 闭环 enabled 时老引擎整段没跑，所以这里加到的就是闭环的全部输出，不存在叠加。
             recoil_add_y += cl_out.add_y;
             // ---- 输出尾链 ----
             // 有目标 ⇒ PID 已算出 scaled；无目标但压枪在压 ⇒ 也走同一条尾链

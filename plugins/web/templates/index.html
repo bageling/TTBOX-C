@@ -5617,8 +5617,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <div class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</div>
                     <div class="tile-subtitle">开火期闭环纠偏（自动适应，不用选枪）</div>
                     <div class="field-hint">开火后每一帧看实际偏了多少、下一帧反向补回来，连续纠偏让弹道自己收敛；不需要选枪、录枪或提前采数据。没有可靠的实时观测时整套不动作 —— 宁可前几发不压，也不拿上一次开火的经验去猜。</div>
+                    <div class="field-hint">开着它的时候，上面的三段查表整套停用（两套不会叠加，避免过压和来回摆）；关掉就完全走老引擎。想对比两套效果，只切这一个勾就行。</div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="recoil_cl_enabled" data-config type="checkbox"> 启用闭环纠偏</label>
+                      <label class="check-line"><input id="recoil_cl_enabled" data-config type="checkbox"> 启用闭环纠偏（顶替上面的三段查表）</label>
                       <label class="field">即时纠偏比例<input id="recoil_cl_kp" data-config type="number" min="0" step="0.1"><span class="field-hint">这一帧看到多少像素偏移，就按这个比例立刻补下压，不等累计。点射靠的就是它。填大了会来回摆。</span></label>
                       <label class="field">纠偏强度<input id="recoil_cl_gain" data-config type="number" min="0" step="0.5"><span class="field-hint">每累计 1 像素·秒的偏差补多少 count 下压。压不够就加，压过头就减。</span></label>
                       <label class="field">积分上限 px·s<input id="recoil_cl_integral_max" data-config type="number" min="0" step="10"><span class="field-hint">偏差累计到这么多就不再涨，防止越压越狠。</span></label>
