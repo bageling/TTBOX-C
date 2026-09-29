@@ -11,10 +11,10 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-29 起产品版本为 "V1.0.06"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-29 起产品版本为 "V1.0.07"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
-project(ttbox_core VERSION 1.0.06 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.07 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -715,6 +715,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_selector_stress tests/test_selector_stress.cpp)
   target_link_libraries(test_selector_stress PRIVATE ttbox_core)
   add_test(NAME test_selector_stress COMMAND test_selector_stress)
+
+  # V1.0.07：贴裁剪区边界剔除（防"锁到画面外半截人猛拉一把"）+ 锁定尺寸一致性
+  add_executable(test_selector_clip_guard tests/test_selector_clip_guard.cpp)
+  target_link_libraries(test_selector_clip_guard PRIVATE ttbox_core)
+  add_test(NAME test_selector_clip_guard COMMAND test_selector_clip_guard)
 
   # C10/C11/C14：生命周期压力 + RuntimeConfig 并发读写压测
   add_executable(test_lifecycle_stress tests/test_lifecycle_stress.cpp)

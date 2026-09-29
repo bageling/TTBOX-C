@@ -31,12 +31,39 @@ float box_center_y(const DetectionBox& b) { return (b.y1 + b.y2) * 0.5f; }
 float box_diag(const DetectionBox& b) {
     return std::hypot(b.x2 - b.x1, b.y2 - b.y1);
 }
+
+// V1.0.07：框高一致性 —— 高比落在 [1/ratio, ratio] 内才算"同一个目标的同一套框"。
+// ratio ≤ 0 或任一框高非正 ⇒ 一律放行（不引入新否决，保证关掉时行为与加此参数前一致）。
+bool size_ratio_ok(float h_ref, float h_cand, float ratio) {
+    if (ratio <= 0.0f) return true;
+    if (h_ref <= 0.0f || h_cand <= 0.0f) return true;
+    const float r = h_ref > h_cand ? h_ref / h_cand : h_cand / h_ref;
+    return r <= ratio;
+}
 }  // namespace
 
 std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
     const std::vector<DetectionBox>& dets, const TargetSelectorConfig& cfg, float cx, float cy,
     float radius_sq) const {
     std::vector<Candidate> out;
+    // ---- V1.0.07：贴裁剪区边界的候选剔除（详见 TargetSelector.hpp）----
+    // 裁剪区半宽 = search_radius_px（capture 与画面同中心；0 = 未知 ⇒ 不做该判定）。
+    const float crop_half = cfg.search_radius_px > 0.0f ? cfg.search_radius_px : 0.0f;
+    auto clipped_by_crop = [&](const DetectionBox& b) -> bool {
+        if (crop_half <= 0.0f) return false;
+        if (!cfg.reject_clip_horizontal && !cfg.reject_clip_top) return false;
+        // 离准星近的框不判：近身目标的腿本来就常被裁剪区下边截掉，那是正常情况。
+        if (std::hypot(box_center_x(b) - cx, box_center_y(b) - cy) <= cfg.clip_center_max_px) {
+            return false;
+        }
+        const float m = cfg.clip_margin_px;
+        if (cfg.reject_clip_horizontal &&
+            (b.x1 <= cx - crop_half + m || b.x2 >= cx + crop_half - m)) {
+            return true;
+        }
+        if (cfg.reject_clip_top && b.y1 <= cy - crop_half + m) return true;
+        return false;
+    };
     for (const auto& b : dets) {
         if (b.score < cfg.confidence) continue;
         if (!cfg.class_filter.empty()) {
@@ -44,6 +71,7 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                                       b.class_id) != cfg.class_filter.end();
             if (!in) continue;
         }
+        if (clipped_by_crop(b)) continue;  // 被裁剪区切线切断的框：瞄准点不可信
         const float bdx = b.x1 + (b.x2 - b.x1) * cfg.aim_ratio_x - cx;
         const float bdy = b.y1 + (b.y2 - b.y1) * cfg.aim_ratio_y - cy;
         const float d_sq = bdx * bdx + bdy * bdy;
@@ -233,9 +261,13 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                                         const float ref_cx = (cfg.use_kalman_predict && at->pred_cx != 0.0f) ? at->pred_cx : at->cx;
                                         const float ref_cy = (cfg.use_kalman_predict && at->pred_cy != 0.0f) ? at->pred_cy : at->cy;
                     // 找离锁定框中心最近的候选
+                    // V1.0.07：加尺寸一致性 —— 框高比超限的候选视为"另一个目标/另一套框"，
+                    //   不参与竞争（否则 cls5↔cls0 两套人体框会整块换掉，落点按 0.31×Δh 跳 60~200px）。
+                    const float h_ref = at->box.y2 - at->box.y1;
                     const Candidate* best = nullptr;
                     float best_d = match_r_sq;
                     for (const auto& c : cands) {
+                        if (!size_ratio_ok(h_ref, c.box.y2 - c.box.y1, cfg.track_size_ratio)) continue;
                         const float d = (c.cx - ref_cx) * (c.cx - ref_cx) +
                                         (c.cy - ref_cy) * (c.cy - ref_cy);
                         if (d < best_d) { best_d = d; best = &c; }

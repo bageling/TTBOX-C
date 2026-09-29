@@ -205,6 +205,12 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.switch_cooldown_ms 不能为负";
         return false;
     }
+    // V1.0.07：贴裁剪区剔除 / 锁定尺寸一致性（默认开，见 TargetSelector.hpp）
+    if (mouse.clip_margin_px < 0.0f || mouse.clip_center_max_px < 0.0f ||
+        mouse.track_size_ratio < 0.0f) {
+        if (error) *error = "mouse.clip_margin_px / clip_center_max_px / track_size_ratio 不能为负";
+        return false;
+    }
     // 选靶四项机制（2026-09-24 补通路）：均为"加进来才生效"的可选增强，默认全关。
     if (mouse.lock_hold_ms < 0.0f || mouse.switch_threshold_px < 0.0f) {
         if (error) *error = "mouse.lock_hold_ms / switch_threshold_px 不能为负";
@@ -769,6 +775,12 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
     m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
     m.set("switch_cooldown_ms", JsonValue::number(static_cast<double>(mouse.switch_cooldown_ms)));
+    // V1.0.07：贴裁剪区剔除 + 锁定尺寸一致性（缺陷修复，出厂即生效，可单独关）
+    m.set("reject_clip_horizontal", JsonValue::boolean(mouse.reject_clip_horizontal));
+    m.set("reject_clip_top", JsonValue::boolean(mouse.reject_clip_top));
+    m.set("clip_margin_px", JsonValue::number(static_cast<double>(mouse.clip_margin_px)));
+    m.set("clip_center_max_px", JsonValue::number(static_cast<double>(mouse.clip_center_max_px)));
+    m.set("track_size_ratio", JsonValue::number(static_cast<double>(mouse.track_size_ratio)));
     // 选靶四项机制（默认 0/false ⇒ 不开时选靶输出与加入前逐字节一致）
     m.set("lock_hold_ms", JsonValue::number(static_cast<double>(mouse.lock_hold_ms)));
     m.set("priority_scoring", JsonValue::boolean(mouse.priority_scoring));
@@ -1224,6 +1236,12 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 static_cast<float>(obj_num(*ba, "box_h_ema_alpha", 0.10));
         }
         p.mouse.switch_cooldown_ms = static_cast<float>(obj_num(*m, "switch_cooldown_ms", 600.0));
+        // V1.0.07：贴裁剪区剔除 + 锁定尺寸一致性。缺键 ⇒ 吃结构体默认（修复默认开）。
+        p.mouse.reject_clip_horizontal = obj_bool(*m, "reject_clip_horizontal", true);
+        p.mouse.reject_clip_top = obj_bool(*m, "reject_clip_top", false);
+        p.mouse.clip_margin_px = static_cast<float>(obj_num(*m, "clip_margin_px", 6.0));
+        p.mouse.clip_center_max_px = static_cast<float>(obj_num(*m, "clip_center_max_px", 105.0));
+        p.mouse.track_size_ratio = static_cast<float>(obj_num(*m, "track_size_ratio", 2.0));
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));

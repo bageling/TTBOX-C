@@ -243,6 +243,14 @@ void AimThread::loop() {
                 // 0.5 / 600ms；两者置 0 可完全关闭，回到加此机制前的行为。
                 scfg.switch_hysteresis = frame_profile->mouse.switch_hysteresis;
                 scfg.switch_cooldown_ms = frame_profile->mouse.switch_cooldown_ms;
+                // V1.0.07：贴裁剪区边界剔除 + 锁定尺寸一致性（缺陷修复，出厂即生效）。
+                // 两者的定障依据见 TargetSelector.hpp；前者靠 search_radius_px 推出裁剪区
+                // 左右边界（capture 与画面同中心），不需要新的几何通路。
+                scfg.reject_clip_horizontal = frame_profile->mouse.reject_clip_horizontal;
+                scfg.reject_clip_top = frame_profile->mouse.reject_clip_top;
+                scfg.clip_margin_px = frame_profile->mouse.clip_margin_px;
+                scfg.clip_center_max_px = frame_profile->mouse.clip_center_max_px;
+                scfg.track_size_ratio = frame_profile->mouse.track_size_ratio;
                 // 选靶四项机制（2026-09-24 补通路）：锁定期 / 打分制 / 粘滞 / 头身稳定。
                 // ★ 此前 TargetSelector 里算法已实现但这里没赋值 ⇒ 永远吃结构体默认（全关），
                 //   面板也开不了。默认值仍是 0/false ⇒ 不开时选靶行为逐字节不变。

@@ -747,6 +747,16 @@ struct MouseProfile {
     //  两者都为 0/0 时行为与加入前逐字节一致（旧用例兼容）。
     float switch_hysteresis = 0.5f;             // 切换滞后比例（0.5 = 需近 50%）
     float switch_cooldown_ms = 600.0f;          // 切换冷却（ms）
+    // ---- V1.0.07：贴裁剪区边界剔除 + 锁定尺寸一致性（详见 TargetSelector.hpp）----
+    // 前四项是缺陷修复（出厂即生效，不是可选特性）：
+    //   ① 贴裁剪区左右边界的框（画面外的人被切成瘦长条）一旦被选中会把准星猛拉 300px；
+    //   ② 第 1 层 track_lock 不看框尺寸 ⇒ cls5↔cls0 两套人体框来回换，落点乱跳。
+    // 每项都可单独关（设 false / 0）回到加此参数前的行为，便于 A/B 定位。
+    bool reject_clip_horizontal = true;   // 左/右贴裁剪区边界 ⇒ 剔除候选
+    bool reject_clip_top = false;         // 上边贴裁剪区边界 ⇒ 剔除（默认关，近身仰角目标易误伤）
+    float clip_margin_px = 6.0f;          // 框边距裁剪区边界多远算"被切断"
+    float clip_center_max_px = 105.0f;    // 离准星超过这个距离才判贴边
+    float track_size_ratio = 2.0f;        // 锁定换块的框高比上限（0 = 关）
     // ---- 选靶四项机制（对齐 BB 目标选择/锁定，见 bb-port/01 §1）----
     // ★ 默认 0/false ⇒ 不开时选靶行为与本参数加入前**逐字节一致**（1.5.46 兼容）。
     //   对应 TargetSelectorConfig 里的同名字段，由 AimThread 逐帧灌进 scfg。
