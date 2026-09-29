@@ -236,6 +236,15 @@ void AimThread::loop() {
                     if (cap.width > 0 && cap.height > 0) {
                         scfg.search_radius_px =
                             static_cast<float>(cap.width < cap.height ? cap.width : cap.height) * 0.5f;
+                        // V1.0.08：裁剪区下边界（框/准星同一坐标系）= 帧高/2 + 裁剪偏移 + 半宽。
+                        // 板端 1440/2 + 0 + 320 = 1040，与实测一致。框底贴到它 ⇒ 框高被截断。
+                        crop_bottom_px_ =
+                            task.frame_height > 0
+                                ? static_cast<float>(task.frame_height) * 0.5f +
+                                      static_cast<float>(cap.offset_y) + scfg.search_radius_px
+                                : -1.0f;
+                    } else {
+                        crop_bottom_px_ = -1.0f;
                     }
                 }
                 scfg.lost_grace_ms = frame_profile->mouse.lost_grace_ms;
@@ -375,7 +384,8 @@ void AimThread::loop() {
                 ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
             if (target_ok) {
-                if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty)) {
+                if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty,
+                                  crop_bottom_px_)) {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
                 }

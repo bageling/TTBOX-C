@@ -771,6 +771,10 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("aim_offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_y)));
     m.set("offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.offset_x)));
     m.set("offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.offset_y)));
+    // V1.0.08：框底被裁剪区截断时的落点外推（默认开 = 缺陷修复，可关做 A/B）
+    m.set("clip_bottom_extrapolate", JsonValue::boolean(mouse.aim_point.clip_bottom_extrapolate));
+    m.set("body_w_over_h", JsonValue::number(static_cast<double>(mouse.aim_point.body_w_over_h)));
+    m.set("clip_bottom_margin_px", JsonValue::number(static_cast<double>(mouse.aim_point.clip_bottom_margin_px)));
     // switch_delay_ms 已删（尸体字段，见 MouseTypes.hpp 的说明）；老配置里带着会被忽略。
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
     m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
@@ -1209,6 +1213,10 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.aim_point.aim_offset_y = static_cast<float>(obj_num(*m, "aim_offset_y", 0.0));
         p.mouse.aim_point.offset_x = static_cast<float>(obj_num(*m, "offset_x", 0.5));
         p.mouse.aim_point.offset_y = static_cast<float>(obj_num(*m, "offset_y", 0.5));
+        p.mouse.aim_point.clip_bottom_extrapolate = obj_bool(*m, "clip_bottom_extrapolate", true);
+        p.mouse.aim_point.body_w_over_h = static_cast<float>(obj_num(*m, "body_w_over_h", 0.32));
+        p.mouse.aim_point.clip_bottom_margin_px =
+            static_cast<float>(obj_num(*m, "clip_bottom_margin_px", 12.0));
         p.mouse.lost_grace_ms = static_cast<float>(obj_num(*m, "lost_grace_ms", 78.0));
         p.mouse.switch_hysteresis = static_cast<float>(obj_num(*m, "switch_hysteresis", 0.5));
         // 选靶四项机制（默认 0/false，见 MouseProfile 注释）

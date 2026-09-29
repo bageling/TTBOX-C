@@ -5,6 +5,12 @@
 
 namespace ttbox::core::aim {
 
+namespace {
+// V1.0.08：贴裁剪区下边界时，身高最多按可见框高的多少倍外推。
+// 取 3.0 是给极端近身留余量；正常情况由框宽约束，这个上限只防异常框。
+constexpr float kClipBottomMaxStretch = 3.0f;
+}  // namespace
+
 void class_offset_for(const AimPointProfile& prof, int class_id,
                       float* offset_x, float* offset_y) {
     const ClassOffset* best = nullptr;
@@ -22,13 +28,23 @@ void class_offset_for(const AimPointProfile& prof, int class_id,
 }
 
 bool aim_point_at(const DetectionBox& box, int class_id, const AimPointProfile& prof,
-                  float* tx, float* ty) {
+                  float* tx, float* ty, float crop_bottom_px) {
     const float w = box.x2 - box.x1;
-    const float h = box.y2 - box.y1;
+    float h = box.y2 - box.y1;
     if (w <= 0.0f || h <= 0.0f) return false;
     float ox = prof.offset_x;
     float oy = prof.offset_y;
     class_offset_for(prof, class_id, &ox, &oy);
+    // V1.0.08：框底贴到裁剪区下边界 ⇒ 下半身在 crop 之外，可见框高偏小 ⇒ 落点相对人体
+    // 上飘（越近越严重）。此时改用**框宽**反推身高：宽度不随纵向裁剪失真，而人体框
+    // 宽/高 在板端三批记录里都稳定在 0.32（p10-p90 = 0.30~0.34）。
+    // 只放大不缩小，且最多放大 kClipBottomMaxStretch 倍（防蹲姿/异常框把落点推到脚下）。
+    if (prof.clip_bottom_extrapolate && crop_bottom_px > 0.0f && prof.body_w_over_h > 0.05f &&
+        box.y2 >= crop_bottom_px - prof.clip_bottom_margin_px) {
+        const float h_from_w = w / prof.body_w_over_h;
+        const float h_cap = h * kClipBottomMaxStretch;
+        h = std::min(std::max(h_from_w, h), h_cap);
+    }
     *tx = box.x1 + ox * w;
     *ty = box.y1 + oy * h;
     return true;

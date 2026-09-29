@@ -16,10 +16,13 @@ namespace ttbox::core::aim {
 // 计算瞄准点（crop 坐标系）。
 //   box：目标框（crop 系）；class_id：目标类别
 //   prof：瞄准点配置（默认 offset + class_offsets）
+//   crop_bottom_px：裁剪区下边界（与 box 同一坐标系）。<=0 = 未知 ⇒ 不做截断外推。
 //   输出 tx/ty = 目标框内瞄准点（像素，crop 系）。
 // 返回 false 仅当 box 无效。
+// V1.0.08：框底贴到裁剪区下边界时（近身目标下半身在 crop 之外），可见框高被截断，
+//   按它算的落点会相对人体上飘 ⇒ 此时用框宽反推完整身高（见 AimPointProfile 同名注释）。
 bool aim_point_at(const DetectionBox& box, int class_id, const AimPointProfile& prof,
-                  float* tx, float* ty);
+                  float* tx, float* ty, float crop_bottom_px = -1.0f);
 
 // 获取 class_id 命中的类偏移（按 priority 最高）；无命中返回默认。
 void class_offset_for(const AimPointProfile& prof, int class_id,
