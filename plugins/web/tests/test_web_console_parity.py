@@ -35,9 +35,20 @@ EXPECTED_TAB_LABELS = [
     '07预设参数', '08系统状态', '09风扇控制',
 ]
 
-# [布局冻结] .app-shell 固定宽度基线（px）；停用的上游响应式断点共 4 个
-FROZEN_APP_SHELL_WIDTH = 1660
-FROZEN_DISABLED_BREAKPOINTS = (1180, 920, 480, 560)
+# [布局冻结 → 2026-09-29 响应式解冻] .app-shell 宽度**上限**基线（px）。
+# 2026-09-18 业主把布局定死成固定 1660px；2026-09-29 业主指令解冻
+# （「控制台 UI 要跟随浏览器大小」「电脑端也加上缩放」），宽度改回自适应
+# `min(1660px, calc(100vw - 36px))` —— 1660px 仍是**上限**：
+# 视口 ≥1696px 时逐像素与冻结期一致，更窄时收缩，不再出横向滚动条。
+FROZEN_APP_SHELL_MAX_WIDTH = 1660
+# [响应式解冻] 启用中的 4 个断点（= 模板 <style> 段出现顺序）。
+# 上游原值 1180/920/480/560 中三个必须抬高：外壳变流体后总览三栏在 ~1380px
+# 就会挤爆（1180→1400）、平板/手机切换点（920→1024），另两个随手抬到常用档
+# （480→560、560→768 分类偏移弹层）。
+RESPONSIVE_BREAKPOINTS = (1400, 1024, 560, 768)
+# [响应式解冻] 侧栏宽上限：宽屏（视口 ≥1682px）必须取到 286px，
+# 主内容区才是冻结期的 1348px。
+FROZEN_SIDEBAR_MAX_WIDTH = 286
 LAYOUT_FREEZE_DOC = (
     REPO_ROOT / 'docs' / 'handover' / '2026-09-17' / '控制台布局冻结基线-2026-09-18.md'
 )
@@ -141,50 +152,83 @@ def test_section_ids_match_tab_targets():
     assert set(ids) == expected_ids, f'section id 集合与页签契约不一致: {sorted(set(ids))}'
 
 
-def test_layout_width_is_frozen():
-    """[布局冻结] .app-shell 固定宽度 1660px（width 与 min-width 各自锁死）。
+def test_layout_width_is_fluid_with_cap():
+    """[响应式解冻] `.app-shell` = `min(1660px, calc(100vw - 36px))`：自适应 + 1660px 上限。
 
-    ★ 逐属性**行首锚定**匹配，规避子串"掩蔽"盲区：`'width: 1660px;' in block`
-      会被 `min-width: 1660px;` 命中，导致仅改 `width`（如 1660→1661）时护栏**漏报**。
-      锚定 `^\\s*width:` 后，`  min-width:` 行不再误配（其行首为 `m` 而非 `w`）。
+    2026-09-18 的冻结写法是 `width: 1660px; min-width: 1660px;`（配 `min(1660px`
+    反例断言）。2026-09-29 业主解冻后语义反过来：**必须**是 `min(1660px, ...)`，
+    **必须没有**定值 `min-width`（留着它宽度就被锁死，等于没解冻）。
+    上限 1660px 本身仍是硬线——改小/改大即失败。
     """
     m = re.search(r'\.app-shell\s*\{([^}]*)\}', _src())
     assert m, '.app-shell 基础规则缺失'
     block = m.group(1)
-    width_m = re.search(r'(?m)^\s*width:\s*([0-9]+px)\s*;\s*$', block)
-    minw_m = re.search(r'(?m)^\s*min-width:\s*([0-9]+px)\s*;\s*$', block)
+    width_m = re.search(r'(?m)^\s*width:\s*([^;]+);\s*$', block)
     assert width_m, f'.app-shell 缺少 width 声明: {block!r}'
-    assert minw_m, f'.app-shell 缺少 min-width 声明: {block!r}'
-    assert width_m.group(1) == f'{FROZEN_APP_SHELL_WIDTH}px', \
-        f'.app-shell width 漂移: {width_m.group(1)} (期望 {FROZEN_APP_SHELL_WIDTH}px)'
-    assert minw_m.group(1) == f'{FROZEN_APP_SHELL_WIDTH}px', \
-        f'.app-shell min-width 漂移: {minw_m.group(1)} (期望 {FROZEN_APP_SHELL_WIDTH}px)'
-    # 旧的自适应写法必须绝迹（否则窄窗口会重新计算宽度）
-    assert 'min(1660px' not in _src(), '不得残留 min(1660px, ...) 自适应宽度'
+    expr = width_m.group(1).strip()
+    assert expr == f'min({FROZEN_APP_SHELL_MAX_WIDTH}px, calc(100vw - 36px))', \
+        f'.app-shell 宽度漂移: {expr!r}（期望 min({FROZEN_APP_SHELL_MAX_WIDTH}px, calc(100vw - 36px))）'
+    # 定值 min-width 必须绝迹（行首锚定，规避注释里提到 min-width 的误报）
+    assert re.search(r'(?m)^\s*min-width:\s*[0-9.]+px\s*;\s*$', block) is None, \
+        f'.app-shell 不得再有定值 min-width（宽度会被锁死，解冻失效）: {block!r}'
+    assert 1550 <= FROZEN_APP_SHELL_MAX_WIDTH <= 1750, '上限基线本身异常'
 
 
-def test_responsive_breakpoints_disabled():
-    """[布局冻结] 所有 @media 断点条件必须为 max-width: 0px（永不匹配）。
+def test_sidebar_width_is_fluid_with_286_cap():
+    """[响应式解冻] `--sidebar-width` 必须是 `clamp(..., 286px)`：流体且上限不变。
 
-    上游 1180/920/480/560 四个响应式断点已停用；若有人复活任一数值宽度断点，
-    小屏折叠规则会重新裁掉固定宽度布局（尤其 920px 段的 html,body{overflow-x:hidden}）
-    —— 本断言即失败（= 改布局即测试失败）。
+    宽屏（视口 ≥1682px）取到上限 286px ⇒ 主内容区仍是冻结期的 1348px；
+    窗口变窄时侧栏先收缩。上限一旦漂移，宽屏外观就不再与冻结基线逐像素一致。
+    """
+    m = re.search(r'(?m)^\s*--sidebar-width:\s*([^;]+);', _src())
+    assert m, '--sidebar-width 定义缺失'
+    expr = m.group(1).strip()
+    cm = re.fullmatch(r'clamp\(([^)]*)\)', expr)
+    assert cm, f'--sidebar-width 必须是 clamp(下限, 流体值, 上限) 形式: {expr!r}'
+    parts = [p.strip() for p in cm.group(1).split(',')]
+    assert len(parts) == 3, f'clamp 参数个数异常: {expr!r}'
+    assert parts[2] == f'{FROZEN_SIDEBAR_MAX_WIDTH}px', \
+        f'侧栏宽上限漂移: {parts[2]}（期望 {FROZEN_SIDEBAR_MAX_WIDTH}px）'
+
+
+def test_responsive_breakpoints_enabled():
+    """[响应式解冻] 4 个断点必须按新阈值启用，且不留 `max-width: 0px` 死条件。
+
+    2026-09-18 冻结期断言「所有 @media 条件 == max-width: 0px」；解冻后反过来：
+    条件必须全是**数值宽度** = 基线 4 档，且顺序与模板一致（1400 必须排在 1024 前
+    ——断点是后写覆盖先写，顺序错会让窄屏规则被宽屏规则盖掉）。
     """
     src = _src()
     conditions = re.findall(r'@media\s*\(([^)]*)\)', src)
-    assert len(conditions) == len(FROZEN_DISABLED_BREAKPOINTS), (
-        f'期望 {len(FROZEN_DISABLED_BREAKPOINTS)} 个 @media，实际 {len(conditions)}: {conditions}'
-    )
+    widths = []
     for cond in conditions:
-        assert cond.replace(' ', '') == 'max-width:0px', f'存在未停用的断点: {cond!r}'
-    # 数值宽度的 max-width 断点 / 任意 min-width 断点均不许存在
-    assert re.search(r'@media\s*\(max-width:\s*(?!0px)\d', src) is None, '存在数值宽度 @media 断点'
+        mm = re.fullmatch(r'\s*max-width:\s*(\d+)px\s*', cond)
+        assert mm, f'断点条件必须是纯 max-width: Npx（不许 min-width / 复合条件）: {cond!r}'
+        widths.append(int(mm.group(1)))
+    assert tuple(widths) == RESPONSIVE_BREAKPOINTS, (
+        f'断点档位漂移: 期望 {RESPONSIVE_BREAKPOINTS}，实际 {tuple(widths)}'
+    )
+    assert 'max-width: 0px' not in src, '不得残留已停用的 max-width: 0px 断点'
+    # 只允许 max-width 断点（移动优先的反向写法会破坏本项目「宽屏定尺」的优先级）
     assert re.search(r'@media\s*\(min-width', src) is None, '不得使用 min-width 断点'
 
 
 def test_layout_freeze_doc_exists():
-    """[布局冻结] 基线文档固化（改布局须与文档同步）。"""
+    """[布局冻结 + 解冻] 基线文档固化：既留冻结记录，也留解冻记录。
+
+    冻结期只断言 `'1660' in text`（太弱：解冻后把文档改回旧文也能过）。
+    解冻起加严：① 必须有 `## 8. 2026-09-29 解冻` 记录节；② **在该节内**抄录了
+    外壳新宽度表达式与侧栏 clamp；③ 四个断点宽度逐个出现在该节内。
+    """
     assert LAYOUT_FREEZE_DOC.is_file(), f'布局冻结基线文档缺失: {LAYOUT_FREEZE_DOC}'
     text = LAYOUT_FREEZE_DOC.read_text(encoding='utf-8')
-    assert '1660' in text
-    assert 'max-width: 0px' in text, '文档须记录断点停用写法 max-width: 0px'
+    assert '1660' in text, '基线文档必须记录 1660px 上限'
+    assert 'max-width: 0px' in text, '基线文档必须保留冻结期的停用写法（回溯用）'
+    # 解冻记录必须自成 §8 一节，且把新写法逐个抄录在**该节内**。
+    # （不能只查全文：§4 冻结期表格本来就含 560px 等旧值，全文匹配会掩盖漏记。）
+    assert '## 8. 2026-09-29 解冻' in text, '基线文档缺 §8「2026-09-29 解冻」记录节'
+    sec8 = text.split('## 8. 2026-09-29 解冻', 1)[1]
+    assert 'min(1660px, calc(100vw - 36px))' in sec8, '§8 必须抄录外壳新宽度写法'
+    assert 'clamp(240px, 17vw, 286px)' in sec8, '§8 必须抄录侧栏宽 clamp 写法'
+    for w in RESPONSIVE_BREAKPOINTS:
+        assert f'{w}px' in sec8, f'§8 必须记录断点 {w}px'

@@ -2,7 +2,7 @@
 <html lang="zh-CN" data-ui-brand="{{ ui_skin }}" data-theme="{{ default_theme }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=1660, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{ app_title }}</title>
 <style>
 :root {
@@ -38,7 +38,11 @@
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
   --shadow-soft: 0 16px 42px rgba(0, 0, 0, 0.24);
   --radius: 8px;
-  --sidebar-width: 286px;
+  /* 2026-09-29 响应式解冻（业主：控制台跟随浏览器大小 + 电脑端也缩放）：
+     侧栏由定值 286px 改为随视口收缩。视口 ≥1682px 时 17vw ≥ 286px ⇒ 上限仍是
+     286px，宽屏逐像素不变；1321~1682px 之间线性收缩（240~286px）；≤1400px
+     由断点接管成固定 240px。 */
+  --sidebar-width: clamp(240px, 17vw, 286px);
 }
 
 html[data-theme="light"] {
@@ -190,8 +194,11 @@ html[data-theme="light"] .button-link.is-disabled {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   gap: 24px;
-  width: 1660px;
-  min-width: 1660px;
+  /* 2026-09-29 响应式解冻：恢复上游自适应写法但保留 1660px 上限。
+     视口 ≥1696px 时 100vw-36px ≥ 1660px ⇒ 仍是 1660px（宽屏外观逐像素不变）；
+     窗口更窄时等比收缩，不再出横向滚动条。原 min-width:1660px 必须去掉——
+     留着它宽度就锁死，等于没解冻。 */
+  width: min(1660px, calc(100vw - 36px));
   min-height: 100vh;
   margin: 0 auto;
   padding: 22px 0 42px;
@@ -539,8 +546,9 @@ html[data-theme="light"] .top-shell {
      改后：主控挪到中间列并与「实时锁定」横排（左文案 + 右按钮）；
      核心状态 4 项改 2×2 放右列，与主控同高（都撑满行高，不留半格）；
      运行数据移到第二行、横跨「主控+核心状态」两列宽，内部两列对齐。
-     布局是定死的（所有 @media 都被置成 max-width:0，主内容区恒 1348px）：
-     1348-32=1316，fr 1.02/0.86/0.92 ⇒ 480/404/432。 */
+     2026-09-29 响应式解冻后：视口 ≥1696px 仍是本布局（主内容区实测 1348px）；
+     更窄时由 1400 / 1024 两个断点接管重排。宽屏下 1348-32=1316，
+     fr 1.02/0.86/0.92 ⇒ 480/404/432。 */
   display: grid;
   grid-template-columns: minmax(360px, 1.02fr) minmax(300px, 0.86fr) minmax(330px, 0.92fr);
   grid-template-areas:
@@ -1628,9 +1636,9 @@ html[data-theme="light"] #control-section-pid .range-control-field .field-hint {
 }
 
 .assist-grid {
-  /* 2026-09-24 分区重排：每张卡都是完整功能块。本项目布局是定死的
-     （所有 @media 都被置为 max-width:0，主内容区实测恒 1348px，不随窗口变），
-     所以列数由这个下限决定，1348/320=4.2 ⇒ 恒 4 条轨道：
+  /* 2026-09-24 分区重排：每张卡都是完整功能块。
+     2026-09-29 响应式解冻后：视口 ≥1696px 主内容区仍是 1348px（宽屏不变）；
+     ≤1400px 起由断点接管，≤1024px 直接单列。宽屏下 1348/320=4.2 ⇒ 恒 4 条轨道：
      4 张卡的分区（压枪/拟人化）一行排满；3 张卡的分区 auto-fit 收掉空轨道，
      实际 3 列（每列 449px）照样占满一行。改这个值前先跑
      Temp/ttbox_layout_probe2.py 对比各区高度，400px 时压枪区 2144px 高且
@@ -3919,11 +3927,27 @@ html[data-theme="light"] .toast {
   display: none;
 }
 
-@media (max-width: 0px) { /* TTBOX 定死布局：上游 1180px 断点停用 */
+@media (max-width: 1400px) { /* 2026-09-29 解冻：上游 1180px 断点，阈值抬到 1400px（外壳变流体后总览三栏在更宽处就会挤爆，实测 1380px 是下限） */
   .app-shell {
     grid-template-columns: 240px minmax(0, 1fr);
     gap: 18px;
   }
+
+  /* 2026-09-29 响应式解冻：瞄准档案卡原为 repeat(auto-fill, 580px) 定值轨道，
+     1025~1400px 之间只能放 1 列、右侧大片留白；窄屏改流体填充。 */
+  .aim-profile-list {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    max-width: none;
+  }
+
+  /* 2026-09-29 响应式解冻：辅助功能的跨列（is-wide/is-three）只适用于宽屏 4 轨
+     栅格。窄屏轨道数变少，`grid-column: span 3` 会生成隐式轨道把栅格撑乱，
+     这里一律退回单轨；is-full（1/-1）在任何轨道数下都安全，保留。 */
+  #assist-page .assist-section .assist-grid > .module-tile.is-wide,
+  #assist-page .assist-section .assist-grid > .module-tile.is-three {
+    grid-column: span 1;
+  }
+
 
   .home-activation-panel {
     grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr) minmax(180px, 1fr);
@@ -4001,12 +4025,21 @@ html[data-theme="light"] .toast {
   }
 }
 
-@media (max-width: 0px) { /* TTBOX 定死布局：上游 920px 断点停用 */
+@media (max-width: 1024px) { /* 2026-09-29 解冻：上游 920px 断点，阈值抬到 1024px（平板/手机：侧栏改顶栏 + 页签横滚 + 全部单列） */
   html,
   body {
     max-width: 100%;
     overflow-x: hidden;
   }
+
+  /* 2026-09-29 响应式解冻：辅助功能的跨列（is-wide/is-three）只适用于宽屏 4 轨
+     栅格。窄屏轨道数变少，`grid-column: span 3` 会生成隐式轨道把栅格撑乱，
+     这里一律退回单轨；is-full（1/-1）在任何轨道数下都安全，保留。 */
+  #assist-page .assist-section .assist-grid > .module-tile.is-wide,
+  #assist-page .assist-section .assist-grid > .module-tile.is-three {
+    grid-column: span 1;
+  }
+
 
   body::before {
     background-size: 42px 42px;
@@ -4827,7 +4860,7 @@ html[data-theme="light"] .toast {
 
 }
 
-@media (max-width: 0px) { /* TTBOX 定死布局：上游 480px 断点停用 */
+@media (max-width: 560px) { /* 2026-09-29 解冻：上游 480px 断点，阈值抬到 560px（小屏手机进一步收紧） */
   .app-shell {
     width: min(100vw - 12px, 100%);
   }
@@ -4923,7 +4956,7 @@ html[data-theme="light"] .toast {
   }
 }
 
-@media (max-width: 0px) { /* TTBOX 定死布局：上游 560px 断点停用 */
+@media (max-width: 768px) { /* 2026-09-29 解冻：上游 560px 断点，阈值抬到 768px（分类偏移弹层在窄屏改居中浮层） */
   .class-offset-open {
     z-index: 120;
   }
