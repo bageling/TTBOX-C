@@ -5625,6 +5625,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">积分上限 px·s<input id="recoil_cl_integral_max" data-config type="number" min="0" step="10"><span class="field-hint">偏差累计到这么多就不再涨，防止越压越狠。</span></label>
                       <label class="field">起步观测帧数<input id="recoil_cl_start_frames" data-config type="number" min="1" step="1"><span class="field-hint">连续看清目标这么多帧后才开始压；前面几帧不压是故意的。</span></label>
                       <label class="field">单帧下压上限<input id="recoil_cl_press_max_count" data-config type="number" min="0" step="1"><span class="field-hint">一帧最多补这么多 count（0 = 不限），作为安全阀。</span></label>
+                      <label class="field">底子学习速度 ms<input id="recoil_cl_baseline_tau_ms" data-config type="number" min="0" step="100"><span class="field-hint">没开火时学"平时偏差底子"的速度，越小跟得越快。0 = 不学底子（第一版口径，一般更差）。</span></label>
                     </div>
                   </div>
                 </article>
@@ -6753,6 +6754,7 @@ const BB_CTRL_MODULES = [
     ["integral_max", "n", 100.0],
     ["start_frames", "i", 6],
     ["press_max_count", "n", 20.0],
+    ["baseline_tau_ms", "n", 1500.0],
   ]],
   ["trigger2", [
     ["enabled", "b", false],

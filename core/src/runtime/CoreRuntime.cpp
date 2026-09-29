@@ -496,6 +496,8 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     out->recoil_cl_obs_frames = aim_status.recoil_cl_obs_frames;
     out->recoil_cl_p_term = aim_status.recoil_cl_p_term;
     out->recoil_cl_i_term = aim_status.recoil_cl_i_term;
+    out->recoil_cl_baseline = std::isfinite(aim_status.recoil_cl_baseline)
+                                 ? aim_status.recoil_cl_baseline : 0.0;
     out->aim_pos_x = aim_status.predicted_x;
     out->aim_pos_y = aim_status.predicted_y;
     out->aim_has_target = aim_status.has_target;

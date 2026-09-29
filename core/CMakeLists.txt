@@ -14,7 +14,7 @@ cmake_minimum_required(VERSION 3.16)
 # ★ 2026-09-29 起产品版本为 "V1.0.02"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
-project(ttbox_core VERSION 1.0.02 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.03 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

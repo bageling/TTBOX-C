@@ -10,6 +10,10 @@
 //   ⑥ 真闭环仿真：后坐力持续把偏差推大时，注入能把偏差压回收敛区；
 //   ⑦ 比例项（kp，2026-09-29 业主令「先做 1」）：短促点射里起压第一帧就有可观输出，
 //      不依赖积分爬升 —— 纯积分在同场景下首帧输出只有它的十几分之一。
+//   ⑧ 基线口径（2026-09-29 15:3x 实机数据定障）：观测量 = 偏差 − 没开火时学的底子。
+//      实机：原始偏差开火时仅 41% 为正（被静态负偏移埋住）⇒ 第一版 27 秒只压 17 count；
+//      减底线后 98% 为正、中位 +56px。Case1-9 锁的是 baseline_tau_ms=0 的原始口径（回归保护），
+//      Case10/11 锁基线模式本体。
 //
 // 对应实现：core/src/mouse/RecoilClosedLoop.hpp
 // 接线点：  core/src/aim/AimThread.cpp（obs_ok 构造 + control_y 作观测量）
@@ -36,6 +40,7 @@ RecoilClConfig make_cfg() {
     c.integral_max = 100.0f;
     c.start_frames = 6;
     c.press_max_count = 20.0f;
+    c.baseline_tau_ms = 0.0f;   // Case1-9：原始偏差口径（回归保护）
     return c;
 }
 
@@ -216,6 +221,77 @@ void test_kp_immediate_output_for_tap_fire() {
     check(no_kp.sum >= 0.0f && with_kp.sum > 0.0f, "两种配置都不出现负输出");
 }
 
+// Case10: 基线口径 —— 学底子 → 开火用「偏差−底子」；底子冻结；毛刺钳位
+void test_baseline_mode() {
+    std::printf("[Case10] 基线口径：底子不挡路、开火中冻结、毛刺钳 100px\n");
+    RecoilClosedLoop rc;
+    RecoilClConfig cfg = make_cfg();
+    cfg.baseline_tau_ms = 1500.0f;   // 基线开
+
+    // ① 没开火：底子收敛到静态偏移 -15px（多帧 EMA）
+    for (int i = 0; i < 300; ++i) rc.track_baseline(-15.0f, 4.0f, cfg);
+    const float bl = rc.baseline();
+    check(bl > -18.0f && bl < -12.0f, "底子收敛到 -15px 附近");
+
+    // ② 开火：偏差 = 底子 + 后坐力残留 40px（原始值 +25，第一版会被负底子卡住）
+    float sum = 0.0f;
+    for (int i = 0; i < 30; ++i) {
+        const auto out = rc.update(true, true, true, -15.0f + 40.0f, 4.0f, cfg);
+        sum += out.add_y;
+    }
+    check(sum > 30.0f, "原始偏差 +25px 也能压（不被 -15 底子挡住）");
+
+    // ③ 开火中底子冻结：长喷 500 帧后底子仍是开火前的值（没把后坐力学进去）
+    for (int i = 0; i < 500; ++i) rc.update(true, true, true, 60.0f, 4.0f, cfg);
+    check(rc.baseline() == bl, "开火期间底子冻结");
+
+    // ④ 毛刺钳位：偏差突然 +300px（检测框跳变），e_hp 钳 100
+    rc.reset();
+    for (int i = 0; i < 300; ++i) rc.track_baseline(-15.0f, 4.0f, cfg);
+    for (int i = 0; i < 8; ++i) rc.update(true, true, true, 285.0f, 4.0f, cfg);
+    check(rc.p_term() <= 0.5f * 100.0f + 1e-3f, "毛刺被钳在 e_hp<=100（kp=0.5 → p_term<=50）");
+    check(rc.add_y() <= cfg.press_max_count + 1e-3f, "单帧输出仍受安全阀约束");
+
+    // ⑤ 偏差等于底子（无后坐力）⇒ 不压
+    rc.reset();
+    for (int i = 0; i < 300; ++i) rc.track_baseline(-15.0f, 4.0f, cfg);
+    float sum0 = 0.0f;
+    for (int i = 0; i < 30; ++i) sum0 += rc.update(true, true, true, -15.0f, 4.0f, cfg).add_y;
+    check(sum0 == 0.0f, "偏差贴着底子（无变化）⇒ 零输出");
+
+    // ⑥ 全量复位清底子：换目标后重新学
+    rc.reset();
+    check(!(rc.baseline() == rc.baseline()), "reset 后底子未就绪（NaN）");  // NaN != NaN
+}
+
+// Case11: 基线口径的闭环收敛仿真 —— 后坐力把偏差从底子上顶起来，闭环压回底子附近
+void test_baseline_closed_loop() {
+    std::printf("[Case11] 基线口径闭环：底子 -15px 起步，后坐力残留被压回\n");
+    const float ppc = 0.65f;
+    const float base = -15.0f;          // 静态瞄准偏移
+    const float recoil_px_per_s = 30.0f;
+    const float dt_ms = 4.0f;          // 主循环 250Hz
+    RecoilClosedLoop rc;
+    RecoilClConfig cfg = make_cfg();
+    cfg.baseline_tau_ms = 1500.0f;
+    cfg.kp = 0.5f;
+    for (int i = 0; i < 400; ++i) rc.track_baseline(base, dt_ms, cfg);
+    float err = base;                  // 原始偏差
+    float peak_hp = 0.0f;
+    for (int i = 0; i < 600; ++i) {    // 2.4s 连喷
+        err += recoil_px_per_s * (dt_ms / 1000.0f);   // 后坐力顶
+        const auto out = rc.update(true, true, true, err, dt_ms, cfg);
+        err -= out.add_y * ppc;                        // 纠偏拉回
+        if (err - base > peak_hp) peak_hp = err - base;
+        if (err < base) err = base;                    // 不把准星推过目标
+    }
+    const float open_loop = recoil_px_per_s * 0.004f * 600.0f;
+    std::printf("     开环累计 %.1fpx / 相对底子末值 %.2fpx / 峰值 %.2fpx\n",
+                open_loop, err - base, peak_hp);
+    check(err - base < open_loop * 0.10f, "相对底子的末值 < 开环 10%");
+    check(peak_hp < 0.5f * open_loop, "峰值远小于开环累计");
+}
+
 }  // namespace
 
 int main() {
@@ -229,6 +305,8 @@ int main() {
     test_accumulates_on_positive_error();
     test_closed_loop_converges();
     test_kp_immediate_output_for_tap_fire();
+    test_baseline_mode();
+    test_baseline_closed_loop();
     std::printf("结果: %d failures\n", failures);
     return failures == 0 ? 0 : 1;
 }

@@ -97,6 +97,7 @@ struct PipelineMetrics {
     int32_t recoil_cl_obs_frames = 0;  // 本次开火内的连续有效观测帧数
     double recoil_cl_p_term = 0.0;     // 上一帧比例项贡献（限幅前，count）
     double recoil_cl_i_term = 0.0;     // 上一帧积分项贡献（限幅前，count）
+    double recoil_cl_baseline = 0.0;   // 偏差底子（px；0 表示未就绪）
     double aim_pos_x = 0.0;    // 目标中心 X（crop 系 px，AimThread 实时；标定/诊断用）
     double aim_pos_y = 0.0;    // 目标中心 Y
     // 累计请求投递的 HID count（有符号和，自 AimThread::start 起单调累加）。

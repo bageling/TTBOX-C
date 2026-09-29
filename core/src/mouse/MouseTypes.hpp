@@ -434,6 +434,9 @@ struct RecoilClConfig {
     float integral_max = 100.0f;     // 积分限幅（px·s）；实际下压量 = gain × clamp(积分)
     int start_frames = 6;            // 起压前最少连续有效观测帧数（前几发不压 = 设计内代价）
     float press_max_count = 20.0f;   // 单帧最大下压（count，安全阀）；0 = 不限
+    float baseline_tau_ms = 1500.0f; // 偏差底子 EMA 时间常数（ms）；0 = 关基线（第一版原始口径）
+                                     //   观测量 = 偏差 − 没开火时学到的底子（2026-09-29 实机
+                                     //   数据定障：原始偏差开火时仅 41% 为正，被静态负偏移埋住）
 };
 
 // 2026-09-29：提前量一代（Lead1Config，帧窗口投票法）已整段删除 —— 业主裁定

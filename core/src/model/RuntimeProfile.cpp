@@ -243,7 +243,8 @@ bool RuntimeProfile::validate(std::string* error) const {
     // start_frames 必须 >= 1 —— 0 会退化成"第一帧就压"，与「先观测再压」定案冲突。
     if (mouse.recoil_cl.kp < 0.0f || mouse.recoil_cl.gain < 0.0f ||
         mouse.recoil_cl.integral_max < 0.0f ||
-        mouse.recoil_cl.press_max_count < 0.0f || mouse.recoil_cl.start_frames < 1) {
+        mouse.recoil_cl.press_max_count < 0.0f || mouse.recoil_cl.start_frames < 1 ||
+        mouse.recoil_cl.baseline_tau_ms < 0.0f) {
         if (error) *error = "recoil_cl 参数越界（start_frames 需 >= 1）";
         return false;
     }
@@ -620,6 +621,7 @@ JsonValue RuntimeProfile::to_json() const {
         rcl.set("integral_max", JsonValue::number(static_cast<double>(mouse.recoil_cl.integral_max)));
         rcl.set("start_frames", JsonValue::number(static_cast<double>(mouse.recoil_cl.start_frames)));
         rcl.set("press_max_count", JsonValue::number(static_cast<double>(mouse.recoil_cl.press_max_count)));
+        rcl.set("baseline_tau_ms", JsonValue::number(static_cast<double>(mouse.recoil_cl.baseline_tau_ms)));
         m.set("recoil_cl", std::move(rcl));
 
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 不再序列化 lead1 段。
@@ -1056,6 +1058,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             c.integral_max = static_cast<float>(obj_num(*rcl, "integral_max", 100.0));
             c.start_frames = static_cast<int>(obj_int(*rcl, "start_frames", 6));
             c.press_max_count = static_cast<float>(obj_num(*rcl, "press_max_count", 20.0));
+            c.baseline_tau_ms = static_cast<float>(obj_num(*rcl, "baseline_tau_ms", 1500.0));
         }
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
         if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {

@@ -711,6 +711,11 @@ void AimThread::loop() {
             // control_y 是"平滑后瞄准点 − 参考点"（AimThread.cpp:439），与 PID 同一口径，
             // 避免把检测框跳变（AimTracker.hpp 记载 y1 帧间 ±18px）当成后坐力。
             const bool cl_hotkey = RecoilController::fire_hotkey_active(hotkey_bits, recoil_cfg);
+            // 没开火但有目标：慢 EMA 学"偏差底子"（静态瞄准偏移）。
+            // 开火期间不学（冻结），防长喷把后坐力本身学进底子 —— 见 RecoilClosedLoop.hpp 文件头。
+            if (target_ok && !cl_hotkey) {
+                recoil_cl_.track_baseline(control_y, dt_ms, recoil_cl_cfg);
+            }
             bool cl_obs_ok = false;
             if (target_ok && cl_hotkey) {
                 const float cl_box_h = selected.box.y2 - selected.box.y1;
@@ -1042,6 +1047,7 @@ void AimThread::loop() {
             status_.recoil_cl_obs_frames = recoil_cl_.obs_frames();
             status_.recoil_cl_p_term = recoil_cl_.p_term();
             status_.recoil_cl_i_term = recoil_cl_.i_term();
+            status_.recoil_cl_baseline = recoil_cl_.baseline();
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;

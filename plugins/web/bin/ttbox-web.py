@@ -912,6 +912,7 @@ CTRL_BLOCKS = [
     ('recoil_cl', 'recoil_cl', [
         ('enabled', 'b', False), ('kp', 'n', 0.5), ('gain', 'n', 2.0),
         ('integral_max', 'n', 100.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 20.0),
+        ('baseline_tau_ms', 'n', 1500.0),
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
@@ -2034,6 +2035,7 @@ def collect_web_state() -> dict:
                         'p_term': m.get('recoil_cl_p_term', 0),
                         'i_term': m.get('recoil_cl_i_term', 0),
                         'integral': m.get('recoil_cl_integral', 0),
+                        'baseline': m.get('recoil_cl_baseline', 0),
                         'state': m.get('recoil_cl_state', 0),
                         'obs_frames': m.get('recoil_cl_obs_frames', 0),
                     },
