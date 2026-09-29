@@ -400,6 +400,38 @@ struct VerticalCorrectionConfig {
     float ramp3_start = 1.0f, ramp3_middle = 0.5f, ramp3_end = 0.1f;
 };
 
+// ---------------------------------------------------------------------------
+// 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）
+//
+// 为什么需要（代码事实，不是设计偏好）：
+//   · core/src/aim/AimThread.cpp:25 `pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0)`；
+//     第 3 个实参是 predict，而它只乘在积分通道上（Pid1Controller.hpp:80-90
+//     `ki_raw = ((error_diff + last_u) * predict) * integral_gain`）
+//     ⇒ predict_y = 0 把 K_i 整个乘成 0 ⇒ **默认配置下 Y 轴只有 P+D、没有 I**。
+//   · 枪口上抬 ⇒ 准星不动、画面整体上移 ⇒ 目标框在画面里匀速下移（斜坡输入）。
+//     斜坡只有 I 项吃得掉：P 必留稳态误差、D 在稳态下不干活
+//     ⇒ **PID 结构上补不了后坐力**，这才是压枪模块存在的全部理由。
+//   本模块 = 把这一环补回来：一个**只在开火期生效的闭环积分项**。
+//
+// 设计约束（业主 2026-09-29 定案，实现不得偏离）：
+//   ① 「有实时观测就压，没有实时观测就不猜」—— 观测不成立时立即清零，
+//      不留跨开火记忆（换枪/换倍镜/换节奏最怕的就是拿上次的经验去猜）；
+//   ② 不需要选枪/录枪/预采数据 —— 观测量是**实时实测**的画面偏移（error_y），
+//      不含任何枪械先验，枪械差异一律由实测自己表达；
+//   ③ 只下压（单向）—— 积分下限钳到 0，永远不会把准星往上推。
+//
+// 与既有两套压枪引擎的关系：**完全独立**。RecoilConfig（老速率模型）与
+// RecoilBbConfig（BB 三段查表）各自照旧；本模块默认 enabled=false ⇒ 不开时
+// 输出链与加入前逐字节一致。
+// ---------------------------------------------------------------------------
+struct RecoilClConfig {
+    bool enabled = false;            // 总开关（默认关；不开时行为零变化）
+    float gain = 2.0f;               // 闭环积分增益（count / (px·s)）—— ★待实测整定
+    float integral_max = 100.0f;     // 积分限幅（px·s）；实际下压量 = gain × clamp(积分)
+    int start_frames = 6;            // 起压前最少连续有效观测帧数（前几发不压 = 设计内代价）
+    float press_max_count = 20.0f;   // 单帧最大下压（count，安全阀）；0 = 不限
+};
+
 // 2026-09-29：提前量一代（Lead1Config，帧窗口投票法）已整段删除 —— 业主裁定
 //   「提前量只留 2.0」。一代与二代原本是**相加**关系（不是替代），删掉之后二代自己
 //   照常工作，只是不再有"投票法"那一份额外偏移。旧配置残留的 `mouse.lead1` 段会被忽略。
@@ -644,6 +676,7 @@ struct MouseProfile {
     // 全部默认 false ⇒ 不开时 AimThread 不跑这些模块，输出链与本批加入前逐字节一致。
     RecoilBbConfig recoil_bb;               // 压枪三段查表引擎（recoil.enabled 且 recoil_bb.enabled 才走）
     VerticalCorrectionConfig vertical_correction;  // 垂直修正 + 力度渐变（叠加进最终位移）
+    RecoilClConfig recoil_cl;               // 开火期闭环纠偏（压枪 v1，2026-09-29；默认 enabled=false）
     Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）；一代 2026-09-29 已删
     HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
     // BB 927 原版里这两个是**独立开关**，不归 humanize.enabled 管（照搬，2026-09-28）。

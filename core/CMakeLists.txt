@@ -678,6 +678,12 @@ if(TTBOX_CORE_BUILD_TESTS)
                         target_link_libraries(test_recoil PRIVATE ttbox_core)
                         add_test(NAME test_recoil COMMAND test_recoil)
 
+  # 开火期闭环纠偏（压枪 v1，2026-09-29）：观测门控/观察期/单向/限幅/默认关/闭环收敛。
+  #   只依赖 header-only 的 mouse/RecoilClosedLoop.hpp ⇒ host 与板端同跑一份断言。
+  add_executable(test_recoil_closed_loop tests/test_recoil_closed_loop.cpp)
+  target_link_libraries(test_recoil_closed_loop PRIVATE ttbox_core)
+  add_test(NAME test_recoil_closed_loop COMMAND test_recoil_closed_loop)
+
   # BB 对标第二批（2026-09-24）：压枪三段查表 / 两代提前量 / 拟人化链 / 抗过冲 /
   # 速度自适应 Kp / 全局正弦扰动 + 新配置键往返 —— 每模块含"默认关=行为零变化"用例
   add_executable(test_bb_second_batch tests/test_bb_second_batch.cpp)

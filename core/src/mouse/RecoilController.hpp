@@ -91,6 +91,13 @@ public:
     // 当前是否处于压枪激活状态（供状态 API/日志用）
     bool active() const { return active_; }
 
+    // 开火键是否按住：语义与 update() / update_bb() 内的判据**完全同源**
+    // （同一 hotkey_hit、同一 hotkey/hotkey2/hotkey_mode），供其它模块复用。
+    // 闭环压枪用它作为"本次开火中"的唯一判据，不另立一套热键语义。
+    static bool fire_hotkey_active(uint16_t bits, const RecoilConfig& cfg) {
+        return hotkey_hit(bits, cfg.hotkey, cfg.hotkey2, cfg.hotkey_mode);
+    }
+
 private:
     // 热键触发：any = 任一命中，all = 同时按下
     static bool hotkey_hit(uint16_t bits, int k1, int k2, int mode) {

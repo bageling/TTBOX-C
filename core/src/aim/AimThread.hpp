@@ -21,6 +21,7 @@
 #include "mouse/ContinuousLead.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
+#include "mouse/RecoilClosedLoop.hpp"   // 开火期闭环纠偏（压枪 v1，2026-09-29）
 #include "mouse/TriggerController.hpp"
 #include "mouse/BezierTrajectory.hpp"
 // BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
@@ -103,6 +104,15 @@ public:
         uint64_t trigger_fire_count = 0;  // 自 start() 起累计开火次数（按下命令成功投递才算）
         bool trigger_active = false;      // 任一扳机处于激活态（面板 pill 用）
         uint8_t trigger_button = 0;       // 最近一次开火使用的键位掩码（0 = 未开火）
+        // ---- 开火期闭环纠偏遥测（压枪 v1，2026-09-29）----
+        // 压枪此前**零观测面**（ttbox-web.py 里没有任何 recoil 运行期字段）⇒ 优化无从验收。
+        // 这四个字段就是闭环的观测面：state 是状态机档位、integral 是内部积分量、
+        // add_y 是实际注入量（可与 scheduler_input_y − pid_output_y 的差分互为印证）、
+        // obs_frames 说明"这次开火已经连续有效观测了多少帧"。
+        float recoil_cl_add_y = 0.0f;    // 本帧闭环注入的下压量（count）
+        float recoil_cl_integral = 0.0f; // 闭环积分量（px·s）
+        int recoil_cl_state = 0;         // 0=未开火/无观测 1=观测中 2=正在压
+        int recoil_cl_obs_frames = 0;    // 本次开火内的连续有效观测帧数
     };
     AimThread() = default;
     ~AimThread() { stop(); }
@@ -156,6 +166,7 @@ private:
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
     RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
+    RecoilClosedLoop recoil_cl_;    // 开火期闭环纠偏（压枪 v1，2026-09-29；默认关，不开时零影响）
     // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
     // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
     TriggerController trigger_;

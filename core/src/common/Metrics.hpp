@@ -89,6 +89,12 @@ struct PipelineMetrics {
     double pid_output_y = 0.0;
     double scheduler_input_x = 0.0;
     double scheduler_input_y = 0.0;
+    // ---- 开火期闭环纠偏遥测（压枪 v1，2026-09-29）----
+    // 此前压枪**没有任何运行期观测**（ttbox-web.py 里零个 recoil 字段）⇒ 优化无从验收。
+    double recoil_cl_add_y = 0.0;      // 本帧闭环注入的下压量（count）
+    double recoil_cl_integral = 0.0;   // 闭环积分量（px·s）
+    int32_t recoil_cl_state = 0;       // 0=未开火/无观测 1=观测中 2=正在压
+    int32_t recoil_cl_obs_frames = 0;  // 本次开火内的连续有效观测帧数
     double aim_pos_x = 0.0;    // 目标中心 X（crop 系 px，AimThread 实时；标定/诊断用）
     double aim_pos_y = 0.0;    // 目标中心 Y
     // 累计请求投递的 HID count（有符号和，自 AimThread::start 起单调累加）。

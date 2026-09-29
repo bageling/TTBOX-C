@@ -37,6 +37,7 @@ void AimThread::reset_runtime_state() {
     continuous_lead_.reset();  // 持续提前量累计/方向/渐入电平清零（destroy→init 重建一致）
     personal_shader_.reset();
     recoil_.reset();
+    recoil_cl_.reset();        // 压枪 v1：闭环积分与观测计数随世代清零
     // BB 对标第二批（2026-09-24）：新模块状态同样必须随世代清零，禁止 A 模型状态漏到 B
     lead_pred_.reset();
     humanize_shaper_.reset();
@@ -108,6 +109,7 @@ void AimThread::loop() {
             // ---- BB 对标第二批（2026-09-24）：默认全关 ⇒ 不跑即零输出，行为零变化 ----
             RecoilBbConfig recoil_bb_cfg;           // 三段查表压枪引擎（默认关）
             VerticalCorrectionConfig vc_cfg;        // 垂直修正 + 力度渐变
+            RecoilClConfig recoil_cl_cfg;           // 开火期闭环纠偏（压枪 v1；默认 enabled=false）
             Lead2Config lead2_cfg;                  // 提前量二代（积分累积）
             HumanizeShaperConfig humanize_cfg;      // BB 拟人化整形链
             AntiOvershootConfig anti_over_cfg;      // 抗过冲
@@ -289,6 +291,7 @@ void AimThread::loop() {
                 // BB 对标第二批：每周期重读（改配置即时生效，无需重启）
                 recoil_bb_cfg = frame_profile->mouse.recoil_bb;
                 vc_cfg = frame_profile->mouse.vertical_correction;
+                recoil_cl_cfg = frame_profile->mouse.recoil_cl;   // 压枪 v1：每周期重读，改配置即时生效
                 lead2_cfg = frame_profile->mouse.lead2;
                 humanize_cfg = frame_profile->mouse.humanize;
                 anti_over_cfg = frame_profile->mouse.anti_overshoot;
@@ -413,6 +416,7 @@ void AimThread::loop() {
                     continuous_lead_.reset();  // 持续提前量累计清零（新目标重新累计"同向距离"）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                     recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）
+                    recoil_cl_.reset();  // 压枪 v1：换目标 ⇒ 旧目标的观测作废，重新累积
                     lead_pred_.reset();       // BB 提前量：新目标重新收帧/清零积分
                     anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
                     humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
@@ -677,6 +681,36 @@ void AimThread::loop() {
                     recoil_add_y = rd.y;   // 下压为正
                 }
             }
+
+            // ---- 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）----
+            // 定案原话：「开火后，每一帧看实际偏了多少，下一帧反向拉多少，连续纠偏，
+            //             让弹道自动收敛在一个小区域里」；「有实时观测就压，没有实时观测就不猜」。
+            //
+            // 观测合格性 obs_ok（三条全满足才算"有实时观测"）：
+            //   ① 有目标（target_ok）—— 无目标时观测量无意义；
+            //   ② 开火键按住（与老压枪引擎同一套 hotkey_hit 判据，不另立语义）；
+            //   ③ 框高稳定（|box_h − box_h_ema| <= 0.35 × box_h_ema）—— 框在剧烈缩放说明
+            //      检测不稳 / 目标忽远忽近，此时偏差不可信。
+            // 「换目标」由上面的 recoil_cl_.reset() 处理：换目标即清零 + 重新累积观测帧
+            // ⇒ 天然满足"同目标连续观测"，不需要额外再判 id（而且此处 last_target_id_
+            //   已在 :427 被更新，再判 id 会恒为真，是个假判据）。
+            // 任一不满足 ⇒ 引擎内部立即清零（不猜，且不留跨开火记忆）。
+            //
+            // 观测量用 control_y（像素；目标在准星下方为正 = 后坐力主方向），而不是原始 ey：
+            // control_y 是"平滑后瞄准点 − 参考点"（AimThread.cpp:439），与 PID 同一口径，
+            // 避免把检测框跳变（AimTracker.hpp 记载 y1 帧间 ±18px）当成后坐力。
+            const bool cl_hotkey = RecoilController::fire_hotkey_active(hotkey_bits, recoil_cfg);
+            bool cl_obs_ok = false;
+            if (target_ok && cl_hotkey) {
+                const float cl_box_h = selected.box.y2 - selected.box.y1;
+                const float cl_box_h_ema = tracker_.state().box_h_ema;
+                cl_obs_ok = (cl_box_h_ema <= 0.0f) ||
+                            (std::abs(cl_box_h - cl_box_h_ema) <= 0.35f * cl_box_h_ema);
+            }
+            const auto cl_out = recoil_cl_.update(
+                recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, control_y, dt_ms, recoil_cl_cfg);
+            // 与老压枪同域相加（两套都开就是叠加；面板上已提示与三段查表二选一）。
+            recoil_add_y += cl_out.add_y;
             // ---- 输出尾链 ----
             // 有目标 ⇒ PID 已算出 scaled；无目标但压枪在压 ⇒ 也走同一条尾链
             // （deadzone → remainder → int16 → 拟人化 → 热键安全门），
@@ -989,6 +1023,11 @@ void AimThread::loop() {
             status_.pid_output_y = selected.valid ? aibox_y : 0.0f;
             status_.scheduler_input_x = selected.valid ? scaled_x : 0.0f;
             status_.scheduler_input_y = selected.valid ? scaled_y : 0.0f;
+            // 压枪 v1 闭环遥测（压枪此前零观测面，这几个字段是后续验收的唯一依据）
+            status_.recoil_cl_add_y = recoil_cl_.add_y();
+            status_.recoil_cl_integral = recoil_cl_.integral_px_s();
+            status_.recoil_cl_state = recoil_cl_.state();
+            status_.recoil_cl_obs_frames = recoil_cl_.obs_frames();
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;

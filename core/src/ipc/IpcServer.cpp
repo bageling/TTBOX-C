@@ -1107,6 +1107,11 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("pid_output_y", JsonValue::number(status.metrics.pid_output_y));
     m.set("scheduler_input_x", JsonValue::number(status.metrics.scheduler_input_x));
     m.set("scheduler_input_y", JsonValue::number(status.metrics.scheduler_input_y));
+    // 压枪 v1 闭环遥测（面板 control_trace.recoil_cl 消费）
+    m.set("recoil_cl_add_y", JsonValue::number(status.metrics.recoil_cl_add_y));
+    m.set("recoil_cl_integral", JsonValue::number(status.metrics.recoil_cl_integral));
+    m.set("recoil_cl_state", JsonValue::number(static_cast<double>(status.metrics.recoil_cl_state)));
+    m.set("recoil_cl_obs_frames", JsonValue::number(static_cast<double>(status.metrics.recoil_cl_obs_frames)));
     // 目标中心（标定状态机的真实目标位移数据源）
     m.set("aim_pos_x", JsonValue::number(status.metrics.aim_pos_x));
     m.set("aim_pos_y", JsonValue::number(status.metrics.aim_pos_y));

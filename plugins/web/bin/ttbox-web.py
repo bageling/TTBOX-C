@@ -905,6 +905,14 @@ CTRL_BLOCKS = [
         ('ramp3_enabled', 'b', False), ('ramp3_duration_ms', 'n', 2000.0),
         ('ramp3_start', 'n', 1.0), ('ramp3_middle', 'n', 0.5), ('ramp3_end', 'n', 0.1),
     ]),
+    # 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）——
+    #   开火后每一帧按实测偏差反向补一份下压，连续纠偏让弹道收敛；
+    #   不选枪 / 不录枪 / 不预采数据，没有可靠实时观测时整套不动作（不猜）。
+    #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilClConfig 一字不差。
+    ('recoil_cl', 'recoil_cl', [
+        ('enabled', 'b', False), ('gain', 'n', 2.0), ('integral_max', 'n', 100.0),
+        ('start_frames', 'i', 6), ('press_max_count', 'n', 20.0),
+    ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
         ('enabled', 'b', False), ('key1', 'key', 16), ('key2', 'key', 0),
@@ -2018,6 +2026,15 @@ def collect_web_state() -> dict:
                     'error': {'x': m.get('aim_error_x', 0), 'y': m.get('aim_error_y', 0)},
                     'pid_output': {'x': m.get('pid_output_x', 0), 'y': m.get('pid_output_y', 0)},
                     'scheduler_input': {'x': m.get('scheduler_input_x', 0), 'y': m.get('scheduler_input_y', 0)},
+                    # 压枪 v1 闭环遥测（2026-09-29）：压枪此前零观测面，这里补上。
+                    #   add_y 与上层 scheduler_input/pid_output 的差互为印证；
+                    #   state: 0=未开火/无观测 1=观测中 2=正在压。
+                    'recoil_cl': {
+                        'add_y': m.get('recoil_cl_add_y', 0),
+                        'integral': m.get('recoil_cl_integral', 0),
+                        'state': m.get('recoil_cl_state', 0),
+                        'obs_frames': m.get('recoil_cl_obs_frames', 0),
+                    },
                     'hid_move': {'x': m.get('mouse_dx', 0), 'y': m.get('mouse_dy', 0)},
                     'injection_allowed': bool(m.get('injection_allowed', False)),
                     'mouse_control_connected': bool(m.get('mouse_control_connected', False)),
