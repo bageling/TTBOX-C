@@ -12,7 +12,8 @@
 #   ③ 无同义异名 env：TTBOX_CONFIG_PATH / TTBOX_MODEL_ROOT / TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT / TTBOX_WEB_HOST
 #   ④ V-03 共享键同值：config/default.json 与 deploy/config/default.json.prod ↔ deploy/config/00-factory.json
 #   ⑤ 跨语言同值常量：socket / web 端口 / EDID attempts / 心跳 60·180 逐值相等（B-CONST-2）
-#   ⑥ 版本：core/include/ttbox/core/version.hpp::kCoreVersion == core/CMakeLists.txt project VERSION
+#   ⑥ 版本：core/include/ttbox/core/version.hpp::kCoreVersion **去掉字母前缀** == core/CMakeLists.txt project VERSION
+#      （2026-09-29 起产品版本带 V 前缀 "V1.0.01"，而 CMake 只解析数字 ⇒ 它降级为数字镜像）
 #   ⑦ 无补丁残迹：hardware_display.json 单点（V-19）；systemd_units.py / runner.py / test_systemd_units.py 已删（V-15/16）
 #   ⑧ V-07 无绝对路径注入：出货 Python 禁 `sys.path.insert(0, '/opt/…')`（散落字面量 + insert(0) 遮蔽 stdlib）
 #   ⑨ TTBOX_PROJECT_ROOT 兜底清零：`#define TTBOX_PROJECT_ROOT` 出现次数必须为 0（强制由 CMake -D 注入）
@@ -452,6 +453,15 @@ def check_crosslang():
 # ---------------------------------------------------------------------------
 # ⑥ 版本同值（B-CONST-3）
 # ---------------------------------------------------------------------------
+def _ver_mirror(product_version):
+    """产品版本 -> CMake 数字镜像：去掉前导字母前缀（V1.0.01 -> 1.0.01）。
+
+    ★ 2026-09-29：产品版本改走「V 线」后，CMake 的 project VERSION 只解析数字
+    ⇒ 它只能存镜像，判据改成「剥掉前导字母后相等」。
+    """
+    return re.sub(r'^[A-Za-z]+', '', str(product_version or ''))
+
+
 def check_version():
     vh = read("core/include/ttbox/core/version.hpp")
     cm = read("core/CMakeLists.txt")
@@ -459,10 +469,12 @@ def check_version():
     m2 = re.search(r'project\(ttbox_core VERSION ([\d.]+)', cm)
     if not m1 or not m2:
         bad("⑥ 版本真源缺失：version.hpp::kCoreVersion 或 CMakeLists project VERSION 未找到")
-    elif m1.group(1) != m2.group(1):
-        bad("⑥ 版本异值：kCoreVersion=%r != CMake project VERSION=%r" % (m1.group(1), m2.group(1)))
+    elif _ver_mirror(m1.group(1)) != m2.group(1):
+        bad("⑥ 版本异值：kCoreVersion=%r 去字母前缀=%r != CMake project VERSION=%r"
+            % (m1.group(1), _ver_mirror(m1.group(1)), m2.group(1)))
     else:
-        ok("⑥ 版本同值：core %s（version.hpp == CMakeLists）" % m1.group(1))
+        ok("⑥ 版本同值：core %s（version.hpp 去前缀 %s == CMakeLists %s）"
+           % (m1.group(1), _ver_mirror(m1.group(1)), m2.group(1)))
 
 
 # ---------------------------------------------------------------------------
@@ -554,10 +566,16 @@ def run_selftest(factory):
     # 4) env：禁用名残留 ⇒ 必被捕获
     if "TTBOX_MODEL_ROOT" not in scan_env_names("os.environ.get('TTBOX_MODEL_ROOT')", ".py"):
         st_bad("env 扫描器失效：禁用名未被捕获")
-    # 5) 版本：异值必被捕获
-    if hpp_const('inline constexpr const char* kCoreVersion = "9.9.9";', "kCoreVersion") == \
+    # 5) 版本：异值必被捕获；★ 且 V 前缀必须被正确剥离（否则同源会被误报成异值）
+    if _ver_mirror(hpp_const('inline constexpr const char* kCoreVersion = "9.9.9";', "kCoreVersion")) == \
             re.search(r'project\(ttbox_core VERSION ([\d.]+)', read("core/CMakeLists.txt")).group(1):
         st_bad("版本检测器失效：异值未被捕获")
+    if _ver_mirror("V9.9.9") != "9.9.9" or _ver_mirror("9.9.9") != "9.9.9" or _ver_mirror("") != "":
+        st_bad("版本归一器失效：V 前缀未被正确剥离")
+    if _ver_mirror(re.search(r'kCoreVersion\s*=\s*"([^"]*)"',
+                             read("core/include/ttbox/core/version.hpp")).group(1)) != \
+            re.search(r'project\(ttbox_core VERSION ([\d.]+)', read("core/CMakeLists.txt")).group(1):
+        st_bad("版本归一器误报：当前 V 线版本未与 CMake 数字镜像对上")
     # 6) V-07：绝对路径 insert(0, '/opt/…') ⇒ 必被捕获
     if not _ABS_INSERT.search('sys.path.insert(0, "/opt/ttbox/scripts")'):
         st_bad("V-07 检测器失效：绝对路径 sys.path 注入未被捕获")

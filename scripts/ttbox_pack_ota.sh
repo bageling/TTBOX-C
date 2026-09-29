@@ -59,12 +59,18 @@ done
 [ -n "$OUT_DIR" ]   || die "缺 out_dir"
 [ -f "$MANIFEST" ]  || die "缺打包白名单: $MANIFEST"
 
-# ---- 版本号真源（S7）：core/CMakeLists.txt ----
-CMAKE_PROJECT="${REPO_ROOT}/core/CMakeLists.txt"
-[ -f "$CMAKE_PROJECT" ] || die "缺 ${CMAKE_PROJECT}"
-VER="$(sed -n 's/^project(ttbox_core VERSION \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$CMAKE_PROJECT" | head -1)"
-[ -n "$VER" ] || die "无法从 ${CMAKE_PROJECT} 解析版本号（project(ttbox_core VERSION x.y.z ...)）"
-info "版本（真源 core/CMakeLists.txt）: ${VER}"
+# ---- 版本号真源（S7）：core/include/ttbox/core/version.hpp::kCoreVersion ----
+#   ★ 2026-09-29 起产品版本带字母前缀（"V1.0.01"），而 CMake 的 project VERSION 只解析数字
+#     ⇒ 它降级为「数字镜像」；本脚本改读 version.hpp（唯一真源）。
+#     包名 / manifest.version / releases 目录名 / 云端版本串全部派生自这里。
+VERSION_HPP="${REPO_ROOT}/core/include/ttbox/core/version.hpp"
+[ -f "$VERSION_HPP" ] || die "缺 ${VERSION_HPP}"
+VER="$(sed -n 's/.*kCoreVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_HPP" | head -1)"
+[ -n "$VER" ] || die "无法从 ${VERSION_HPP} 解析版本号（kCoreVersion = \"x.y.z\"）"
+case "$VER" in
+    *[!A-Za-z0-9._-]*) die "版本号含非法字符: ${VER}（云端 bridge 与板端更新器要求 [A-Za-z0-9._-]+）" ;;
+esac
+info "版本（真源 core/include/ttbox/core/version.hpp）: ${VER}"
 
 # ---- git_sha（与 fhs_init gen_manifest 同一套三级回退）----
 if [ -z "$GIT_SHA" ]; then
