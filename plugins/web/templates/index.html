@@ -4515,6 +4515,10 @@ html[data-theme="light"] .toast {
   }
 
   .license-gate-card {
+    /* 2026-09-29 响应式解冻补漏：定尺期为「不随窗口缩」把这里改成固定 520px，
+       窄屏会被上面 html,body 的 overflow-x:hidden 裁掉右半边 —— 而激活输入框
+       正好在最右，等于手机上激活不了。窄屏改回流体。 */
+    width: min(520px, calc(100vw - 32px));
     margin-top: max(18px, env(safe-area-inset-top));
     padding: 16px;
   }
