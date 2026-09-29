@@ -625,6 +625,7 @@ JsonValue RuntimeProfile::to_json() const {
         rcl.set("slew_count_per_frame",
                 JsonValue::number(static_cast<double>(mouse.recoil_cl.slew_count_per_frame)));
         rcl.set("baseline_tau_ms", JsonValue::number(static_cast<double>(mouse.recoil_cl.baseline_tau_ms)));
+        rcl.set("keep_horiz", JsonValue::boolean(mouse.recoil_cl.keep_horiz));
         m.set("recoil_cl", std::move(rcl));
 
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 不再序列化 lead1 段。
@@ -1067,6 +1068,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             c.press_max_count = static_cast<float>(obj_num(*rcl, "press_max_count", 3.0));
             c.slew_count_per_frame = static_cast<float>(obj_num(*rcl, "slew_count_per_frame", 0.3));
             c.baseline_tau_ms = static_cast<float>(obj_num(*rcl, "baseline_tau_ms", 2000.0));
+            c.keep_horiz = obj_bool(*rcl, "keep_horiz", true);
         }
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
         if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {

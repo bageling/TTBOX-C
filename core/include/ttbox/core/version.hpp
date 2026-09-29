@@ -15,6 +15,6 @@ inline constexpr const char* kAppName = "ttbox_core";
 //     ⇒ "V1.0.01" > "1.5.70"。若写成纯数字 "1.0.01"，已装 1.5.x 的盒子会判定为**降级**
 //     （is_downgrade=true）⇒ 更新器直接拒装、面板也只显示「已是最新」，永远升不上来。
 //     回归锁：plugins/web/tests/test_web_ota_version_scheme.py。
-inline constexpr const char* kCoreVersion = "V1.0.04";
+inline constexpr const char* kCoreVersion = "V1.0.05";
 
 }  // namespace ttbox::core

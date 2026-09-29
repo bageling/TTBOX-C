@@ -405,6 +405,11 @@ void test_v2_defaults() {
           "默认下积分项自己就吃不掉整个单帧预算（gain×integral_max <= press_max）");
     check(c.slew_count_per_frame > 0.0f, "默认启用限速（阻尼）");
     check(c.baseline_tau_ms > 0.0f, "默认启用基线（开火前静止位置 = 保持目标）");
+    // ★ V1.0.05（2026-09-29 19:xx）：本引擎天生单轴（Output 只有 add_y），接管期间老引擎整段
+    //   不跑 ⇒ 横向补偿归零（业主实机「弹道偏左偏出人身」）。keep_horiz 默认必须为 true，
+    //   否则等于把那个缺陷又装回去。
+    check(c.keep_horiz == true,
+          "默认保留横向补偿（接管时老引擎只出横向）—— 关掉就等于横向没人管");
 }
 
 }  // namespace

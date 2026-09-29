@@ -915,6 +915,7 @@ CTRL_BLOCKS = [
         ('enabled', 'b', False), ('kp', 'n', 0.0), ('gain', 'n', 0.25),
         ('integral_max', 'n', 12.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 3.0),
         ('slew_count_per_frame', 'n', 0.3), ('baseline_tau_ms', 'n', 2000.0),
+        ('keep_horiz', 'b', True),
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [

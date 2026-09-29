@@ -658,18 +658,25 @@ void AimThread::loop() {
             // 本来就不消费它们（见 RecoilController.hpp 的 has_target 分支）。
             float recoil_add_x = 0.0f;
             float recoil_add_y = 0.0f;
-            // ★★ 两套压枪**互斥**（2026-09-29 14:3x 业主令）：开火期闭环纠偏 enabled ⇒
-            //   老引擎（BB 三段查表 / 老速率模型）**整段不跑**。理由两条：
+            // ★★ 两套压枪的**纵向**互斥（2026-09-29 14:3x 业主令；2026-09-29 19:xx 按实机反馈收窄）：
+            //   开火期闭环纠偏 enabled ⇒ 纵向只由闭环出，老引擎的 Y 丢弃。理由两条：
             //     ① 两套叠加会过压 + 来回摆；
             //     ② 叠加时分不清"压得好"是谁的功劳，A/B 对比无从谈起。
             //   闭环关闭 ⇒ 老引擎照旧（闭环内部第一原则会直接清零返回 0，不残留输出）。
-            //   闭环接管期间每帧复位老引擎：它的时钟（bb_clock_ms_）与残差是按 dt 自维护的，
-            //   停跑期间会滞留陈值，复位保证"切回老引擎"时不是从一段陈旧状态接着跑。
+            // ★★ 2026-09-29 19:xx 修（业主实机：「第一个问题是有的枪械压不住，第二弹道偏左已经偏出人身」）：
+            //   闭环 `RecoilClosedLoop::Output` **只有 add_y**，是天生单轴引擎；
+            //   而上面这条互斥让老引擎整段不跑 ⇒ 下面 `scaled_x += recoil_add_x` 加的一直是 0
+            //   ⇒ **横向补偿 100% 消失**，横向只剩瞄准 PID 的 X 轴在扛。这是互斥决策带出来的副作用。
+            //   修法：接管期间**仍让老引擎跑**（保住它的内部时钟 bb_clock_ms_ 与残差连续），
+            //   但只取它的横向分量；纵向仍一律丢弃、只认闭环。
+            //   keep_horiz=false 可退回 V1.0.04 行为（横向一起停）做 A/B。
             const bool recoil_cl_takeover = recoil_cl_cfg.enabled;
-            if (recoil_cl_takeover) {
+            const bool keep_horiz = recoil_cl_takeover && recoil_cl_cfg.keep_horiz;
+            if (recoil_cl_takeover && !keep_horiz) {
+                // 横向也不要 ⇒ 老引擎彻底停，复位它的时钟/残差，避免停跑期间滞留陈值
                 recoil_.reset();
             }
-            if (!recoil_cl_takeover) {
+            if (!recoil_cl_takeover || keep_horiz) {
                 if (recoil_bb_cfg.enabled) {
                     // BB 三段查表引擎（含垂直修正 + 力度渐变）。
                     // ★ adv 倍率已真接线：扳机首枪发出 recoil_adv ⇒ 走 recoil_bb.adv_mult（默认 0.9）。
@@ -684,12 +691,17 @@ void AimThread::loop() {
                         recoil_cfg, recoil_bb_cfg, vc_cfg, dt_ms, recoil_px_per_count,
                         adv_mult, 1.0f);
                     recoil_add_x = bbo.recoil_x + bbo.vert_x;
-                    recoil_add_y = bbo.recoil_y + bbo.vert_y;   // 下压为正（目标偏下方向）
+                    if (!recoil_cl_takeover) {
+                        recoil_add_y = bbo.recoil_y + bbo.vert_y;   // 下压为正（目标偏下方向）
+                    }
+                    // 接管期间：上面的 recoil_add_y 一律不取（纵向归闭环），只留 bbo 的横向。
                 } else {
                     const auto rd = recoil_.update(hotkey_bits, target_ok, recoil_cfg, dt_ms,
                                                    recoil_px_per_count);
                     recoil_add_x = rd.x;   // 拟人 X 微动（可正可负）
-                    recoil_add_y = rd.y;   // 下压为正
+                    if (!recoil_cl_takeover) {
+                        recoil_add_y = rd.y;   // 下压为正
+                    }
                 }
             }
 
@@ -710,11 +722,21 @@ void AimThread::loop() {
             // 观测量用 control_y（像素；目标在准星下方为正 = 后坐力主方向），而不是原始 ey：
             // control_y 是"平滑后瞄准点 − 参考点"（AimThread.cpp:439），与 PID 同一口径，
             // 避免把检测框跳变（AimTracker.hpp 记载 y1 帧间 ±18px）当成后坐力。
+            // ★★ 2026-09-29 19:xx 倍镜归一（业主实机「高倍镜表现异常」定障，与 PID 同一招）：
+            //   致动 1 count 在高倍镜下画面位移放大 M 倍，而 gain 是**固定**的标定值
+            //   ⇒ 等效环路增益被放大 M 倍（6 倍镜 ≈ 8.7 倍）⇒ 高倍镜段必然过冲/顶格。
+            //   修法：进闭环前把误差除以本档真实倍率，和下面 PID 用的
+            //   `err_x = control_x / active_zoom_scale_` 完全同一招。
+            //   归一之后 gain（按腰射标定的那个数）对所有档位通吃 —— 不需要逐档重标。
+            //   active_zoom_scale_ 默认 1.0 ⇒ 腰射与未配置档位逐字节不变。
+            const float cl_zoom = (std::isfinite(active_zoom_scale_) && active_zoom_scale_ > 0.0f)
+                                      ? active_zoom_scale_ : 1.0f;
+            const float cl_err_y = control_y / cl_zoom;   // 归一域误差（px，腰射当量）
             const bool cl_hotkey = RecoilController::fire_hotkey_active(hotkey_bits, recoil_cfg);
-            // 没开火但有目标：慢 EMA 学"偏差底子"（静态瞄准偏移）。
+            // 没开火但有目标：慢 EMA 学"偏差底子"（静态瞄准偏移）。★底子与误差同域（都归一过）。
             // 开火期间不学（冻结），防长喷把后坐力本身学进底子 —— 见 RecoilClosedLoop.hpp 文件头。
             if (target_ok && !cl_hotkey) {
-                recoil_cl_.track_baseline(control_y, dt_ms, recoil_cl_cfg);
+                recoil_cl_.track_baseline(cl_err_y, dt_ms, recoil_cl_cfg);
             }
             bool cl_obs_ok = false;
             if (target_ok && cl_hotkey) {
@@ -724,7 +746,7 @@ void AimThread::loop() {
                             (std::abs(cl_box_h - cl_box_h_ema) <= 0.35f * cl_box_h_ema);
             }
             const auto cl_out = recoil_cl_.update(
-                recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, control_y, dt_ms, recoil_cl_cfg);
+                recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, cl_err_y, dt_ms, recoil_cl_cfg);
             // 与老压枪同域相加 —— 但两套**互斥**（见上面的 recoil_cl_takeover）：
             // 闭环 enabled 时老引擎整段没跑，所以这里加到的就是闭环的全部输出，不存在叠加。
             recoil_add_y += cl_out.add_y;

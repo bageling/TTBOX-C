@@ -5629,6 +5629,11 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">单帧变化上限<input id="recoil_cl_slew_count_per_frame" data-config type="number" min="0" step="0.1"><span class="field-hint">每帧输出最多变这么多 count（0 = 不限）= 阻尼，防止一帧猛踢。这是压摆动的旋钮。</span></label>
                       <label class="field">底子学习速度 ms<input id="recoil_cl_baseline_tau_ms" data-config type="number" min="0" step="100"><span class="field-hint">没开火时学"平时偏差底子"的速度，越小跟得越快。0 = 不学底子（第一版口径，一般更差）。</span></label>
                     </div>
+                    <div class="field-hint">这套自动纠偏只管<b>纵向</b>（枪口上抬）。横向那条左右漂它不管，由下面这个勾决定谁来补。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="check-line"><input id="recoil_cl_keep_horiz" data-config type="checkbox"> 保留横向补偿（横向仍走上面的三段查表）</label>
+                    </div>
+                    <div class="field-hint">默认勾上。不勾 = 横向也交给瞄准自己拉（旧行为，实机测下来弹道会往左漂出人）。</div>
                   </div>
                 </article>
                 <article class="module-tile is-wide">
@@ -6758,6 +6763,7 @@ const BB_CTRL_MODULES = [
     ["press_max_count", "n", 3.0],
     ["slew_count_per_frame", "n", 0.3],
     ["baseline_tau_ms", "n", 2000.0],
+    ["keep_horiz", "b", true],
   ]],
   ["trigger2", [
     ["enabled", "b", false],
