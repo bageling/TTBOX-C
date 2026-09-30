@@ -2,6 +2,7 @@
 # 验证：标定 gain 写回 mouse.gain_x/y_px_per_count + 拟人化联动，
 #      且不再用旧体系 K_LOOP 改写 kp（pid1 体系 kp 保持不动）。
 import sys
+import threading
 
 src = open('plugins/web/bin/ttbox-web.py', encoding='utf-8').read()
 
@@ -30,6 +31,8 @@ def _make_ns(profile, ipc_status=0):
         '_get_runtime_profile': lambda: profile,
         'ipc_request': lambda req_type, params: (ipc.sent.append((req_type, params)),
                                                  {'status': ipc_status, 'error': ''})[1],
+        # _calib_apply_gain 现在全程持写锁（读-改-写），测试命名空间得给一把真锁
+        '_CFG_WRITE_LOCK': threading.RLock(),
     }
     return ns, ipc
 

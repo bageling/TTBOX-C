@@ -5468,6 +5468,15 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <label class="field"><span class="field-label">跟丢后宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">人短暂被挡住、识别不到时，继续盯着原来的位置这么多毫秒再换人（1000 毫秒 = 1 秒）。调大不容易丢人，但太大可能一直粘着错的人。</span></label>
                   </div>
                 </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>瞄头部小框</strong>
+                    <label class="switch"><input id="controller_aim_at_head_box" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">训练场「单个目标只有大框(身体)＋小框(头)」时勾上：落点自动取小框正中心，按几何配对识别（小框被大框包住、面积明显更小、在大框上半部），不依赖类别号。模型只出一个身体框时勾了也没影响，会自动退回身体框落点。</div>
+                  </div>
+                </article>
               </div>
             </section>
 
@@ -6327,6 +6336,7 @@ const CONTROLLER_DEFAULTS = {
   pull_curve_strength: 0.8,
   pull_curve_min_distance: 80,
   selector_lost_grace_ms: 78,
+  aim_at_head_box: false,
 };
 // ---------------------------------------------------------------------------
 // BB 对标模块表（2026-09-24 面板收敛）
@@ -8999,6 +9009,7 @@ function populateForm(config) {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
+  setCheckbox("controller_aim_at_head_box", controller.aim_at_head_box ?? CONTROLLER_DEFAULTS.aim_at_head_box);
 
   // 压枪：开关与触发键走 config.recoil，其余（拉力/速度/上限/渐出/门控）走
   // BB_CTRL_MODULES 的 recoil 前缀，即 controller_recoil_* 之外的扁平键 recoil_*。
@@ -9110,6 +9121,7 @@ function movementDefaultsForSection(sectionId) {
       controller_rate: controller.rate,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
+      controller_aim_at_head_box: controller.aim_at_head_box,
     },
   };
   return defaultsBySection[sectionId] || defaultsBySection["control-section-pid"];
@@ -9229,6 +9241,7 @@ function collectConfig() {
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
+        aim_at_head_box: getCheckbox("controller_aim_at_head_box"),
         // BB 对标模块（表驱动，见 BB_CTRL_MODULES）
         ...collectControllerModules(),
       },
@@ -13048,6 +13061,23 @@ function bindEvents() {
   };
   const calibTraceLines = [];
 
+  // ★ 标定/手动应用写回参数后，把面板控件刷成 core 当前的生效值。
+  //   后端 _calib_apply_pid 已经把 kp/kd/predict_x 写进 core，但面板输入框只在
+  //   applyFullState / applyConfigNow 时回填 ⇒ 不刷页面看到的是旧值，用户会以为没生效。
+  async function syncConfigAfterCalibration() {
+    try {
+      const cfg = await api("/api/config");
+      if (!cfg) {
+        return;
+      }
+      populateForm(cfg);
+      setApplyStatus("ready", "已同步");
+      showToast("标定已把 Kp / Kd / 预判写回面板");
+    } catch {
+      showToast("参数已写入 Core，但面板刷新失败，可手动刷新页面", true);
+    }
+  }
+
   function calibPhaseLabel(payload) {
     const phase = payload && payload.phase;
     if (phase === "done" || phase === "saved") {
@@ -13141,6 +13171,10 @@ function bindEvents() {
           ["标定时间", saved.calibrated_at || "—"],
           ["模型", saved.model_id || "—"],
         ];
+        const pidSaved = saved.pid_params || {};
+        if (pidSaved.kp != null) {
+          rows.push(["推导 PID", `Kp ${Number(pidSaved.kp).toFixed(3)} · Kd ${Number(pidSaved.kd ?? 0).toFixed(3)} · 预判 ${Number(pidSaved.predict ?? 0).toFixed(3)}`]);
+        }
         savedSummary.innerHTML = rows.map(([k, v]) => `<div class="runtime-stat"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join("");
       } else {
         // 「未标定」≠「增益未知」：运行配置里的 gain 照样在生效（压枪都在用它），
@@ -13158,6 +13192,13 @@ function bindEvents() {
     // 终态后停止持续轮询（下次进入分区/点刷新再拉）
     if (["completed", "failed", "cancelled"].includes(state2) && !running) {
       state.calibKeepPolling = false;
+      // ★ 标定成功写回了 kp/kd/predict_x，面板输入框必须跟着变 —— 否则用户看到的
+      //   还是旧值，只能刷新页面（走 applyFullState → populateForm）才对得上。
+      //   这里拉一次 /api/config 回填，等于"热更新"，不用刷新。
+      if (state2 === "completed" && !state.calibConfigSynced) {
+        state.calibConfigSynced = true;
+        syncConfigAfterCalibration();
+      }
     }
     // 轴拟合结果（运行中/结束时都能看，独立展示避免与轨迹日志互相污染）
     const fitsLog = $("calibFitsLog");
@@ -13218,6 +13259,7 @@ function bindEvents() {
     }
     await api("/api/control/calibration/start", { method: "POST" });
     state.calibKeepPolling = true;
+    state.calibConfigSynced = false;
     scheduleCalibrationPolling(true);
     await refreshCalibration();
     showToast("标定已启动，过程中请保持目标静止");
@@ -13258,6 +13300,8 @@ function bindEvents() {
       }),
     });
     await refreshCalibration();
+    // 手动应用同样写回了 kp/kd/predict_x，面板要跟着热更新
+    await syncConfigAfterCalibration();
     showToast("已按手动增益换算并应用 Kp / Kd / 预判");
   }));
 

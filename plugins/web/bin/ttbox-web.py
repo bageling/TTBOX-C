@@ -1363,6 +1363,10 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     # 这两个是"全局基底瞄准点"，core 侧再被当前档的 offset 覆盖。
     for k, v in aim_point_vals.items():
         mouse[k] = v
+    # 几何配对识头（不依赖类别号）：面板勾上后落点取「小框正中心」（见 core resolve_head_box）。
+    # 平铺键，与 clip_bottom_extrapolate / offset_x 同层。
+    if ctrl.get('aim_at_head_box') is not None:
+        mouse['aim_at_head_box'] = bool(ctrl['aim_at_head_box'])
 
     # 6) 推理参数
     inference: dict = {}
@@ -1580,6 +1584,7 @@ def profile_to_web(prof: dict) -> dict:
         'head_aim_head_height_fraction': head_aim.get('head_height_fraction', 0.28),
         'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
         'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
+        'aim_at_head_box': mouse.get('aim_at_head_box', False),
         # personal_motion 改由 CTRL_BLOCKS 表驱动搬运（键名规则一致：前缀_字段），
         # 这里不再手写（手写与表并存会互相覆盖，且容易漏同步）。
     }
@@ -3821,7 +3826,15 @@ CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
 # 为什么不是旧的全正 [8,16,24,32,40]：慢环下位移逐轮累加（轮间只清 bias、不等瞄点归位）
 # ⇒ 比值散开 ⇒ 必挂 fit 的一致性门（MAD/|中位| > 0.35）。交替后相邻两步互相抵消，
 # 同时每个幅度都覆盖到，够撑满 fit 的 min_samples=5。
-CALIB_AMPLITUDES = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
+# ★ 2026-09-30 指令三：上限从 ±32 提到 ±96（3 倍）。业主反馈「摆动幅度太小测不出最快
+#   速度」——幅度小，闭环随便追得上，分不出系统能跟多快。等比 ×2（12/24/48/96）在同样
+#   8 档里把动态范围拉满，大档位用来逼近「最快可追速度」上限（见 max_tracked_amp 闭环）。
+CALIB_AMPLITUDES = (12.0, -12.0, 24.0, -24.0, 48.0, -48.0, 96.0, -96.0)
+# 摆动幅度闭环（配合 CALIB_AMPLITUDES）：位移达到幅度 × 0.6 算「追上」，追得上就继续往
+# 更大的档走；连续追不上 CALIB_AMP_MISS_LIMIT 轮 ⇒ 认为到了系统速度上限，提前收敛停摆
+# （不再硬跑更大幅、避免把目标甩飞）。收敛产物 max_tracked_amp = 温和档下能追上的最大幅度。
+CALIB_AMP_TRACK_RATIO = 0.6
+CALIB_AMP_MISS_LIMIT = 2
 # 标定期"温和档" PID：bias 是最高 ±32px 的阶跃，用实战参数在 ~50ms 采集回路延迟下
 # 会打进持续振荡（实测 ±150px），把目标甩出画面 ⇒ 整轮 no_target 作废
 # （2026-09-24 板上 A/B：kp0.10/kd0.30 十六轮全稳）。gain=Δpx/ΔΣcounts 是闭环恒等式、
@@ -3868,6 +3881,7 @@ _cal = {
     'settle_ms': 0,          # 轮间等瞄点静止耗时
     'settled': False,        # 是否等到静止（未静止不判失败，交给 MAD 门过滤）
     'dropped_sample_count': 0,  # 被门槛丢掉的样本数（同目标/位移/count/落设备）
+    'max_tracked_amp': 0.0,     # 闭环收敛产物：温和档下追得上的最大摆动幅度（px），= 最快可追速度的量度
 }
 _cal_lock = threading.Lock()
 # ★ 配置读-改-写串行锁：Core 只保证单次 SET_CONFIG 原子，不保证跨请求的 RMW 原子。
@@ -4247,6 +4261,7 @@ def _calib_worker() -> None:
         axis_observations = {CalibrationAxis.X: [], CalibrationAxis.Y: []}
         dropped = {CalibrationAxis.X: 0, CalibrationAxis.Y: 0}
         no_write = False
+        max_tracked_amps = []   # 每轴「最快可追幅度」闭环产物（[X, Y]，单位 px）
         for axis in (CalibrationAxis.X, CalibrationAxis.Y):
             _calib_set(
                 state=f'stabilize_{axis.value}',
@@ -4256,6 +4271,10 @@ def _calib_worker() -> None:
                 progress=0.5 if axis is CalibrationAxis.Y else 0.0,
             )
             # 每轴动作前重新确认同一候选，避免目标切换混入测量。
+            # 摆动幅度闭环：追得上就继续走大档，连续追不上就收敛停摆。
+            # max_tracked_amp 是这轮闭环的产物（最快可追幅度），随轴独立。
+            max_tracked_amp = 0.0
+            miss_streak = 0
             for index, amp in enumerate(amplitudes):
                 if _cal['status'] != 'running':
                     _calib_set(state='cancelled', phase='cancelled', reason='cancelled')
@@ -4291,8 +4310,9 @@ def _calib_worker() -> None:
                 # 同时测**真实响应延迟**（施加偏置 → 位移首次 ≥0.3px），它要喂给 PID 推导，
                 # 不能用上面等静止的 settle_ms（那是几百 ms 量级，会被 fit 的 ≤50ms 直接拒）。
                 injected_at = time.monotonic()
-                target_px = amp * 0.6
+                target_px = amp * CALIB_AMP_TRACK_RATIO
                 first_response_ms = None
+                tracked = False   # ★ 闭环判据：采样窗内位移是否追到幅度 × 0.6
                 deadline = injected_at + 0.8
                 while time.monotonic() < deadline:
                     if _cal['status'] != 'running':
@@ -4307,6 +4327,7 @@ def _calib_worker() -> None:
                     if first_response_ms is None and moved >= 0.3:
                         first_response_ms = (time.monotonic() - injected_at) * 1000.0
                     if moved >= abs(target_px):
+                        tracked = True
                         break
                 end = _calib_sample_pair(axis)
                 # 本轮结束立即回零（下一轮开头还会再清一次并等静止）。
@@ -4352,6 +4373,19 @@ def _calib_worker() -> None:
                             ipc_request('SET_CONFIG', {'profile': prof})
                             _calib_set(reason='低增益：已抬高标定期 KP 继续测量')
                 _calib_set(dropped_sample_count=sum(dropped.values()))
+                # ★ 摆动幅度闭环（2026-09-30 指令三）：追得上 → 记最快可追幅度、清零 miss；
+                #   追不上（注入生效却没过 60% 幅度）→ 计数；连续 miss 到上限 ⇒ 提前收敛停摆，
+                #   不再硬跑更大幅、避免把目标甩飞。max_tracked_amp = 温和档最快可追速度的量度。
+                if tracked:
+                    max_tracked_amp = max(max_tracked_amp, abs(amp))
+                    _calib_set(max_tracked_amp=max_tracked_amp)
+                    miss_streak = 0
+                elif wrote:
+                    miss_streak += 1
+                    if miss_streak >= CALIB_AMP_MISS_LIMIT:
+                        _calib_set(max_tracked_amp=max_tracked_amp,
+                                   reason=f'{axis.value}轴摆动收敛：最快可追幅度 ≈ {max_tracked_amp:.0f}px')
+                        break
             if not axis_observations[axis]:
                 # 整轴一个样本都没过门槛：与其让 fit 报一句笼统的"有效样本不足"，
                 # 不如把卡在哪说清（位移够不够 / 闭环有没有真的动 / 目标是不是被甩出画面）。
@@ -4367,6 +4401,7 @@ def _calib_worker() -> None:
                 phase=f'measure_{axis.value}_settle',
                 current_axis=axis.value,
             )
+            max_tracked_amps.append(max_tracked_amp)
         if no_write:
             _calib_set(state='failed', status='failed', phase='error', ready=False,
                        reason='注入的 count 没有落到 usbproxy（检查输出后端与连线）')
@@ -4408,6 +4443,11 @@ def _calib_worker() -> None:
             'model_id': _read_active_model(),
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
+            # 摆动闭环产物：两轴各自「最快可追幅度」+ 整体瓶颈（两轴较小者）。
+            # 后续 rate（跟随速度）推导的数据源，当前先落盘留痕（推导待 pid_sim 验证）。
+            'max_tracked_amp_x': round(max_tracked_amps[0], 2),
+            'max_tracked_amp_y': round(max_tracked_amps[1], 2),
+            'max_tracked_amp': round(min(max_tracked_amps), 2),
         }
         # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
         # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
@@ -4513,6 +4553,7 @@ def _calibration_payload() -> dict:
             'settle_ms': _cal['settle_ms'],
             'settled': _cal['settled'],
             'dropped_sample_count': _cal['dropped_sample_count'],
+            'max_tracked_amp': _cal['max_tracked_amp'],
             'error': '' if _cal['status'] != 'failed' else _cal['reason'],
         }
     record = _read_calibration()
@@ -4524,7 +4565,11 @@ def _calibration_payload() -> dict:
     eff = {}
     try:
         emo = (_get_runtime_profile().get('mouse')) or {}
-        for key in ('gain_x_px_per_count', 'gain_y_px_per_count'):
+        # ★ 除了增益，PID 三件也一并回「当前生效值」：标定写回 kp/kd/predict_x 后，
+        #   前端要拿它刷新面板控件（不用刷新页面），且这里才是 core 真正在用的值
+        #   （留档文件里的 pid_params 只回答"当时推导了多少"）。
+        for key in ('gain_x_px_per_count', 'gain_y_px_per_count',
+                    'kp_x', 'kd_x', 'predict_x'):
             try:
                 eff[key] = round(float(emo[key]), 4)
             except (KeyError, TypeError, ValueError):
@@ -4555,6 +4600,8 @@ def _calibration_payload() -> dict:
         'capture_width': _rec('crop_size', 0, prefix='capture'),
         'capture_height': _rec('crop_size', 0, prefix='capture'),
         'crop_size': _rec('crop_size', 0, prefix='capture'),
+        # 本轮推导出来的 PID（只是"当时推了多少"，生效值看 effective）
+        'pid_params': _rec('pid_params') or {},
         # 生效值单列一份：面板可在"未标定"时如实展示"当前运行配置里的增益"
         'effective': eff,
     }
