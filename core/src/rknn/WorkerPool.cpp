@@ -248,10 +248,10 @@ void InferenceWorker::apply_runtime_profile() {
     const uint32_t rh = prof->capture.height;
     const uint32_t fw = params_.frame_w, fh = params_.frame_h;
     if (rw > 0 && rh > 0 && fw > 0 && fh > 0 && rw <= fw && rh <= fh) {
-        // ROI 中心 = 屏幕中心 + offset（offset 语义=相对屏幕中心偏移），
+        // V1.0.13：capture.offset_x/y 已删 ⇒ ROI 恒以屏幕中心为心，
         // 转左上角起点并 clamp 到全帧内。
-        const int32_t cx = static_cast<int32_t>(fw / 2) + prof->capture.offset_x;
-        const int32_t cy = static_cast<int32_t>(fh / 2) + prof->capture.offset_y;
+        const int32_t cx = static_cast<int32_t>(fw / 2);
+        const int32_t cy = static_cast<int32_t>(fh / 2);
         const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(
             cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
         const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(

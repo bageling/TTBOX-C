@@ -11,11 +11,6 @@ from ttbox_motion.calibration import (
 )
 
 
-# 板端实况的 Kp/Kd 削弱宽度（`mouse.smooth_x`）。derive_pid_params 把它改成必传参数
-# （以前有默认 9900、调用点全不传 ⇒ 默认值静默生效，配置改成 9990/0 都不起作用）。
-BOARD_SMOOTH = 9900.0
-
-
 def observations(axis, values, delays=None, target_id="track-1"):
     delays = delays or [8.0] * len(values)
     return [
@@ -106,30 +101,30 @@ def test_calibration_session_has_explicit_state_transitions():
 
 def test_derive_pid_params_scales_kp_inverse_to_gain():
     # 增益越大（1 count 移动越多 px），KP 应越小以防过冲
-    low_gain = derive_pid_params(0.4, 0.4, 30, smooth=BOARD_SMOOTH)
-    high_gain = derive_pid_params(1.5, 1.5, 30, smooth=BOARD_SMOOTH)
+    low_gain = derive_pid_params(0.4, 0.4, 30)
+    high_gain = derive_pid_params(1.5, 1.5, 30)
     assert low_gain["kp"] > high_gain["kp"]
-    assert 0.0 < low_gain["kp"] <= 60.0
+    assert 0.0 < low_gain["kp"] <= 1.0     # V1.0.13：上限换到生效域（KP_MAX）
 
 
 def test_derive_pid_params_increases_kd_with_delay():
-    low_delay = derive_pid_params(0.65, 0.65, 10, smooth=BOARD_SMOOTH)
-    high_delay = derive_pid_params(0.65, 0.65, 60, smooth=BOARD_SMOOTH)
+    low_delay = derive_pid_params(0.65, 0.65, 10)
+    high_delay = derive_pid_params(0.65, 0.65, 60)
     assert high_delay["kd"] > low_delay["kd"]
 
 
 def test_derive_pid_params_reduces_predict_with_delay():
-    low_delay = derive_pid_params(0.65, 0.65, 10, smooth=BOARD_SMOOTH)
-    high_delay = derive_pid_params(0.65, 0.65, 60, smooth=BOARD_SMOOTH)
+    low_delay = derive_pid_params(0.65, 0.65, 10)
+    high_delay = derive_pid_params(0.65, 0.65, 60)
     assert high_delay["predict"] < low_delay["predict"]
     assert 0.1 <= high_delay["predict"] <= 0.35
 
 
 def test_derive_pid_params_handles_extreme_gain_delay():
     # 超高增益 + 高延迟：KP 走保守分支，必须仍给出有效参数
-    d = derive_pid_params(1.5, 1.5, 60, smooth=BOARD_SMOOTH)
-    assert 4.0 <= d["kp"] <= 60.0
-    assert 4.0 <= d["kd"] <= 50.0
+    d = derive_pid_params(1.5, 1.5, 60)
+    assert 0.04 <= d["kp"] <= 1.0
+    assert 0.04 <= d["kd"] <= 0.5
     assert 0.1 <= d["predict"] <= 0.35
 
 
@@ -137,15 +132,7 @@ def test_derive_pid_params_rejects_zero_gain():
     import pytest as _p
 
     with _p.raises(ValueError):
-        derive_pid_params(0.0, 0.65, 30, smooth=BOARD_SMOOTH)
-
-
-def test_derive_pid_params_requires_smooth():
-    """smooth 必须是必传参数：带默认值时调用方漏传会静默按默认算（这正是旧 bug）。"""
-    import pytest as _p
-
-    with _p.raises(TypeError):
-        derive_pid_params(0.65, 0.65, 30)          # 故意不传 smooth
+        derive_pid_params(0.0, 0.65, 30)
 
 
 # ===========================================================================
@@ -223,17 +210,16 @@ def _fit_with_px_denominator(axis):
 def test_px_denominator_yields_gain_one_for_every_game():
     """★ 反向锁：分母退回 px 时，**无论真实游戏灵敏度是多少，拟合出的 gain 都是 1.0**。
 
-    gain=1.0 又会让 derive_pid_params 恒返回 kp=KP_FRACTION_PER_FRAME/kp_scale
-    （= 0.07/0.01 = 7.0），也就是"标定成功"却写下一个与任何游戏都无关的常数 ——
+    gain=1.0 又会让 derive_pid_params 恒返回 kp=KP_FRACTION_PER_FRAME
+    （= 0.07），也就是"标定成功"却写下一个与任何游戏都无关的常数 ——
     自动调参整个失效。这条用例存在的意义：谁把分母改回 px，它就会红。
     """
     for _ in (0.25, 0.4, 0.65, 1.2, 2.0):            # 五种差异极大的游戏灵敏度
         fake = _fit_with_px_denominator(CalibrationAxis.X)
         assert fake.converged is True                 # 它会"成功"，这才是最坑的地方
         assert fake.gain_px_per_count == pytest.approx(1.0)
-        assert derive_pid_params(fake.gain_px_per_count, fake.gain_px_per_count, 12.0,
-                                 smooth=BOARD_SMOOTH)["kp"] \
-            == pytest.approx(KP_FRACTION_PER_FRAME / 0.01)
+        assert derive_pid_params(fake.gain_px_per_count, fake.gain_px_per_count, 12.0)["kp"] \
+            == pytest.approx(KP_FRACTION_PER_FRAME)
 
 
 def test_real_counts_denominator_makes_kp_track_the_actual_game():
@@ -242,55 +228,45 @@ def test_real_counts_denominator_makes_kp_track_the_actual_game():
     for g in (0.25, 0.4, 0.65, 1.2, 2.0):
         fit = fit_axis_measurements(CalibrationAxis.X, counts_observations(CalibrationAxis.X, g))
         assert fit.gain_px_per_count == pytest.approx(g, rel=1e-9)
-        kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0,
-                                   smooth=BOARD_SMOOTH)["kp"]
+        kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0)["kp"]
     assert len(set(kps.values())) == len(kps)          # 五个不同的游戏 → 五个不同的 kp
-    # derive_pid_params 把 kp 保留 2 位小数，故用绝对容差
-    assert kps[0.65] == pytest.approx(KP_FRACTION_PER_FRAME / 0.01 / 0.65, abs=0.005)
-    assert kps[0.65] != pytest.approx(KP_FRACTION_PER_FRAME / 0.01)   # 不再是与游戏无关的常数
+    # derive_pid_params 把 kp 保留 4 位小数，故用绝对容差
+    assert kps[0.65] == pytest.approx(KP_FRACTION_PER_FRAME / 0.65, abs=0.005)
+    assert kps[0.65] != pytest.approx(KP_FRACTION_PER_FRAME)   # 不再是与游戏无关的常数
 
 
 # ===========================================================================
 # 自动调参锚点：必须对齐板端 A/B 实测**稳定组**，不能落回**振荡组**
 #
-# 2026-09-24 板端（gain 实测 x=0.686 / y=0.695、回路延迟 51ms、smooth=9900）：
-#   kp=25/kd=25 → bias 阶跃打进持续振荡（准星 ±150px），标定必挂
-#   kp=10/kd=30 → 同一链路 16 轮全稳
-# 旧公式（单帧 15%）算出 kp=21.87/kd=24.60，几乎就是那个振荡组 ——
+# 2026-09-24 板端（gain 实测 x=0.686 / y=0.695、回路延迟 51ms；以下都是**生效值**）：
+#   kp=0.25/kd=0.25 → bias 阶跃打进持续振荡（准星 ±150px），标定必挂
+#   kp=0.10/kd=0.30 → 同一链路 16 轮全稳
+# 旧公式（单帧 15%）算出 kp=0.219/kd=0.246，几乎就是那个振荡组 ——
 # "标定成功写回的参数正好是让标定失败的那组"。下面两条把它钉死。
 # ===========================================================================
 
 
 def test_derived_params_match_board_measured_stable_set():
-    d = derive_pid_params(0.686, 0.695, 51.0, smooth=BOARD_SMOOTH)
-    # 实测稳定组是 kp=10 / kd=30：允许小幅偏差，但不能差一个量级
-    assert d["kp"] == pytest.approx(10.0, rel=0.15)
-    assert d["kd"] == pytest.approx(30.0, rel=0.15)
+    d = derive_pid_params(0.686, 0.695, 51.0)
+    # 实测稳定组是 kp=0.10 / kd=0.30（生效值）：允许小幅偏差，但不能差一个量级
+    assert d["kp"] == pytest.approx(0.10, rel=0.15)
+    assert d["kd"] == pytest.approx(0.30, rel=0.15)
     assert d["predict"] <= 0.35
 
 
 def test_derived_kp_never_lands_in_board_measured_oscillating_band():
-    """旧公式在 51ms 给出 kp=21.87/delay 比 1.13——落在实测振荡组附近，这里禁止回归。"""
-    d = derive_pid_params(0.686, 0.695, 51.0, smooth=BOARD_SMOOTH)
-    assert d["kp"] < 15.0                     # 明显低于振荡组 kp=25
+    """旧公式在 51ms 给出 kp=0.2187/delay 比 1.13——落在实测振荡组附近，这里禁止回归。"""
+    d = derive_pid_params(0.686, 0.695, 51.0)
+    assert d["kp"] < 0.15                     # 明显低于振荡组 kp=0.25
     assert d["kd"] / d["kp"] > 2.0            # 阻尼比要够（实测稳定组是 3.0）
 
 
-def test_derive_pid_params_kp_eff_is_invariant_to_smooth():
-    """★ smooth 是"削弱 Kp/Kd 的倍率"，改它不该改**物理行为**。
+def test_derived_kp_is_the_effective_value_directly():
+    """★ V1.0.13：返回的 kp 就是**生效值**，不再有"名义值 × 0.01"那层隐形换算。
 
-    生效域 kp_eff = kp × (bandwidth-smooth)/bandwidth 必须由 gain 决定、与 smooth 无关
-    （否则面板上一改 Smooth，同一份标定结果就推出完全不同的手感的极限环边界）。
-    旧实现把 smooth 写死 9900 且调用点不传 ⇒ smooth=0 时 kp_eff 强 100 倍（发散）。
+    旧域里配置写 10.2、实际生效 0.102，中间差 100 倍 —— 业主在面板上看到的数
+    跟手感对不上，正是"参考物太多"的典型。smooth 删掉后这层换算没有了，
+    所以这条用例的判据直接是 kp == 单帧比例 / gain。
     """
-    for smooth in (0.0, 3000.0, 9900.0):
-        d = derive_pid_params(0.686, 0.686, 51.0, smooth=smooth)
-        kp_eff = d["kp"] * (10000.0 - smooth) / 10000.0
-        assert kp_eff == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)
-
-
-def test_derive_pid_params_rejects_out_of_range_smooth():
-    """smooth 越界会让 kp_scale 变负或 0 ⇒ 推导出的 kp 无意义，必须 fail-loud。"""
-    for bad in (10000.0, 12000.0, -1.0):
-        with pytest.raises(ValueError):
-            derive_pid_params(0.65, 0.65, 30.0, smooth=bad)
+    d = derive_pid_params(0.686, 0.686, 51.0)
+    assert d["kp"] == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)

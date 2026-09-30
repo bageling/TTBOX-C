@@ -196,25 +196,24 @@ static void test_low_confidence() {
 
 // 测试7：坐标转换 — 已知输入，输出必须与预期完全一致
 // 复用 test_coordinate_transform 的确定性用例：box(90,40,110,140) aim_point(0.5,0.15)
-// aim_offset(10,-5)，roi 200x200 → 期望 error=(-10,-40)
+// roi 200x200 → 参考点=(100,100)，target=(100,55) → 期望 error=(0,-45)
+// ★ V1.0.13：aim_offset(10,-5) 已删（准星恒为裁剪区正中心）。
 static void test_coordinate() {
     AimPointProfile p;
     p.offset_x = 0.5f;
     p.offset_y = 0.15f;
-    p.aim_offset_x = 10.0f;
-    p.aim_offset_y = -5.0f;
     float ex = 0.0f, ey = 0.0f;
     const DetectionBox b = box(90.0f, 40.0f, 110.0f, 140.0f, 0.9f, 1);
     CHECK(CoordinateTransform::pixel_error(b, 1, p, 200.0f, 200.0f, &ex, &ey));
-    // target=(100,55) reference=(110,95) → error=(-10,-40)
-    CHECK(std::abs(ex + 10.0f) < 1e-5f);
-    CHECK(std::abs(ey + 40.0f) < 1e-5f);
+    // target=(100,55) reference=(100,100) → error=(0,-45)
+    CHECK(std::abs(ex) < 1e-5f);
+    CHECK(std::abs(ey + 45.0f) < 1e-5f);
 
     // 参考点独立验证
     float rx = 0.0f, ry = 0.0f;
     CoordinateTransform::reference_point(200.0f, 200.0f, p, &rx, &ry);
-    CHECK(std::abs(rx - 110.0f) < 1e-5f);
-    CHECK(std::abs(ry - 95.0f) < 1e-5f);
+    CHECK(std::abs(rx - 100.0f) < 1e-5f);
+    CHECK(std::abs(ry - 100.0f) < 1e-5f);
     std::printf("test7_coordinate: PASS\n");
 }
 

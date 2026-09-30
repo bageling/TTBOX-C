@@ -16,7 +16,8 @@ STEPS = 900
 
 def sim(kp, kd, predict, delay, gain, dist=40.0, noise=2.0, seed=11):
     random.seed(seed)
-    p = Pid1(kp, kd, predict, 0.2, 9900)
+    # ★ V1.0.13：kp/kd 已是生效值 ⇒ 仿真里 smooth 必须传 0（传 9900 等于再削 99%）
+    p = Pid1(kp, kd, predict, 0.2, 0)
     err = float(dist)
     es = []
     os = []
@@ -54,7 +55,7 @@ def run_row(label, kp, kd, predict, delay, gain):
         v = "!!振荡"
     elif conv > 300:
         v = "!!慢"
-    print(f"{label:<38} kp={kp:5.1f} kd={kd:5.1f} p={predict:4.2f} "
+    print(f"{label:<38} kp={kp:6.3f} kd={kd:6.3f} p={predict:4.2f} "
           f"d={delay:3d} g={gain:4.2f} | 幅={amp:6.2f} 翻转={fl:3d} "
           f"非零={nz:3d} 收敛={conv:3d}  {v}")
 
@@ -65,15 +66,14 @@ def main():
     print(f"== 因子实验: {mode} ==")
     for gain in (0.65, 1.0, 1.5):
         for delay in (30, 60):
-            # smooth 是必传参数（无默认）：仿真固定用板端实况 9900。
-            d = derive_pid_params(gain, gain, delay, smooth=9900.0)
+            d = derive_pid_params(gain, gain, delay)
             kp, kd, predict = d["kp"], d["kd"], d["predict"]
             if mode == "kd_boost":
-                kd = max(8.0, min(60.0, kp * (1.2 + delay / 80.0)))
+                kd = max(0.08, min(0.6, kp * (1.2 + delay / 80.0)))
             elif mode == "predict_low":
                 predict = max(0.1, min(0.4, 0.4 - delay / 300.0))
             elif mode == "kd_boost_predict_low":
-                kd = max(8.0, min(60.0, kp * (1.2 + delay / 80.0)))
+                kd = max(0.08, min(0.6, kp * (1.2 + delay / 80.0)))
                 predict = max(0.1, min(0.4, 0.4 - delay / 300.0))
             run_row(mode, kp, kd, predict, delay, gain)
 

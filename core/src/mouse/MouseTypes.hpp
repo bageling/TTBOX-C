@@ -84,12 +84,14 @@ struct HeadAimConfig {
 
 // 瞄准点配置（AimPointProfile）：
 //   默认瞄准点 = 框中心 + offset × 框尺寸；class_offsets 按类别覆盖。
-//   aim_offset_x/y = 瞄准参考点（准星）偏移，crop 系像素。
+//   ★ V1.0.13（2026-09-30）：aim_offset_x/y（准星在 crop 系的像素偏移）已删 ——
+//     业主口径「功能太复杂、参考物太多，落点与设置的瞄点对不上」。
+//     准星定义改为裁剪区正中心（CoordinateTransform::reference_point 不再加偏移），
+//     于是"落点"只剩 offset_x/offset_y **一个**入口。旧配置里出现这两个键一律
+//     静默忽略（等价 0 ⇒ 与删除前行为一致；板端实测一直是 0）。
 struct AimPointProfile {
     float offset_x = 0.5f;
     float offset_y = 0.5f;
-    float aim_offset_x = 0.0f;  // crop 系 px（crop 中心 + 偏移 = 准星）
-    float aim_offset_y = 0.0f;
     std::vector<ClassOffset> class_offsets;
     // ★ switch_delay_ms 已删（2026-09-26）：全仓只有序列化在搬它，没有任何消费者，
     //   面板也没有对应控件 —— 属于"看着像配置、其实没人读"的尸体字段。
@@ -570,11 +572,16 @@ struct MouseProfile {
     std::vector<AimHotkeyProfile> aim_profiles{AimHotkeyProfile{}};
     float fov_range = 1.0f;                     // 目标选择范围（0~1，仅影响目标选择）
     float confidence = 0.25f;                   // 目标置信度阈值（目标选择）
-    // PID 默认值以用户提供的 pid1.cpp 权威参数为准（X: kp=25 kd=25 predict=3 rate=0.3；Y: predict=0）
-        float kp_x = 25.0f;                         // X 比例增益（P 控制）
-        float kp_y = 25.0f;
-        float kd_x = 25.0f;                         // 微分增益（pid1 刹车，防过冲）
-        float kd_y = 25.0f;
+    // ★ V1.0.13（2026-09-30）：kp/kd 的语义改成**真实有效值**（count / px 误差）。
+    //   原先 pid1 的 kp 要先被 smooth 的 (10000-smooth)/10000 削一刀才生效 ——
+    //   出厂 kp=25 + smooth=9900 ⇒ 实际只有 0.25（被削 99%）。两个参数管一件事、
+    //   而面板上那个「削弱强度」没人猜得出它的作用 ⇒ 业主口径「参考物太多、功能紊乱」。
+    //   现改为：kp 直接就是"每 1px 误差输出多少 count"，smooth 从参数面删除。
+    //   老配置带 smooth_x/y 的，读配置时按同一系数折算进 kp/kd（行为等价，见 RuntimeProfile.cpp）。
+        float kp_x = 0.25f;                         // X 比例增益（count / px 误差）
+        float kp_y = 0.25f;
+        float kd_x = 0.25f;                         // 微分增益（pid1 刹车，防过冲）
+        float kd_y = 0.25f;
     // A10.1：FOV 角度换算模式（参考 PD Aim fov 算法，可选）
     bool fov_mode = false;                      // true = 角度换算输出（替代 kp×err）
     float hfov = 83.105f;                       // 水平视场角（度）
@@ -598,10 +605,13 @@ struct MouseProfile {
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
     // controller 公式（kp×rate×err + predict×vel）与输出链参数
-    float predict_x = 3.0f;                   // pid1 X 前馈 3.0（追左右移动目标）
+    // ★ V1.0.13：predict 默认 3.0 → **1.0**。3.0 是 pid1 原版值，在我们这套
+    //   （51ms 回路延迟 + 144fps）下会自激。1.0 是离线闭环扫出来的峰值：
+    //   目标在画面里移动 200px/s 时落点滞后 13.5px → 1.5px（板端实测噪声下 13.4 → 3.8px），
+    //   静止靶 0.21px 不变、单帧输出不涨；1.2 起滞后回升并开始振铃（yu 用 1.3，抄会炸）。
+    float predict_x = 1.0f;                   // pid1 X 前馈（追左右移动目标；离线扫出的安全上限）
         float predict_y = 0.0f;                   // pid1 Y 不带前馈（仅位置纠正）
-    float smooth_x = 9900.0f;                   // smooth 参考值（9900≈不过滤；TTBox 用 smooth 0~1 兼容）
-    float smooth_y = 9900.0f;
+    // ★ V1.0.13：smooth_x/smooth_y 已删（折叠进 kp/kd，见上面的说明）。
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
     // 插件配置（pull_curve / continuous_lead / recoil / personal_motion / personal_trajectory）
         PullCurveConfig pull_curve;

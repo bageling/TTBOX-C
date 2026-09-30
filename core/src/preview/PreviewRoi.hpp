@@ -1,7 +1,8 @@
 // PreviewRoi.hpp — 预览裁剪矩形（纯函数，host 可单测）
 //
 // 预览必须显示「模型实际看到的区域」：由 RuntimeProfile::capture 决定
-// （截取尺寸 capture.width/height + 相对屏幕中心的偏移 capture.offset_x/y）。
+// （截取尺寸 capture.width/height）。
+// ★ V1.0.13（2026-09-30）：capture.offset_x/y 已删 —— 裁剪区恒以屏幕中心为心。
 //
 // 2026-09-20 业主定案：主页「截取尺寸」改多少，低帧预览就裁多少。
 // 此前 PreviewModule 用 preview.width/height（部署值 640）自己裁一块固定中心方块，
@@ -9,7 +10,7 @@
 // 而且预览窗口大小一变就以为改的是「尺寸」。把矩形计算收敛到这里：
 //
 //   · compute_preview_roi 的公式与 rknn/WorkerPool::apply_runtime_profile 的 ROI
-//     **逐字一致**（中心 ± 偏移、clamp 到全帧内），保证预览框 == 推理 ROI；
+//     **逐字一致**（中心、clamp 到全帧内），保证预览框 == 推理 ROI；
 //   · capture 为 0×0（全帧/自动）或超出全帧 ⇒ 中心正方形 side=min(fw,fh)，
 //     与 WorkerPool 里 0×0 分支的 decoder_->set_roi(中心正方形) 语义一致。
 //
@@ -28,16 +29,15 @@ struct PreviewRoi {
     uint32_t h = 0;
 };
 
-// 与 WorkerPool 同式：ROI 中心 = 屏幕中心 + offset，转左上角起点并 clamp 到全帧内。
+// 与 WorkerPool 同式：ROI 中心 = 屏幕中心，转左上角起点并 clamp 到全帧内。
 inline PreviewRoi compute_preview_roi(uint32_t frame_w, uint32_t frame_h,
-                                      uint32_t cap_w, uint32_t cap_h,
-                                      int32_t offset_x, int32_t offset_y) {
+                                      uint32_t cap_w, uint32_t cap_h) {
     PreviewRoi roi;
     if (frame_w == 0 || frame_h == 0) return roi;
 
     if (cap_w > 0 && cap_h > 0 && cap_w <= frame_w && cap_h <= frame_h) {
-        const int32_t cx = static_cast<int32_t>(frame_w / 2) + offset_x;
-        const int32_t cy = static_cast<int32_t>(frame_h / 2) + offset_y;
+        const int32_t cx = static_cast<int32_t>(frame_w / 2);
+        const int32_t cy = static_cast<int32_t>(frame_h / 2);
         const int32_t rx = std::max<int32_t>(
             0, std::min<int32_t>(cx - static_cast<int32_t>(cap_w / 2),
                                  static_cast<int32_t>(frame_w - cap_w)));

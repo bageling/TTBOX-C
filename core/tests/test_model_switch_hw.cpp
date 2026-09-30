@@ -89,8 +89,10 @@ bool run_runtime(const std::string& model, const RuntimeProfile& prof,
     // 热更新：应用用户配置（conf/iou/FOV）
     decoder->apply_runtime(prof.inference, prof.fov);
     if (prof.capture.width > 0) {
-        decoder->set_roi(prof.capture.offset_x, prof.capture.offset_y,
-                         prof.capture.width, prof.capture.height);
+        // V1.0.13：capture.offset_x/y 已删 ⇒ ROI 恒以屏幕中心为心
+        const uint32_t roi_x = (1920 - prof.capture.width) / 2;
+        const uint32_t roi_y = (1080 - prof.capture.height) / 2;
+        decoder->set_roi(roi_x, roi_y, prof.capture.width, prof.capture.height);
     }
     const auto& p = decoder->stats();
     (void)p;

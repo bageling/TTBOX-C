@@ -8,8 +8,11 @@ namespace ttbox::core::aim {
 void CoordinateTransform::reference_point(float roi_w, float roi_h,
                                           const AimPointProfile& prof,
                                           float* rx, float* ry) {
-    *rx = roi_w * 0.5f + prof.aim_offset_x;
-    *ry = roi_h * 0.5f + prof.aim_offset_y;
+    // V1.0.13（2026-09-30）：原先这里再加 prof.aim_offset_x/y（准星像素偏移），
+    // 已按业主口径删除 —— 准星就是裁剪区正中心，落点只剩「瞄点」一个入口。
+    (void)prof;
+    *rx = roi_w * 0.5f;
+    *ry = roi_h * 0.5f;
 }
 
 bool CoordinateTransform::pixel_error(const DetectionBox& box, int class_id,

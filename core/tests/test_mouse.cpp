@@ -6,6 +6,8 @@
 #include "test_util.hpp"
 
 #include <cmath>
+#include <type_traits>
+#include <utility>
 
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/AimStateMachine.hpp"
@@ -175,12 +177,10 @@ TEST(mouse_coord_transform_pixel_error) {
     // ROI 改变（192）→ 准星 (96,96) → err +104/+104（自动重算）
     CHECK(aim::CoordinateTransform::pixel_error(box, 0, prof, 192, 192, &ex, &ey));
     CHECK_EQ(ex, 104.0f);
-    // aim_offset 偏移准星
-    prof.aim_offset_x = -10.0f;
-    prof.aim_offset_y = 10.0f;
+    // ★ V1.0.13：aim_offset_x/y 已删 ⇒ 准星恒为裁剪区正中心（160,160）
     CHECK(aim::CoordinateTransform::pixel_error(box, 0, prof, 320, 320, &ex, &ey));
-    CHECK_EQ(ex, 50.0f);   // 200 - (160-10)
-    CHECK_EQ(ey, 30.0f);   // 200 - (160+10)
+    CHECK_EQ(ex, 40.0f);   // 200 - 160
+    CHECK_EQ(ey, 40.0f);   // 200 - 160
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +466,6 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.jitter_feedforward.gain_px_per_count = 0.0f; // V1.0.12 起 0 = 用 mouse.gain_y（热键档 gain 已删）
     p.mouse.jitter_feedforward.scale = 0.8f;
     p.mouse.jitter_feedforward.max_px = 25.0f;
-    p.mouse.aim_point.aim_offset_x = 12.0f;
     p.mouse.fov_mode = true;
     p.mouse.hfov = 90.0f;
     p.mouse.vfov = 60.0f;
@@ -495,7 +494,6 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.jitter_feedforward.gain_px_per_count == 0.0f);
     CHECK(q.mouse.jitter_feedforward.scale == 0.8f);
     CHECK(q.mouse.jitter_feedforward.max_px == 25.0f);
-    CHECK(q.mouse.aim_point.aim_offset_x == 12.0f);
     CHECK(q.mouse.fov_mode);
     CHECK(q.mouse.hfov == 90.0f);
     CHECK(q.mouse.vfov == 60.0f);
@@ -649,8 +647,9 @@ TEST(mouse_profile_fields_roundtrip) {
     RuntimeProfile p;
     p.mouse.predict_x = 0.6f;
     p.mouse.predict_y = 0.7f;
-    p.mouse.smooth_x = 5000.0f;
-    p.mouse.smooth_y = 4000.0f;
+    // V1.0.13：smooth_x/smooth_y 已删（折叠进 kp/kd）——这里改用 kp/kd 锁往返
+    p.mouse.kp_x = 0.42f;
+    p.mouse.kd_y = 0.19f;
     p.mouse.output_deadzone = 1.5f;
     p.mouse.pull_curve.enabled = true;
     p.mouse.pull_curve.strength = 0.9f;
@@ -661,11 +660,95 @@ TEST(mouse_profile_fields_roundtrip) {
     const RuntimeProfile q = RuntimeProfile::from_json(j);
     CHECK(q.mouse.predict_x == 0.6f);
     CHECK(q.mouse.predict_y == 0.7f);
-    CHECK(q.mouse.smooth_x == 5000.0f);
+    CHECK(q.mouse.kp_x == 0.42f);
+    CHECK(q.mouse.kd_y == 0.19f);
     CHECK(q.mouse.output_deadzone == 1.5f);
     CHECK(q.mouse.pull_curve.enabled);
     CHECK(q.mouse.pull_curve.strength == 0.9f);
     CHECK(q.mouse.pull_curve.min_distance == 100.0f);
+}
+
+
+// ---------------------------------------------------------------------------
+// V1.0.13 编译期守卫：三个「多余的落点/增益参考物」不许回来
+//   · AimPointProfile::aim_offset_x/y  —— 准星像素偏移（第二个落点入口）
+//   · CaptureProfile::offset_x/y       —— 裁剪区偏移（第三个落点入口）
+//   · MouseProfile::smooth_x/y         —— pid1 的"削弱倍率"（把 kp/kd 暗削 99%）
+// 加回来 = 编译失败。这是最强形式的反向验证：测试跑不起来就说不了谎。
+// ---------------------------------------------------------------------------
+template <typename T, typename = void>
+struct has_aim_offset_field : std::false_type {};
+template <typename T>
+struct has_aim_offset_field<T, decltype(void(std::declval<T&>().aim_offset_x))>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_capture_offset_field : std::false_type {};
+template <typename T>
+struct has_capture_offset_field<T, decltype(void(std::declval<T&>().offset_x))>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_smooth_field : std::false_type {};
+template <typename T>
+struct has_smooth_field<T, decltype(void(std::declval<T&>().smooth_x))> : std::true_type {};
+
+static_assert(!has_aim_offset_field<aim::AimPointProfile>::value,
+              "V1.0.13：AimPointProfile 不得再有 aim_offset_x（落点只留瞄点一个入口）");
+static_assert(!has_capture_offset_field<CaptureProfile>::value,
+              "V1.0.13：CaptureProfile 不得再有 offset_x（裁剪区恒居中）");
+static_assert(!has_smooth_field<aim::MouseProfile>::value,
+              "V1.0.13：MouseProfile 不得再有 smooth_x（已折叠进 kp/kd）");
+
+// ---------------------------------------------------------------------------
+// smooth 折叠：老配置（带 smooth_x/smooth_y）必须折算成同一套真实 kp/kd，
+// 且写回时不再产出 smooth_* —— 否则老盒子升级后 kp 会突然放大 100 倍。
+// ---------------------------------------------------------------------------
+TEST(mouse_smooth_folds_into_kp_and_never_written_back) {
+    // 板端真实老配置：kp_x=15 / kd_x=6 / smooth=9900 ⇒ 真实 kp_x=0.15 / kd_x=0.06
+    auto lp = json_parse(
+        R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":9900,"smooth_y":9900,)"
+        R"("predict_x":0,"predict_y":0}})");
+    CHECK(lp.ok);
+    if (!lp.ok) return;
+    const RuntimeProfile legacy = RuntimeProfile::from_json(lp.value);
+
+    CHECK(std::fabs(legacy.mouse.kp_x - 0.15f) < 1e-6f);
+    CHECK(std::fabs(legacy.mouse.kd_x - 0.06f) < 1e-6f);
+    // 折叠确实发生了：没折算的话 kp_x 会原样停在 15
+    CHECK(legacy.mouse.kp_x < 1.0f);
+
+    // 写回不再产出 smooth_*，且写回来的就是折算后的真实值（再读一遍不变大）
+    // 注意：humanize.smooth_factor / global_wave.smooth 里也含 "smooth"，所以只找键名。
+    const std::string out = legacy.to_json().dump();
+    CHECK(out.find("\"smooth_x\"") == std::string::npos);
+    CHECK(out.find("\"smooth_y\"") == std::string::npos);
+    const RuntimeProfile back = RuntimeProfile::from_json(legacy.to_json());
+    CHECK(std::fabs(back.mouse.kp_x - legacy.mouse.kp_x) < 1e-6f);
+    CHECK(std::fabs(back.mouse.kd_x - legacy.mouse.kd_x) < 1e-6f);
+    CHECK(std::fabs(back.mouse.kp_x - 15.0f) > 1.0f);
+}
+
+// smooth=0（明说过"不削"）同样按 0 算，不能把默认 9900 拿来削一遍。
+TEST(mouse_smooth_zero_means_no_attenuation) {
+    auto p = json_parse(R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":0}})");
+    CHECK(p.ok);
+    if (!p.ok) return;
+    const RuntimeProfile t = RuntimeProfile::from_json(p.value);
+    CHECK(std::fabs(t.mouse.kp_x - 15.0f) < 1e-6f);
+    CHECK(std::fabs(t.mouse.kd_x - 6.0f) < 1e-6f);
+}
+
+// 不带 smooth 键的老配置（键不存在 ≠ smooth=0）：默认 kp/kd 就是真实值，不得再折算。
+TEST(mouse_without_smooth_key_uses_true_kp_default) {
+    auto p = json_parse(R"({"mouse":{"enabled":true}})");
+    CHECK(p.ok);
+    if (!p.ok) return;
+    const RuntimeProfile t = RuntimeProfile::from_json(p.value);
+    CHECK(std::fabs(t.mouse.kp_x - 0.25f) < 1e-6f);   // 结构体默认 = 真实有效值
+    CHECK(std::fabs(t.mouse.kd_x - 0.25f) < 1e-6f);
+    CHECK(std::fabs(t.mouse.predict_x - 1.0f) < 1e-6f);  // V1.0.13 新默认（离线扫出的安全上限）
+    CHECK(t.to_json().dump().find("\"smooth_x\"") == std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

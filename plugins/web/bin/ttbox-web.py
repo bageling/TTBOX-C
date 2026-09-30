@@ -760,7 +760,10 @@ def _brand_template_name(template: str, brand: Any = None) -> str:
 # 参数翻译（Web 格式 ↔ RuntimeProfile 格式）
 # 映射依据：Web 前端 collectConfig()（web/static/app.js:5663）+ Web daemon
 # 二进制字段名实测。predict_x/y 是 Pid1Controller 的 I 通道增益（无量纲），
-# rate_x/y 是 kp_gain_rate，smooth_x/y 是 soft-limit 宽度——三者全部直通。
+# rate_x/y 是 kp_gain_rate —— 全部直通。
+# ★ V1.0.13（2026-09-30）：smooth_x/y 已随 core 一起删除（折叠进 kp/kd），
+#   aim_offset_x/y 与 capture.offset_x/y 也一并删除（落点只留「瞄点」一个入口）。
+#   老配置里若还带这些键，core 一律静默忽略。
 # ====================================================================
 HOTKEY_BITS = {'left': 1, 'right': 2, 'middle': 4, 'back': 8, 'forward': 16}
 BIT_HOTKEYS = {v: k for k, v in HOTKEY_BITS.items()}
@@ -811,11 +814,8 @@ CONTROLLER_NUMS = {
     'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'predict_x': 'predict_x', 'predict_y': 'predict_y',
     'rate_x': 'rate_x', 'rate_y': 'rate_y',
-    'smooth_x': 'smooth_x', 'smooth_y': 'smooth_y',
     'output_deadzone': 'output_deadzone',
     'selector_lost_grace_ms': 'lost_grace_ms',
-    'aim_reference_offset_x': 'aim_offset_x',
-    'aim_reference_offset_y': 'aim_offset_y',
 }
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {
@@ -1433,10 +1433,8 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
         crop = normalize_capture_crop_size(cap['crop_size'])
         capture['width'] = crop
         capture['height'] = crop
-    if cap.get('crop_offset_x') is not None:
-        capture['offset_x'] = cap['crop_offset_x']
-    if cap.get('crop_offset_y') is not None:
-        capture['offset_y'] = cap['crop_offset_y']
+    # ★ V1.0.13：crop_offset_x/y → capture.offset_x/y 的映射已删（core 侧字段已删，
+    #   裁剪区恒以画面中心为心）。面板也不再发这两个键。
 
     # 8) FOV 基准半径：瞄准范围 = 截取尺寸内划最大的圆形（业主口径）
     #    半径基准 = 内接圆半径 × range_factor（总览「FOV 半径」）。
@@ -1604,11 +1602,8 @@ def profile_to_web(prof: dict) -> dict:
         'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
         'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),
         'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
-        'smooth_x': mouse.get('smooth_x'), 'smooth_y': mouse.get('smooth_y'),
         'output_deadzone': mouse.get('output_deadzone'),
         'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
-        'aim_reference_offset_x': mouse.get('aim_offset_x'),
-        'aim_reference_offset_y': mouse.get('aim_offset_y'),
         'pull_curve_enabled': pc.get('enabled', True),
         'pull_curve_strength': pc.get('strength', 0.8),
         'pull_curve_min_distance': pc.get('min_distance', 80),
@@ -1663,8 +1658,6 @@ def profile_to_web(prof: dict) -> dict:
         'capture': {
             'device': '/dev/video0',
             'crop_size': cap.get('width'),
-            'crop_offset_x': cap.get('offset_x'),
-            'crop_offset_y': cap.get('offset_y'),
         },
         'range_factor': fov_factor_web,
         'sens': mouse.get('sensitivity', 1.0),
@@ -3881,17 +3874,18 @@ CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
 # ⇒ 比值散开 ⇒ 必挂 fit 的一致性门（MAD/|中位| > 0.35）。交替后相邻两步互相抵消，
 # 同时每个幅度都覆盖到，够撑满 fit 的 min_samples=5。
 CALIB_AMPLITUDES = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
-# 标定期"温和档" PID：bias 是最高 ±32px 的阶跃，用实战参数（kp 常见 25）在
-# ~50ms 采集回路延迟下会打进持续振荡（实测 ±150px），把目标甩出画面 ⇒ 整轮
-# no_target 作废（2026-09-24 板上 A/B：kp10/kd30 十六轮全稳）。gain=Δpx/ΔΣcounts
-# 是闭环恒等式、与 PID 参数无关 ⇒ 压 PID 不影响测量。kd 按 3×kp 给阻尼。
-CALIB_PID_KP_MAX = 10.0
+# 标定期"温和档" PID：bias 是最高 ±32px 的阶跃，用实战参数在 ~50ms 采集回路延迟下
+# 会打进持续振荡（实测 ±150px），把目标甩出画面 ⇒ 整轮 no_target 作废
+# （2026-09-24 板上 A/B：kp0.10/kd0.30 十六轮全稳）。gain=Δpx/ΔΣcounts 是闭环恒等式、
+# 与 PID 参数无关 ⇒ 压 PID 不影响测量。kd 按 3×kp 给阻尼。
+# ★ V1.0.13（2026-09-30）：10.0 是**旧名义值**（实际生效 0.10）。core 删掉 smooth 之后
+#   mouse.kp_x 就是生效值，这里必须一起换域 —— 否则标定期会把 10 直接写进 kp_x，
+#   环路自激 100 倍，目标被甩飞、整轮标定白跑。
+CALIB_PID_KP_MAX = 0.10
 CALIB_PID_KD_RATIO = 3.0
-# 推导 PID 时用的 smooth_x：必须是**当前生效值**，不能写死（见 _calib_live_smooth）。
-# 默认值与 core 侧一致（RuntimeProfile.cpp:872 obj_num(*m,"smooth_x",9900.0)）；
-# 上限取面板可调范围上限（index.html NUMERIC_RANGE_LIMITS.controller_smooth=[0,9999]）。
-CALIB_DEFAULT_SMOOTH_X = 9900.0
-CALIB_MAX_SMOOTH_X = 9999.0
+# ★ V1.0.13（2026-09-30）：CALIB_DEFAULT_SMOOTH_X / CALIB_MAX_SMOOTH_X 与
+#   _calib_live_smooth() 一并删除 —— core 侧 smooth_x 已折叠进 kp/kd，配置里没有这个量了。
+#   继续按默认 9900 传，推导出的 kp 会**强 100 倍**（详见 derive_pid_params 的注释）。
 # 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
 # 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
 CALIB_MIN_COUNTS = 6
@@ -4118,8 +4112,9 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         拟人化 response_px_per_count 都依赖它，之前未序列化导致标定结果白测）；
       - personal_trajectory.response_px_per_count 联动 gain_y（同语义：px/count）；
       - 不再改写 kp_x/kp_y。旧实现用旧后端 K_LOOP=1/7 反推 kp（25 → ≈0.26），
-        在 pid1 体系下输出被 smoothTerm 缩放到 deadzone 以下，自瞄直接瘫痪。
-        pid1 的自适应 kp_gain 已处理灵敏度差异，标定不应动 kp。
+        在 pid1 体系下（当时 kp/kd 还被 smooth 削掉 99%）输出被缩到 deadzone 以下，
+        自瞄直接瘫痪。pid1 的自适应 kp_gain 已处理灵敏度差异，标定不应动 kp。
+        ★ V1.0.13 起 kp 已是生效值，这条限制仍然成立：增益归增益、PID 归 PID。
     """
     try:
         gain_x = float(calib.get('mouse_gain_x_px_per_count') or 0)
@@ -4153,38 +4148,20 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _calib_live_smooth(prof: dict) -> float:
-    """读 live 的 smooth_x 并夹到合法区间。
-
-    ★ 2026-09-25 修复的核心：`derive_pid_params` 的 smooth 必须传**当前生效值**。
-    旧实现三个调用点都没传、一律走默认 9900，而面板把 Smooth 暴露成可调项
-    （范围 [0,9999]，面板说明自己写着"0 = 完全不削"）。smooth≠9900 时 kp_scale 全错：
-    **smooth=0 推导出的 kp 强 100 倍（环路发散）、9990 弱 10 倍（迟钝漂移）**。
-    板端历史上真的用过 9990，不是理论风险。
-
-    越界时**夹取而不是抛错**：smooth 是 core 侧不校验的配置项（RuntimeProfile.cpp:872
-    只填默认），一个手改坏的配置不该让整轮标定白跑；夹取后 kp_scale 仍在合法范围。
-    """
-    raw = (prof.get('mouse') or {}).get('smooth_x')
-    try:
-        smooth = float(raw)
-    except (TypeError, ValueError):
-        return CALIB_DEFAULT_SMOOTH_X
-    return max(0.0, min(CALIB_MAX_SMOOTH_X, smooth))
-
-
 def _calib_derive_pid(gain_x: float, gain_y: float, delay_ms: float) -> dict:
-    """按实测 gain/延迟 + **当前 live smooth** 推导 PID（留档与写回共用同一份结果）。"""
-    prof = _get_runtime_profile()
-    return derive_pid_params(gain_x, gain_y, delay_ms, smooth=_calib_live_smooth(prof))
+    """按实测 gain/延迟推导 PID（留档与写回共用同一份结果）。
+
+    ★ V1.0.13：不再需要 smooth —— 推导出来的 kp 就是接进环路的**生效值**。
+    """
+    return derive_pid_params(gain_x, gain_y, delay_ms)
 
 
 def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
-    """自动调参核心：按标定实测 gain + 延迟 + **当前 smooth** 推导整组 PID 并写回。
+    """自动调参核心：按标定实测 gain + 延迟推导整组 PID 并写回。
 
     不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
     → 推导出不同的最佳 KP/KD/predict。只动 kp/kd/predict_x 这三个，
-    rate/smooth 保持架构常量；**predict_y 一律不动** —— Y 轴预判在面板上已独立可调
+    rate 保持架构常量；**predict_y 一律不动** —— Y 轴预判在面板上已独立可调
     （pid1.cpp 参考默认 0），自动调参不该覆盖业主手设的值。
     """
     try:
@@ -4196,7 +4173,6 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
                 float(calib.get('mouse_gain_x_px_per_count') or 0),
                 float(calib.get('mouse_gain_y_px_per_count') or 0),
                 float(calib.get('mouse_response_delay_ms') or 0),
-                smooth=_calib_live_smooth(prof),
             )
             mo = prof.setdefault('mouse', {})
             mo['kp_x'] = pid['kp']
@@ -4485,7 +4461,7 @@ def _calib_worker() -> None:
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
         }
-        # 自动调参：按实测 gain/延迟 + 当前 smooth 推导 KP/KD/predict（pid1 体系，见
+        # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
         # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
         try:
             calib['pid_params'] = _calib_derive_pid(gain_x, gain_y, delay_ms)
@@ -4667,7 +4643,7 @@ def update_auto_calibration():
     if ok:
         ok2, detail2 = _calib_apply_gain(calib)
         detail = detail + '；' + detail2
-        # 手动填增益同样联动自动调参（同一推导函数 + 同一 live smooth，保证行为一致）
+        # 手动填增益同样联动自动调参（同一推导函数，保证行为一致）
         try:
             calib['pid_params'] = _calib_derive_pid(gain_x, gain_y, delay)
         except Exception:

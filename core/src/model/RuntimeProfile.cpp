@@ -43,9 +43,9 @@ bool CaptureProfile::valid(uint32_t frame_w, uint32_t frame_h,
                             "x" + std::to_string(frame_h);
         return false;
     }
-    // offset 为相对屏幕中心的偏移；计算左上角起点并 clamp 后必然界内
-    const int32_t cx = static_cast<int32_t>(frame_w / 2) + offset_x;
-    const int32_t cy = static_cast<int32_t>(frame_h / 2) + offset_y;
+    // V1.0.13：裁剪区恒以屏幕中心为心（offset 已删），clamp 后必然界内
+    const int32_t cx = static_cast<int32_t>(frame_w / 2);
+    const int32_t cy = static_cast<int32_t>(frame_h / 2);
     const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(
         cx - static_cast<int32_t>(w / 2), static_cast<int32_t>(frame_w - w)));
     const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(
@@ -111,7 +111,6 @@ bool RuntimeProfile::validate(std::string* error) const {
         mouse.fov_range, mouse.confidence, mouse.sensitivity, mouse.output_scale,
         mouse.deadzone_x, mouse.deadzone_y, mouse.output_deadzone,
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
-        mouse.aim_point.aim_offset_x, mouse.aim_point.aim_offset_y,
         mouse.aim_point.offset_x, mouse.aim_point.offset_y,
         mouse.personal_motion.curve_blend,
         inference.confidence, inference.iou,
@@ -164,18 +163,10 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.kp 不能为负";
         return false;
     }
-    // ★ 2026-09-26（第四轮审计）：kd 为负 = 阻尼变正反馈；smooth 是"削弱倍率"
-    //   （smoothTerm 的 outputScale = 10000 - smooth），≥10000 输出恒 0 / 反向、
-    //   负值把输出放大逾万倍 —— 旧实现两者都完全不校验，SET_CONFIG 可注入。
+    // ★ 2026-09-26（第四轮审计）：kd 为负 = 阻尼变正反馈，必须挡住。
+    //   （原先这里还校验 smooth 的 [0,9999]；V1.0.13 起 smooth 已从参数面删除。）
     if (mouse.kd_x < 0.0f || mouse.kd_y < 0.0f) {
         if (error) *error = "mouse.kd 不能为负";
-        return false;
-    }
-    if (mouse.smooth_x < 0.0f || mouse.smooth_x > 9999.0f ||
-        mouse.smooth_y < 0.0f || mouse.smooth_y > 9999.0f) {
-        // 面板 Smooth 滑条范围 [0,9999]（0=完全不削）；≥10000 时削弱倍率 ≤0，
-        // 输出恒 0（=10000）或反向（>10000）。
-        if (error) *error = "mouse.smooth 必须在 [0,9999]";
         return false;
     }
     if (mouse.hfov <= 0.0f || mouse.hfov >= 180.0f ||
@@ -353,8 +344,6 @@ JsonValue RuntimeProfile::to_json() const {
     JsonValue cap = JsonValue::object();
     cap.set("width", JsonValue::number(static_cast<double>(capture.width)));
     cap.set("height", JsonValue::number(static_cast<double>(capture.height)));
-    cap.set("offset_x", JsonValue::number(static_cast<double>(capture.offset_x)));
-    cap.set("offset_y", JsonValue::number(static_cast<double>(capture.offset_y)));
     root.set("capture", std::move(cap));
 
     JsonValue inf = JsonValue::object();
@@ -454,8 +443,6 @@ JsonValue RuntimeProfile::to_json() const {
     // 对齐参数
     m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
     m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
-    m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
-    m.set("smooth_y", JsonValue::number(static_cast<double>(mouse.smooth_y)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
     JsonValue pc = JsonValue::object();
@@ -665,8 +652,6 @@ JsonValue RuntimeProfile::to_json() const {
     ha.set("max_lag_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.max_lag_fraction)));
     ha.set("max_lag_px", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.max_lag_px)));
     m.set("head_aim", std::move(ha));
-    m.set("aim_offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_x)));
-    m.set("aim_offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_y)));
     m.set("offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.offset_x)));
     m.set("offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.offset_y)));
     // V1.0.08：框底被裁剪区截断时的落点外推（默认开 = 缺陷修复，可关做 A/B）
@@ -763,8 +748,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.capture.height = sanitize_capture_roi(
             static_cast<uint32_t>(std::max<int64_t>(obj_int(*c, "height", 0), 0)));
         // offset 相对屏幕中心，允许负值
-        p.capture.offset_x = static_cast<int32_t>(std::max<int64_t>(-100000, std::min<int64_t>(obj_int(*c, "offset_x", 0), 100000)));
-        p.capture.offset_y = static_cast<int32_t>(std::max<int64_t>(-100000, std::min<int64_t>(obj_int(*c, "offset_y", 0), 100000)));
     }
     if (const JsonValue* i = v.find("inference"); i && i->is_object()) {
         p.inference.confidence = static_cast<float>(obj_num(*i, "confidence", 0.0));
@@ -801,10 +784,38 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         // 热键的唯一真源是 mouse.aim_profiles（见本段末尾的档位解析，老配置在那里合成第 0 档）。
         p.mouse.fov_range = static_cast<float>(obj_num(*m, "fov_range", 1.0));
         p.mouse.confidence = static_cast<float>(obj_num(*m, "confidence", 0.25));
-        p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", 25.0));
-                p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", 25.0));
-                p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", 25.0));
-                p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", 25.0));
+        // ★ V1.0.13（2026-09-30）：kp/kd 语义改为真实有效值，smooth 从参数面删除。
+        //   老配置（带 smooth_x/smooth_y）必须**原样折算**，否则 kp 会突然放大 100 倍：
+        //     kp_eff = kp * (10000 - smooth) / 10000
+        //   判据用"键是否存在"而不是值 —— 新配置压根不写 smooth，用值判会把默认 9900
+        //   当成"要削 99%"再削一次。
+        //   为什么这么折是等价的：pid1 的 smoothTerm 对小量就是 (v/10000)*(10000-smooth)，
+        //   即纯乘法；离线闭环（core/tools/pid_sim/aim_replay.py）实测移动靶偏差 ≤0.23%、
+        //   静止靶绝对差 0.26px（< 半个 count 量化级）。
+        {
+            const JsonValue* smx = m->find("smooth_x");
+            const JsonValue* smy = m->find("smooth_y");
+            const bool has_smx = smx && smx->is_number();
+            const bool has_smy = smy && smy->is_number();
+            const float kp_dflt_x = has_smx ? 25.0f : 0.25f;
+            const float kp_dflt_y = has_smy ? 25.0f : 0.25f;
+            const float kd_dflt_x = has_smx ? 25.0f : 0.25f;
+            const float kd_dflt_y = has_smy ? 25.0f : 0.25f;
+            p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", kp_dflt_x));
+            p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", kp_dflt_y));
+            p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", kd_dflt_x));
+            p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", kd_dflt_y));
+            if (has_smx) {
+                const float fac = (10000.0f - static_cast<float>(obj_num(*m, "smooth_x", 9900.0))) / 10000.0f;
+                p.mouse.kp_x *= fac;
+                p.mouse.kd_x *= fac;
+            }
+            if (has_smy) {
+                const float fac = (10000.0f - static_cast<float>(obj_num(*m, "smooth_y", 9900.0))) / 10000.0f;
+                p.mouse.kp_y *= fac;
+                p.mouse.kd_y *= fac;
+            }
+        }
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
         p.mouse.hfov = static_cast<float>(obj_num(*m, "hfov", 83.105));
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));
@@ -817,10 +828,9 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
         // 对齐参数
-        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 3.0));
+        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 1.0));
                 p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
-        p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));
-        p.mouse.smooth_y = static_cast<float>(obj_num(*m, "smooth_y", 9900.0));
+        // V1.0.13：smooth_x/smooth_y 已删（上面折算进 kp/kd）。旧键不再读取、也不回写。
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
         if (const JsonValue* pc = m->find("pull_curve"); pc && pc->is_object()) {
@@ -1021,8 +1031,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.aim_point.head_aim.max_lag_fraction = static_cast<float>(obj_num2("max_lag_fraction", 0.18));
             p.mouse.aim_point.head_aim.max_lag_px = static_cast<float>(obj_num2("max_lag_px", 1.25));
         }
-        p.mouse.aim_point.aim_offset_x = static_cast<float>(obj_num(*m, "aim_offset_x", 0.0));
-        p.mouse.aim_point.aim_offset_y = static_cast<float>(obj_num(*m, "aim_offset_y", 0.0));
         p.mouse.aim_point.offset_x = static_cast<float>(obj_num(*m, "offset_x", 0.5));
         p.mouse.aim_point.offset_y = static_cast<float>(obj_num(*m, "offset_y", 0.5));
         p.mouse.aim_point.clip_bottom_extrapolate = obj_bool(*m, "clip_bottom_extrapolate", true);

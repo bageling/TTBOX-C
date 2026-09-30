@@ -147,15 +147,20 @@ def test_normalize_profile_tolerates_shapeless_input(web_mod):
 # 2. 翻译层：面板体 → RuntimeProfile
 # ===========================================================================
 
-def test_body_crop_size_1_becomes_64_and_keeps_offsets(web_mod, monkeypatch):
-    """面板提交 1（全帧被前端夹出来的值）⇒ 必须落成 64，且裁切偏移照常透传。"""
+def test_body_crop_size_1_becomes_64_and_removed_offsets_are_ignored(web_mod, monkeypatch):
+    """面板提交 1（全帧被前端夹出来的值）⇒ 必须落成 64。
+
+    ★ V1.0.13（2026-09-30）：crop_offset_x/y 已删（core 的 CaptureProfile::offset_* 也没了，
+    裁剪区恒以画面中心为心）。老页面 / 老预设里若还带这两个键，翻译层必须**静默忽略**
+    —— 写进 profile 就是"看起来生效、其实没人读"的死接线。
+    """
     monkeypatch.setattr(web_mod, '_get_runtime_profile', lambda: _base_profile())
     prof = web_mod.web_body_to_profile(
         {'capture': {'crop_size': 1, 'crop_offset_x': 10, 'crop_offset_y': 20}})
     assert prof['capture']['width'] == 64
     assert prof['capture']['height'] == 64
-    assert prof['capture']['offset_x'] == 10
-    assert prof['capture']['offset_y'] == 20
+    assert 'offset_x' not in prof['capture']
+    assert 'offset_y' not in prof['capture']
 
 
 def test_body_crop_size_0_stays_full_frame(web_mod, monkeypatch):

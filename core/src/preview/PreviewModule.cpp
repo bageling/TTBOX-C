@@ -173,8 +173,6 @@ void PreviewModule::resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h,
 
     uint32_t cap_w = 0;
     uint32_t cap_h = 0;
-    int32_t offset_x = 0;
-    int32_t offset_y = 0;
     uint32_t max_w = params_.crop_width;
     uint32_t max_h = params_.crop_height;
     if (params_.runtime_config != nullptr) {
@@ -185,15 +183,14 @@ void PreviewModule::resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h,
             // （见 preview/PreviewRoi.hpp::compute_preview_roi）。
             cap_w = profile->capture.width;
             cap_h = profile->capture.height;
-            offset_x = profile->capture.offset_x;
-            offset_y = profile->capture.offset_y;
+            // V1.0.13：capture.offset_x/y 已删 ⇒ ROI 恒以屏幕中心为心。
             // preview.width/height 降级为**输出上限**：ROI 超过它才等比缩小，
             // 不再决定"裁哪一块"（那由 capture 决定）。
             if (profile->preview.width > 0) max_w = profile->preview.width;
             if (profile->preview.height > 0) max_h = profile->preview.height;
         }
     }
-    *roi = compute_preview_roi(frame_w, frame_h, cap_w, cap_h, offset_x, offset_y);
+    *roi = compute_preview_roi(frame_w, frame_h, cap_w, cap_h);
     fit_preview_output(roi->w, roi->h, max_w, max_h, out_width, out_height);
 }
 

@@ -5348,38 +5348,12 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                    直排（标签文字 → 数字框 → 由 JS 注入的滑条 → 说明），与上面 4 个
                    .slider-field 的结构不同，同一行里滑条高度差最多 61px。
                    统一成 .slider-field + .label-row，并保留 for/id 关联（点标签仍能聚焦输入框）。 -->
-              <div class="slider-field overview-field">
-                <div class="label-row">
-                  <label for="capture_crop_offset_x">看的位置左右移</label>
-                  <input id="capture_crop_offset_x" data-config class="value-input" type="number" min="-150" max="150" step="1">
-                </div>
-                <span class="field-hint">正数 = 识别区域往右挪，负数 = 往左挪（像素）。画面中心偏了才需要动它。</span>
-              </div>
-
-              <div class="slider-field overview-field">
-                <div class="label-row">
-                  <label for="capture_crop_offset_y">看的位置上下移</label>
-                  <input id="capture_crop_offset_y" data-config class="value-input" type="number" min="-150" max="150" step="1">
-                </div>
-                <span class="field-hint">正数 = 往下挪，负数 = 往上挪（像素）。</span>
-              </div>
-
-              <div class="slider-field overview-field">
-                <div class="label-row">
-                  <label for="controller_aim_reference_offset_x">瞄的位置左右偏</label>
-                  <input id="controller_aim_reference_offset_x" data-config class="value-input" type="number" min="-160" max="160" step="1">
-                </div>
-                <span class="field-hint">准星最终停在哪：正数 = 往人右边偏一点，负数 = 往左（像素）。想瞄头就往上调下面那格。</span>
-              </div>
-
-              <div class="slider-field overview-field">
-                <div class="label-row">
-                  <label for="controller_aim_reference_offset_y">瞄的位置上下偏</label>
-                  <input id="controller_aim_reference_offset_y" data-config class="value-input" type="number" min="-160" max="160" step="1">
-                </div>
-                <span class="field-hint">正数 = 往下偏（比如瞄胸口），负数 = 往上偏（比如瞄头）。</span>
-              </div>
-
+              <!-- V1.0.13（2026-09-30）：「看的位置左右/上下移」（capture.crop_offset_*）
+                   与「瞄的位置左右/上下偏」（mouse.aim_offset_*）四个控件已删 —— 业主口径
+                   「参考物太多，落点与设置的瞄点对不上」。裁剪区恒以画面中心为心、
+                   准星恒为裁剪区正中心，于是唯一能移落点的是「瞄点」（每档那个上下位置）。
+                   别照老键名把它们加回来：core 侧字段已删（见 MouseTypes.hpp /
+                   RuntimeProfile.hpp 的 V1.0.13 说明），加了也是"开关没反应"的死接线。 -->
               <div class="slider-field">
                 <div class="label-row">
                   <label for="video_detection_confidence_range">多确定才算人</label>
@@ -5478,12 +5452,11 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <div class="module-title"><strong>跟枪手感（四个数调完基本就定了）</strong></div>
                   <div class="field-hint">这页决定准星怎么追人：先「拉」过去，再「刹」住不乱晃。左右和上下共用前两项；只有「预判」左右、上下各一个，默认上下不预判（保持 0）。</div>
                   <div class="field-grid compact pid-field-grid">
-                    <label class="field"><span class="field-label">拉力（追得有多猛）</span><input id="controller_kp" data-config type="number" step="0.1"><span class="field-hint">准星往人身上拉的力气。追不上人、总跟丢就加；拉过头来回冲、抖就降。</span></label>
-                    <label class="field"><span class="field-label">刹车（稳不稳）</span><input id="controller_kd" data-config type="number" step="0.1"><span class="field-hint">快到目标时踩刹车的力度，防冲过头。数值太大反而会抖 —— 觉得画面晃，优先把它降下来。</span></label>
+                    <label class="field"><span class="field-label">拉力（追得有多猛）</span><input id="controller_kp" data-config type="number" step="0.01"><span class="field-hint">准星往人身上拉的力气。追不上人、总跟丢就加；拉过头来回冲、抖就降。★ 这里是真实力气值（默认 0.25）；"削弱强度"那个暗地里除以 100 的旋钮在 V1.0.13 已删。</span></label>
+                    <label class="field"><span class="field-label">刹车（稳不稳）</span><input id="controller_kd" data-config type="number" step="0.01"><span class="field-hint">快到目标时踩刹车的力度，防冲过头。数值太大反而会抖 —— 觉得画面晃，优先把它降下来。</span></label>
                     <label class="field"><span class="field-label">左右预判</span><input id="controller_predict" data-config type="number" step="0.1"><span class="field-hint">对左右移动的人提前往前瞄一点（打提前量）。总是慢半拍就加；瞄到前面太多就降。</span></label>
                     <label class="field"><span class="field-label">上下预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">上下一般不预判，保持 0。只有追上下移动很厉害的目标才考虑加。</span></label>
                     <label class="field"><span class="field-label">跟随速度</span><input id="controller_rate" data-config type="number" step="0.01"><span class="field-hint">力气涨上来的快慢。觉得反应慢就加一点；觉得一窜一窜就降一点。</span></label>
-                    <label class="field"><span class="field-label">削弱强度（别乱动）</span><input id="controller_smooth" data-config type="number" step="10"><span class="field-hint">★ 这个数越大越慢！它实际是把「拉力」和「刹车」按 (10000 − 这个值)/10000 削弱：9900（默认）= 只剩 1/100 力气；9990 = 只剩 1/1000，会变得迟钝、发飘、忽快忽慢。想更猛就调小，0 = 完全不削弱。</span></label>
                   </div>
                 </div>
                 <article class="module-tile">
@@ -6441,21 +6414,15 @@ const OVERVIEW_FOV_FACTOR_MIN = 0.1;
 const CROP_SIZE_OPTIONS = [192, 256, 320, 416, 640];
 const CROP_SIZE_MIN = 1;
 const CROP_SIZE_MAX = 1080;
-const CAPTURE_CROP_OFFSET_MIN = -150;
-const CAPTURE_CROP_OFFSET_MAX = 150;
-const AIM_REFERENCE_OFFSET_MAX = 320;
+// V1.0.13（2026-09-30）：CAPTURE_CROP_OFFSET_* / AIM_REFERENCE_OFFSET_MAX /
+// DYNAMIC_OFFSET_INPUT_IDS 连同 dynamicNumericRangeLimitsForId /
+// updateDynamicOffsetControlLimits 一起删除 —— 它们只服务于那四个已删的偏移控件
+// （裁剪区偏移范围、准星偏移范围随截取尺寸伸缩）。现在裁剪区恒居中、准星恒在中心，
+// 没有需要"动态改 min/max"的输入框了。
 const AIM_OVERLAY_CONFIG_IDS = new Set([
   "capture_crop_size",
   "range_factor",
-  "controller_aim_reference_offset_x",
-  "controller_aim_reference_offset_y",
 ]);
-const DYNAMIC_OFFSET_INPUT_IDS = [
-  "capture_crop_offset_x",
-  "capture_crop_offset_y",
-  "controller_aim_reference_offset_x",
-  "controller_aim_reference_offset_y",
-];
 const RANGE_BINDINGS = [
   ["video_detection_confidence", "video_detection_confidence_range"],
   ["video_detection_iou", "video_detection_iou_range"],
@@ -6470,29 +6437,23 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
-  capture_crop_offset_x: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
-  capture_crop_offset_y: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
-  controller_kp: [0, 200],
-  controller_kd: [0, 80],
-  controller_predict: [0, 10],
-  controller_predict_y: [0, 10],
+  // ★ V1.0.13：kp/kd 改为**真实有效值**（旧的 15/25 是被「削弱强度」砍掉 99% 的名义值）。
+  //   上限按离线扫频收敛（core/tools/pid_sim）：51ms 回路 + 144fps 下 kp_eff > 0.3 必自激。
+  //   留到 1.0 是为了容纳低灵敏度玩家的 gain；一旦超过 0.3 就该往下调，不是往上。
+  controller_kp: [0, 1],
+  controller_kd: [0, 2],
+  controller_predict: [0, 2],
+  controller_predict_y: [0, 1],
   controller_rate: [0, 1],
-  controller_smooth: [0, 9999],
   controller_output_deadzone: [0, 20],
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_min_distance: [0, 1280],
-  controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
-  controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_selector_lost_grace_ms: [0, 2000],
   hailo_pipeline_depth: [1, 4],
 };
 const OVERVIEW_DEFAULTS = {
   capture_crop_size: 320,
   range_factor: 1,
-  capture_crop_offset_x: 0,
-  capture_crop_offset_y: 0,
-  controller_aim_reference_offset_x: 0,
-  controller_aim_reference_offset_y: 0,
   video_detection_confidence: 0.25,
   video_detection_iou: 0.45,
 };
@@ -6508,21 +6469,21 @@ const CONTROLLER_DEFAULTS = {
   // 2026-09-20 定案：pid1.cpp 的 P_PID 为唯一标准，面板只暴露它的这几个参数。
   // ★ 2026-09-24 修正：原先把 kp/kd/predict/rate/smooth 五项**同时写 _x 与 _y**，
   //   回填只取 X ⇒ 面板上调 X 的预判会把 Y 一起改成同一个值。而 pid1.cpp main() 里
-  //   X/Y 的唯一差别恰恰就是 predict（X=3.0，Y=0.0）⇒ predict_y 必须独立。
-  //   现在：Kp / Kd / Rate / Smooth 两轴共用（参考实现里两轴本来就同值），
-  //         predict_x / predict_y 各自独立，默认值直接抄 pid1.cpp 的入参。
-  kp: 25,
-  kd: 25,
-  predict: 3,
+  //   X/Y 的唯一差别恰恰就是 predict ⇒ predict_y 必须独立。
+  //   现在：Kp / Kd / Rate 两轴共用（参考实现里两轴本来就同值），
+  //         predict_x / predict_y 各自独立。
+  // ★ V1.0.13（2026-09-30）：三项默认值改成与 core 结构体一致的**真实值**，并删掉 smooth：
+  //   旧 kp/kd=25 是"被 smooth 削掉 99% 之后的名义值"（生效 0.25），旧 predict=3.0 是
+  //   pid1 原版值、在我们这套 51ms 回路下会自激。现在面板显示的就是接进环路的那个数。
+  kp: 0.25,
+  kd: 0.25,
+  predict: 1,
   predict_y: 0,
   rate: 0.3,
-  smooth: 9900,
   output_deadzone: 1,
   pull_curve_enabled: true,
   pull_curve_strength: 0.8,
   pull_curve_min_distance: 80,
-  aim_reference_offset_x: 0,
-  aim_reference_offset_y: 0,
   selector_lost_grace_ms: 78,
 };
 // ---------------------------------------------------------------------------
@@ -7600,7 +7561,7 @@ function getNumber(id, fallback = 0) {
 }
 
 function getNumberInRange(id, fallback = 0) {
-  const limits = dynamicNumericRangeLimitsForId(id) || NUMERIC_RANGE_LIMITS[id];
+  const limits = NUMERIC_RANGE_LIMITS[id];
   const value = getNumber(id, fallback);
   return limits ? clamp(value, limits[0], limits[1]) : value;
 }
@@ -7609,7 +7570,7 @@ function clampNumberInputToLimits(input) {
   if (!input || !input.id || input.value === "") {
     return;
   }
-  const limits = dynamicNumericRangeLimitsForId(input.id) || NUMERIC_RANGE_LIMITS[input.id];
+  const limits = NUMERIC_RANGE_LIMITS[input.id];
   const value = Number(input.value);
   if (!limits || !Number.isFinite(value)) {
     return;
@@ -8190,49 +8151,8 @@ function getCropSize(fallback = 320) {
   return normalizeCropSize(input.value, fallback);
 }
 
-function getAimReferenceOffsetLimit(cropSize = getCropSize(state.config && state.config.capture ? state.config.capture.crop_size : 320)) {
-  return Math.floor(normalizeCropSize(cropSize) / 2);
-}
-
-function dynamicNumericRangeLimitsForId(id) {
-  if (id === "capture_crop_offset_x" || id === "capture_crop_offset_y") {
-    return [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX];
-  }
-  if (id === "controller_aim_reference_offset_x" || id === "controller_aim_reference_offset_y") {
-    const limit = getAimReferenceOffsetLimit();
-    return [-limit, limit];
-  }
-  return null;
-}
-
-function updateDynamicOffsetControlLimits({ clampValues = false } = {}) {
-  DYNAMIC_OFFSET_INPUT_IDS.forEach((id) => {
-    const limits = dynamicNumericRangeLimitsForId(id);
-    const input = $(id);
-    if (!limits || !input) {
-      return;
-    }
-    const [min, max] = limits;
-    input.min = String(min);
-    input.max = String(max);
-    const rangeInput = $(`${id}_range`);
-    if (rangeInput) {
-      rangeInput.min = String(min);
-      rangeInput.max = String(max);
-    }
-    if (clampValues && input.value !== "") {
-      const clampedValue = clamp(Number(input.value), min, max);
-      if (Number.isFinite(clampedValue)) {
-        input.value = formatControlValue(input, clampedValue);
-        if (rangeInput) {
-          rangeInput.value = formatControlValue(rangeInput, clampedValue);
-        }
-      }
-    }
-  });
-  syncRangeFieldsForIds(DYNAMIC_OFFSET_INPUT_IDS);
-  updateAimRangeOverlay();
-}
+// V1.0.13：getAimReferenceOffsetLimit / dynamicNumericRangeLimitsForId /
+// updateDynamicOffsetControlLimits 三个函数已删（只服务于那四个偏移控件）。
 
 function getPreviewImageLayout(stage, cropSize) {
   if (!stage) {
@@ -8290,24 +8210,10 @@ function updateAimRangeOverlay() {
   }
 
   if (dot) {
-    const controller = (state.config && state.config.ai && state.config.ai.controller) || {};
-    const maxReference = Math.max(0, cropSize - 1);
-    const referenceX = clamp(
-      cropSize * 0.5 + getNumber(
-        "controller_aim_reference_offset_x",
-        controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x
-      ),
-      0,
-      maxReference
-    );
-    const referenceY = clamp(
-      cropSize * 0.5 + getNumber(
-        "controller_aim_reference_offset_y",
-        controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y
-      ),
-      0,
-      maxReference
-    );
+    // ★ V1.0.13：准星 = 裁剪区正中心（core 侧 aim_offset_* 已删）。这个点是**只读**的
+    //   几何提示，不再跟着任何输入框走 —— 面板上没有能移它的控件了。
+    const referenceX = cropSize * 0.5;
+    const referenceY = cropSize * 0.5;
     dot.style.left = `${layout.imageLeft + referenceX * layout.xScale}px`;
     dot.style.top = `${layout.imageTop + referenceY * layout.yScale}px`;
   }
@@ -8323,7 +8229,7 @@ function addRangeBinding(numberId, rangeId) {
 }
 
 function rangeLimitsForInput(input) {
-  const configured = dynamicNumericRangeLimitsForId(input.id) || NUMERIC_RANGE_LIMITS[input.id];
+  const configured = NUMERIC_RANGE_LIMITS[input.id];
   const min = configured ? String(configured[0]) : input.min !== "" ? input.min : "0";
   const max = configured ? String(configured[1]) : input.max !== "" ? input.max : "100";
   const step = input.step && input.step !== "any" ? input.step : "1";
@@ -8400,7 +8306,6 @@ function initRangeBindings() {
       const cropSize = CROP_SIZE_OPTIONS[index] || OVERVIEW_DEFAULTS.capture_crop_size;
       cropSizeInput.value = formatControlValue(cropSizeInput, cropSize);
       cropSizeRange.value = String(index);
-      updateDynamicOffsetControlLimits();
       updateAimRangeOverlay();
     });
     cropSizeRange.addEventListener("change", () => {
@@ -8408,13 +8313,11 @@ function initRangeBindings() {
       const cropSize = CROP_SIZE_OPTIONS[index] || OVERVIEW_DEFAULTS.capture_crop_size;
       cropSizeInput.value = formatControlValue(cropSizeInput, cropSize);
       cropSizeRange.value = String(index);
-      updateDynamicOffsetControlLimits({ clampValues: true });
       requestConfigApply(70);
     });
     cropSizeInput.addEventListener("input", () => {
       if (cropSizeInput.value !== "" && Number.isFinite(Number(cropSizeInput.value))) {
         syncCropSizePresetRange(cropSizeInput.value);
-        updateDynamicOffsetControlLimits();
       }
       updateAimRangeOverlay();
     });
@@ -8422,7 +8325,6 @@ function initRangeBindings() {
       if (cropSizeInput.value !== "") {
         clampNumberInputToLimits(cropSizeInput);
       }
-      updateDynamicOffsetControlLimits({ clampValues: true });
       updateAimRangeOverlay();
     });
   }
@@ -9307,9 +9209,6 @@ function populateForm(config) {
 
   setValue("capture_device", capture.device);
   setCropSizeValue(capture.crop_size);
-  updateDynamicOffsetControlLimits();
-  setValue("capture_crop_offset_x", capture.crop_offset_x ?? 0);
-  setValue("capture_crop_offset_y", capture.crop_offset_y ?? 0);
   setValue("capture_format_preference", capture.format_preference);
   setCheckbox("capture_nv12_uv_swapped", capture.nv12_uv_swapped);
   setCheckbox("capture_nv12_bt709", capture.nv12_bt709);
@@ -9323,7 +9222,7 @@ function populateForm(config) {
   setValue("hotkey_guard_toggle_hotkey", hotkeyGuard.toggle_hotkey ?? HOTKEY_GUARD_DEFAULTS.toggle_hotkey);
   renderAimProfiles(config.aim_profiles);
 
-  // Kp / Kd / Rate / Smooth 四项两轴共用：回填取 X 轴的值（权威），保存时同时写回两轴。
+  // Kp / Kd / Rate 三项两轴共用：回填取 X 轴的值（权威），保存时同时写回两轴。
   // ★ 预判两轴独立，必须从各自的 _x / _y 回填 —— 否则「面板上调 X 的预判顺带改掉 Y」
   //   那个 bug 会在下一次保存时复活（Y 的预判在 pid1.cpp 里必须是 0）。
   setValue("controller_kp", controller.kp_x ?? CONTROLLER_DEFAULTS.kp);
@@ -9331,14 +9230,10 @@ function populateForm(config) {
   setValue("controller_predict", controller.predict_x ?? CONTROLLER_DEFAULTS.predict);
   setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
   setValue("controller_rate", controller.rate_x ?? CONTROLLER_DEFAULTS.rate);
-  setValue("controller_smooth", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
-  setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
-  setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
-  updateDynamicOffsetControlLimits({ clampValues: true });
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
 
   // 压枪：开关与触发键走 config.recoil，其余（拉力/速度/上限/渐出/门控）走
@@ -9367,7 +9262,6 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_predict", controller.predict);
   setValue("controller_predict_y", controller.predict_y);
   setValue("controller_rate", controller.rate);
-  setValue("controller_smooth", controller.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
@@ -9436,7 +9330,6 @@ function resetOverviewDefaults() {
   state.isPopulating = true;
   resetFieldDefaults(overviewDefaults());
   state.isPopulating = false;
-  updateDynamicOffsetControlLimits({ clampValues: true });
   requestConfigApply(0);
   showToast("总览已恢复默认值");
 }
@@ -9451,7 +9344,6 @@ function movementDefaultsForSection(sectionId) {
       controller_predict: controller.predict,
       controller_predict_y: controller.predict_y,
       controller_rate: controller.rate,
-      controller_smooth: controller.smooth,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
     },
@@ -9528,8 +9420,6 @@ function collectConfig() {
     capture: {
       device: getString("capture_device") || previousCapture.device || "/dev/video0",
       crop_size: getCropSize(previousCapture.crop_size || 320),
-      crop_offset_x: getNumberInRange("capture_crop_offset_x", previousCapture.crop_offset_x ?? 0),
-      crop_offset_y: getNumberInRange("capture_crop_offset_y", previousCapture.crop_offset_y ?? 0),
       format_preference: getString("capture_format_preference") || previousCapture.format_preference || "auto",
       nv12_uv_swapped: getCheckbox("capture_nv12_uv_swapped"),
       nv12_bt709: getCheckbox("capture_nv12_bt709"),
@@ -9560,7 +9450,7 @@ function collectConfig() {
     aim_profiles: collectAimProfiles(),
     ai: {
       controller: {
-        // Kp / Kd / Rate / Smooth 四项 X / Y 共用面板上的同一个输入框：一个框写两份。
+        // Kp / Kd / Rate 三项 X / Y 共用面板上的同一个输入框：一个框写两份。
         kp_x: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
         kp_y: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
         kd_x: getNumber("controller_kd", CONTROLLER_DEFAULTS.kd),
@@ -9571,14 +9461,10 @@ function collectConfig() {
         predict_y: getNumber("controller_predict_y", CONTROLLER_DEFAULTS.predict_y),
         rate_x: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
         rate_y: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
-        smooth_x: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
-        smooth_y: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
-        aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
-        aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
         // BB 对标模块（表驱动，见 BB_CTRL_MODULES）
         ...collectControllerModules(),
@@ -9638,7 +9524,6 @@ async function applyConfigNow() {
     return;
   }
   clearTimeout(state.applyTimer);
-  updateDynamicOffsetControlLimits({ clampValues: true });
   if (hasInvalidConfigInput()) {
     setApplyStatus("pending", "等待数值");
     return;
@@ -12254,7 +12139,6 @@ function bindConfigAutoApply() {
       el.addEventListener("input", () => {
         if (el.id === "capture_crop_size" && el.value !== "" && Number.isFinite(Number(el.value))) {
           syncCropSizePresetRange(el.value);
-          updateDynamicOffsetControlLimits();
         }
         if (AIM_OVERLAY_CONFIG_IDS.has(el.id)) {
           updateAimRangeOverlay();
@@ -12262,9 +12146,6 @@ function bindConfigAutoApply() {
       });
       el.addEventListener("change", () => {
         clampNumberInputToLimits(el);
-        if (el.id === "capture_crop_size") {
-          updateDynamicOffsetControlLimits({ clampValues: true });
-        }
         if (AIM_OVERLAY_CONFIG_IDS.has(el.id)) {
           updateAimRangeOverlay();
         }
@@ -12276,9 +12157,7 @@ function bindConfigAutoApply() {
     const eventName = isInstant ? "change" : "input";
     const delay = isInstant ? 70 : 180;
     el.addEventListener(eventName, () => {
-      if (el.id === "capture_crop_size") {
-        updateDynamicOffsetControlLimits({ clampValues: true });
-      } else if (AIM_OVERLAY_CONFIG_IDS.has(el.id)) {
+      if (AIM_OVERLAY_CONFIG_IDS.has(el.id)) {
         updateAimRangeOverlay();
       }
       requestConfigApply(delay);

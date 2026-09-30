@@ -22,7 +22,7 @@ constexpr uint32_t kFrameH = 1440;
 
 // 无偏移：ROI = 屏幕正中的 截取尺寸 方块。
 TEST(center_crop_without_offset) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 256, 256, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 256, 256);
     CHECK_EQ(roi.x, 1152u);  // (2560-256)/2
     CHECK_EQ(roi.y, 592u);   // (1440-256)/2
     CHECK_EQ(roi.w, 256u);
@@ -31,47 +31,24 @@ TEST(center_crop_without_offset) {
 
 // 截取尺寸跟着面板档位走：320 / 640 都要对。
 TEST(crop_size_follows_capture_profile) {
-    const PreviewRoi r320 = compute_preview_roi(kFrameW, kFrameH, 320, 320, 0, 0);
+    const PreviewRoi r320 = compute_preview_roi(kFrameW, kFrameH, 320, 320);
     CHECK_EQ(r320.w, 320u);
     CHECK_EQ(r320.x, 1120u);  // (2560-320)/2
     CHECK_EQ(r320.y, 560u);   // (1440-320)/2
 
-    const PreviewRoi r640 = compute_preview_roi(kFrameW, kFrameH, 640, 640, 0, 0);
+    const PreviewRoi r640 = compute_preview_roi(kFrameW, kFrameH, 640, 640);
     CHECK_EQ(r640.w, 640u);
     CHECK_EQ(r640.x, 960u);
     CHECK_EQ(r640.y, 400u);
 }
 
-// 偏移 = 相对屏幕中心：正负都位移，且不改变尺寸。
-TEST(offset_shifts_center_but_keeps_size) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 256, 256, 100, -100);
-    CHECK_EQ(roi.x, 1252u);  // 1152 + 100
-    CHECK_EQ(roi.y, 492u);   // 592 - 100
-    CHECK_EQ(roi.w, 256u);
-    CHECK_EQ(roi.h, 256u);
-}
-
-// 偏移把框顶出画面 ⇒ clamp 到全帧内（左/上贴边）。
-TEST(offset_clamped_to_frame_left_top) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 256, 256, -9999, -9999);
-    CHECK_EQ(roi.x, 0u);
-    CHECK_EQ(roi.y, 0u);
-    CHECK_EQ(roi.w, 256u);
-    CHECK_EQ(roi.h, 256u);
-}
-
-// 偏移把框顶出画面 ⇒ clamp 到全帧内（右/下贴边）。
-TEST(offset_clamped_to_frame_right_bottom) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 256, 256, 9999, 9999);
-    CHECK_EQ(roi.x, 2304u);  // 2560 - 256
-    CHECK_EQ(roi.y, 1184u);  // 1440 - 256
-    CHECK_EQ(roi.w, 256u);
-    CHECK_EQ(roi.h, 256u);
-}
+// ★ V1.0.13（2026-09-30）：capture.offset_x/y 已删 —— 裁剪区恒以屏幕中心为心。
+//   原先三条「偏移位移 / 偏移 clamp 到全帧」的用例随之作废（函数签名也去掉了两个偏移参）。
+//   反过来锁一条：任何非零偏移（贴边 / 中间）都不可能再出现。
 
 // 截取尺寸 == 全帧 ⇒ 起点 0，就是整帧。
 TEST(capture_equals_frame_is_full_frame) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, kFrameW, kFrameH, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, kFrameW, kFrameH);
     CHECK_EQ(roi.x, 0u);
     CHECK_EQ(roi.y, 0u);
     CHECK_EQ(roi.w, kFrameW);
@@ -80,7 +57,7 @@ TEST(capture_equals_frame_is_full_frame) {
 
 // 0×0（全帧/自动）⇒ 中心正方形，与 WorkerPool 的「自动中心区域」一致。
 TEST(zero_capture_falls_back_to_center_square) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 0, 0, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 0, 0);
     CHECK_EQ(roi.w, 1440u);  // min(2560,1440)
     CHECK_EQ(roi.h, 1440u);
     CHECK_EQ(roi.x, 560u);   // (2560-1440)/2
@@ -89,7 +66,7 @@ TEST(zero_capture_falls_back_to_center_square) {
 
 // 截取尺寸超过全帧（坏配置）⇒ 不硬裁，退回中心正方形。
 TEST(capture_larger_than_frame_falls_back) {
-    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 4096, 4096, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(kFrameW, kFrameH, 4096, 4096);
     CHECK_EQ(roi.w, 1440u);
     CHECK_EQ(roi.h, 1440u);
     CHECK_EQ(roi.x, 560u);
@@ -98,7 +75,7 @@ TEST(capture_larger_than_frame_falls_back) {
 
 // 奇数帧宽高：整数除法不能错位（1111x999）。
 TEST(odd_frame_dimensions_use_integer_center) {
-    const PreviewRoi roi = compute_preview_roi(1111, 999, 101, 101, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(1111, 999, 101, 101);
     CHECK_EQ(roi.x, 505u);  // 1111/2=555, 555-50
     CHECK_EQ(roi.y, 449u);  // 999/2=499, 499-50
     CHECK_EQ(roi.w, 101u);
@@ -107,7 +84,7 @@ TEST(odd_frame_dimensions_use_integer_center) {
 
 // 空帧（0 尺寸）⇒ 全零，调用方据此拒绝编码，不 panic。
 TEST(zero_sized_frame_yields_empty_roi) {
-    const PreviewRoi roi = compute_preview_roi(0, 0, 256, 256, 0, 0);
+    const PreviewRoi roi = compute_preview_roi(0, 0, 256, 256);
     CHECK_EQ(roi.w, 0u);
     CHECK_EQ(roi.h, 0u);
 }

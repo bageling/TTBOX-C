@@ -80,7 +80,8 @@ def _write_preset(web_mod, stem: str, body: dict) -> pathlib.Path:
 
 SAMPLE = {
     'name': 'config1',
-    'capture': {'crop_size': 320, 'crop_offset_x': 0.5, 'crop_offset_y': 0.5},
+    # V1.0.13：crop_offset_x/y 已删（core 的 CaptureProfile::offset_* 也没了）
+    'capture': {'crop_size': 320},
     'ai': {'controller': {'kp_x': 0.7, 'kp_y': 0.6}},
     'mouse': {'sensitivity': 1.3},
 }

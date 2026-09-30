@@ -22,18 +22,22 @@ RESPONSE_DELAY_MAX_MS = 120.0
 
 # ---- 自动调参的锚点常量（2026-09-25 由板端 A/B 实测反推，见 derive_pid_params）----
 #
-# 板端 A/B（gain 实测 x=0.686 / y=0.695，回路延迟 51ms，smooth=9900）：
-#   kp=25 / kd=25 → 单帧吃 17% 误差 → bias 阶跃打进持续振荡（准星 ±150px），标定必挂
-#   kp=10 / kd=30 → 单帧吃 6.9% 误差 → 16 轮全稳
+# 板端 A/B（gain 实测 x=0.686 / y=0.695，回路延迟 51ms）：
+#   kp=0.25 / kd=0.25 → 单帧吃 17% 误差 → bias 阶跃打进持续振荡（准星 ±150px），标定必挂
+#   kp=0.10 / kd=0.30 → 单帧吃 6.9% 误差 → 16 轮全稳
 # ⇒ 单帧误差比例取稳定组的 7%，阻尼比取稳定组在 50ms 的 3.0×kp。
+# ★ V1.0.13（2026-09-30）：上面两组数从"名义值"换成了**生效值** —— core 侧删掉 smooth 之后，
+#   RuntimeProfile.mouse.kp_x 就是接进环路的那个数（旧配置里的 25 实际只等于 0.25）。
 KP_FRACTION_PER_FRAME = 0.07
 KD_RATIO_BASE = 1.0          # 零延迟时的基础阻尼比
 KD_RATIO_DELAY_DIV = 25.0    # 延迟每 +25ms，阻尼比 +1.0（50ms ⇒ 3.0×kp，对齐实测稳定组）
-# KP 下限约束在**生效域**（kp_eff = kp × kp_scale）—— 它管的是"这点输出能不能真挤出
-# count"（死区/整数量化），是物理量，不该随 smooth 漂。锚点 = 旧名义下限 4.0 @
-# smooth=9900（kp_eff=0.04；仿真扫描证明 g1.5+d60 需要 kp≈4~7 才动得起来）。
+# KP 下限：它管的是"这点输出能不能真挤出 count"（死区/整数量化）。
+# 锚点 0.04（= 旧名义 4.0 @ smooth=9900；仿真扫描证明 g1.5+d60 需要 kp≈0.04~0.07 才动得起来）。
 KP_EFF_MIN = 0.04
-KP_NOMINAL_MAX = 60.0        # 名义域安全帽：smooth 极小时 kp 会很大，兜住不让它爆
+KP_MAX = 1.0                 # 安全帽：仿真扫描显示 kp > 0.3 在 51ms 回路下必自激
+# KD 的上下限同样换到生效域（旧名义 4.0 / 50.0 × 0.01）。
+KD_MIN = 0.04
+KD_MAX = 0.5
 
 
 class CalibrationState(str, Enum):
@@ -189,73 +193,55 @@ def derive_pid_params(
     gain_x_px_per_count: float,
     gain_y_px_per_count: float,
     response_delay_ms: float,
-    *,
-    smooth: float,
-    bandwidth: float = 10000.0,
 ) -> dict:
     """由标定实测物理量自动推导 PID 参数（自动调参核心）。
 
     依据 pid1 控制器数学（见 core/src/aim/Pid1Controller.hpp）：
-      - smooth 是**削弱 Kp/Kd 的倍率**：Kp/Kd 通道被 soft-limit 压到
-        (bandwidth-smooth)/bandwidth；Ki 通道固定压到 (bandwidth-1000)/bandwidth。
       - 单帧准星移动 ≈ 输出 × gain px。
-      - 不过冲约束：单帧移动 < 当前误差 → kp_eff × gain < 1。
+      - 不过冲约束：单帧移动 < 当前误差 → kp × gain < 1。
       - 阻尼：系统延迟越大，所需 KD 越大（抑制相位滞后振荡）。
       - 积分：延迟越大，predict（Ki 通道增益）必须越小（上轮仿真证明
         predict 过大 + 延迟 → 剧烈振荡）。
 
-    ★ 2026-09-25 两个修复：
+    ★ V1.0.13（2026-09-30）：`smooth` 参数**删除**。core 侧把"削弱倍率"折进了 kp/kd 本身，
+      于是这里推导出来的 kp **就是接进环路的生效值** —— 不再有"名义值 × 0.01"那层隐形
+      换算。那层换算是业主"手感跟配置对不上"的主要来源，也是本函数历史上最坑的坑：
+      三个调用点漏传 smooth ⇒ 静默按 9900 算 ⇒ kp 直接差 100 倍（发散或少 10 倍）。
+      改成必传只是把坑挪了个位置；删掉才是真的把坑填了。
 
-    ① **`smooth` 必须传 live 值**。它此前是「默认 9900 + 调用点全都不传」——
-       而面板把它暴露成可调项（范围 [0,9999]），于是 `kp_scale` 恒按 0.01 算：
-       smooth=0（不削）时 kp 会**强 100 倍**（环路发散）、smooth=9990 时**弱 10 倍**
-       （迟钝、漂移）。调用方一律从 RuntimeProfile 的 `mouse.smooth_x` 读进来传。
-       板端历史上真的用过 9990，这不是理论风险。
-
-    ② **单帧误差比例锚点改成 7%，阻尼比锚点改成「50ms → 3.0×kp」**。
+    ② **单帧误差比例锚点 7%，阻尼比锚点「50ms → 3.0×kp」**。
        依据是板端 A/B 实测（2026-09-24，gain 实测 x=0.686 / y=0.695，回路延迟 51ms）：
-         - `kp=25 / kd=25`（kp_eff=0.25 ⇒ 单帧吃 17% 误差）→ bias 阶跃打进**持续振荡**，
+         - `kp=0.25 / kd=0.25`（⇒ 单帧吃 17% 误差）→ bias 阶跃打进**持续振荡**，
            准星 ±150px，标定必挂；
-         - `kp=10 / kd=30`（kp_eff=0.10 ⇒ 单帧吃 6.9% 误差）→ **16 轮全稳**。
-       旧公式给的是 15%（kp_eff=0.15/gain），落在实测**不稳**那一档——
-       也就是"标定成功写回的参数正好是让标定失败的那组"。改成 7% 后，
-       用实测 gain 反推得到 kp≈10.2 / kd≈31，与实测稳定组（10 / 30）吻合。
+         - `kp=0.10 / kd=0.30`（⇒ 单帧吃 6.9% 误差）→ **16 轮全稳**。
+       旧公式给的是 15%，落在实测**不稳**那一档——
+       也就是"标定成功写回的参数正好是让标定失败的那组"。
 
-    返回 kp/kd/predict 名义值（写入 RuntimeProfile 的 mouse 段）。
-
-    `smooth` 是**必传**关键字参数（没有默认值）—— 修复前它有默认值 9900 而调用点全都
-    不传，于是配置里改成 9990/0 都不生效，"默认值静默生效"正是这个 bug 的形态。
-    调用方一律从 RuntimeProfile 的 `mouse.smooth_x` 读 live 值传进来。
+    返回 kp/kd/predict 的**生效值**（直接写进 RuntimeProfile 的 mouse 段，无需再折算）。
     """
     if gain_x_px_per_count <= 0 or gain_y_px_per_count <= 0:
         raise ValueError("增益必须 > 0")
-    # smooth 是 Kp/Kd 的削弱宽度，必须落在 [0, bandwidth) —— 越界会让 kp_scale 变成
-    # 负数或 0，推导出的 kp 无意义。宁可 fail-loud，也别静默按默认值算。
-    if not (0.0 <= float(smooth) < float(bandwidth)):
-        raise ValueError(f"smooth 必须在 [0, {bandwidth}) 内，实际 {smooth}")
     gain = min(gain_x_px_per_count, gain_y_px_per_count)
     delay = max(0.0, float(response_delay_ms))
-    kp_scale = max((bandwidth - float(smooth)) / bandwidth, 0.002)
-    # KP：目标「单帧吃掉 7% 误差」。锚点见 docstring ②：板端实测稳定组 kp=10/kd=30
-    # （gain=0.686、smooth=9900）反推 单帧比例 = 0.10×0.686 = 6.9% ⇒ 取 7%。
-    # ★ 单帧比例约束在**生效域**：kp_eff × gain ≡ KP_FRACTION_PER_FRAME（与 smooth 无关，
-    #   这正是"改 smooth 不该改手感、只该改名义 kp"的含义）。
-    kp_eff = KP_FRACTION_PER_FRAME / gain
+    # KP：目标「单帧吃掉 7% 误差」。锚点见 docstring ②：板端实测稳定组 kp=0.10
+    # （gain=0.686）反推 单帧比例 = 0.10×0.686 = 6.9% ⇒ 取 7%。
+    kp = KP_FRACTION_PER_FRAME / gain
     # 极端场景（超高增益 + 高延迟）：命令在延迟窗口内过冲是极限环主因，
-    # 仿真扫描证明 g1.5+d60 需要 kp_eff 压到 0.4× 才稳。
+    # 仿真扫描证明 g1.5+d60 需要 kp 压到 0.4× 才稳。
     if gain >= 1.2 and delay >= 50.0:
-        kp_eff *= 0.4
-    kp_eff = max(KP_EFF_MIN, kp_eff)
-    kp = min(KP_NOMINAL_MAX, kp_eff / kp_scale)
+        kp *= 0.4
+    kp = max(KP_EFF_MIN, min(KP_MAX, kp))
     # KD：阻尼比随延迟线性增强，锚点「50ms → 3.0×kp」= 板端实测稳定组的 kd/kp。
     # （旧式 0.7+delay/120 在 51ms 只有 1.13×kp，正是实测会振荡的那一档。）
     kd_ratio = KD_RATIO_BASE + delay / KD_RATIO_DELAY_DIV
-    kd = max(4.0, min(50.0, kp * kd_ratio))
+    kd = max(KD_MIN, min(KD_MAX, kp * kd_ratio))
     # predict（Ki 通道）：延迟越大越保守；上限 0.35（噪声下 Ki 正反馈
-    # 是振荡主因，见 core/tools/pid_sim 仿真结论），60ms 延迟降为 0.15
+    # 是振荡主因，见 core/tools/pid_sim 仿真结论），60ms 延迟降为 0.15。
+    # ★ 这个上限仍是保守档，与 core 的 predict 默认 1.0 不同源 —— 见 V1.0.13 交付记录
+    #   「待办」一条：要用 pid_sim 在真实 gain 域重新扫一遍再统一。
     predict = max(0.1, min(0.35, 0.35 - delay / 300.0))
     return {
-        'kp': round(kp, 2),
-        'kd': round(kd, 2),
+        'kp': round(kp, 4),
+        'kd': round(kd, 4),
         'predict': round(predict, 3),
     }

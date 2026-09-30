@@ -12,8 +12,6 @@ TEST(runtime_profile_json_roundtrip) {
     p.model_id = "huangwa";
     p.capture.width = 640;
     p.capture.height = 640;
-    p.capture.offset_x = 100;
-    p.capture.offset_y = 50;
     p.inference.confidence = 0.55f;
     p.inference.iou = 0.45f;
     p.inference.class_filter = {0, 1};
@@ -31,7 +29,6 @@ TEST(runtime_profile_json_roundtrip) {
     RuntimeProfile q = RuntimeProfile::from_json(res.value);
     CHECK(q.model_id == "huangwa");
     CHECK_EQ(q.capture.width, 640u);
-    CHECK_EQ(q.capture.offset_x, 100);
     CHECK_EQ(q.inference.confidence, 0.55f);
     CHECK_EQ(q.inference.iou, 0.45f);
     CHECK_EQ(q.inference.class_filter.size(), 2u);
@@ -75,31 +72,16 @@ TEST(runtime_profile_roi_bounds) {
     CaptureProfile cap;
     cap.width = 640;
     cap.height = 640;
-    cap.offset_x = 0;
-    cap.offset_y = 0;
     std::string err;
     CHECK(cap.valid(1920, 1080, &err));  // 全帧内
 
     CaptureProfile out;
     out.width = 2000;  // 越界
-    out.offset_x = 0;
-    out.offset_y = 0;
     CHECK(!out.valid(1920, 1080, &err));
     CHECK(!err.empty());
 
-    // offset 语义为"相对屏幕中心的偏移"：大偏移会被 clamp 到全帧内（合法）
-    CaptureProfile offset_out;
-    offset_out.width = 100;
-    offset_out.offset_x = 1900;  // 相对中心偏移 1900，clamp 后界内
-    offset_out.offset_y = 0;
-    CHECK(offset_out.valid(1920, 1080, &err));
-
-    // 负偏移同样合法（clamp 到左上角）
-    CaptureProfile neg;
-    neg.width = 100;
-    neg.offset_x = -500;
-    neg.offset_y = -500;
-    CHECK(neg.valid(1920, 1080, &err));
+    // V1.0.13：capture.offset_x/y 已删（裁剪区恒以屏幕中心为心）⇒
+    //   原先「大/负偏移 clamp 后仍合法」两条用例随之作废。
 
     CaptureProfile zero;  // 0x0 = 全帧，合法
     CHECK(zero.valid(1920, 1080, &err));

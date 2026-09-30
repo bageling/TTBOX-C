@@ -193,7 +193,8 @@ private:
     bool last_injection_allowed_ = false;
     // ---- V1.0.12（2026-09-30）：active_zoom_scale_（PID 误差分母）已删 —— 不区分倍镜。----
     // ---- V1.0.08：裁剪区下边界（与检测框/准星同一坐标系，全帧像素）----
-    // = 帧高/2 + capture.offset_y + search_radius（板端实测 1440/2 + 0 + 320 = 1040）。
+    // = 帧高/2 + search_radius（V1.0.13 起 capture.offset_y 已删，裁剪区恒居中；
+    //   板端实测 1440/2 + 320 = 1040）。
     // 只给「框底被裁剪区截断 ⇒ 落点外推」用；<0 = 未知（不做外推）。
     float crop_bottom_px_ = -1.0f;
     // ---- V1.0.09：被截断时的身高反推比（h/w），按目标自校准 ----

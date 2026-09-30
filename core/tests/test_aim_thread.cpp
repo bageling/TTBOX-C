@@ -92,11 +92,8 @@ TEST(aim_thread_out_counts_match_sent_moves) {
     profile->mouse.kp_y = 1.0f;
     profile->mouse.kd_x = 0.0f;
     profile->mouse.kd_y = 0.0f;
-    // smooth 是**削弱倍率**（outputScale = 10000 - smooth，只削 Kp/Kd）：
-    // 默认 9900 会把 Kp 砍到 1/100，配合 output_deadzone 默认 1.0 ⇒ 本用例可能全帧零输出，
-    // 断言就退化成 0 == 0。这里显式关掉削弱与死区，保证确实产生非零输出。
-    profile->mouse.smooth_x = 0.0f;
-    profile->mouse.smooth_y = 0.0f;
+    // ★ V1.0.13：smooth 已从参数面删除（折叠进 kp/kd）⇒ 这里 kp=1.0 就是真实增益，
+    // 不会再被削 99%。输出死区仍显式关掉，保证确实产生非零输出。
     profile->mouse.output_deadzone = 0.0f;
     config.update(profile);
 
@@ -141,8 +138,6 @@ TEST(aim_thread_out_counts_ignore_gated_frames) {
     profile->mouse.aim_profiles[0].hotkey = 0x02;
     profile->mouse.kp_x = 1.0f;
     profile->mouse.kp_y = 1.0f;
-    profile->mouse.smooth_x = 0.0f;
-    profile->mouse.smooth_y = 0.0f;
     profile->mouse.output_deadzone = 0.0f;
     config.update(profile);
 
@@ -371,8 +366,6 @@ std::pair<int64_t, int64_t> run_aim_frames(bool bezier_on) {
     profile->mouse.bezier.enabled = bezier_on;
     profile->mouse.bezier.curvature = 0.5f;    // 放大弧线，便于断言看出差异
     profile->mouse.output_deadzone = 0.0f;
-    profile->mouse.smooth_x = 0.0f;
-    profile->mouse.smooth_y = 0.0f;
     profile->mouse.kp_x = 1.0f;
     profile->mouse.kp_y = 1.0f;
     config.update(profile);

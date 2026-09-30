@@ -41,10 +41,12 @@ constexpr uint32_t kMaxCaptureRoiPx = 3840;
 //   offset_x/offset_y = 相对屏幕中心的偏移（px，负值=左/上；配合 width/height 使用）
 // ---------------------------------------------------------------------------
 struct CaptureProfile {
+    // ★ V1.0.13（2026-09-30）：offset_x/offset_y（相对屏幕中心偏移）已删 ——
+    //   业主口径「参考物太多，落点与设置瞄点对不上」。它把 AI 看的那块从屏幕中心
+    //   挪走，等效于在"瞄点"之外又开了一个能移落点的口子（面板「看的位置上下移」）。
+    //   裁剪区恒以屏幕中心为心；落点只剩「瞄点」一个入口。
     uint32_t width = 0;      // 0 = 默认（全帧）
     uint32_t height = 0;     // 0 = 默认（全帧）
-    int32_t offset_x = 0;    // 相对屏幕中心的偏移（px）
-    int32_t offset_y = 0;
 
     bool valid(uint32_t frame_w, uint32_t frame_h, std::string* error = nullptr) const;
 };

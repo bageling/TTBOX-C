@@ -218,10 +218,11 @@ void AimThread::loop() {
                         // 板端实测（2026-09-29）：帧 2560x1440、capture 416x416 居中
                         // ⇒ 1440/2 + 0 + 208 = **928**，与 cls5 原始框 y2 在 928 的巨峰吻合。
                         // 框底贴到它 ⇒ 框高被截断 ⇒ 落点相对人体上飘。
+                        // V1.0.13：cap.offset_y 已删 ⇒ 下边界 = 帧高/2 + 半宽（恒居中）。
                         crop_bottom_px_ =
                             task.frame_height > 0
                                 ? static_cast<float>(task.frame_height) * 0.5f +
-                                      static_cast<float>(cap.offset_y) + scfg.search_radius_px
+                                      scfg.search_radius_px
                                 : -1.0f;
                     } else {
                         crop_bottom_px_ = -1.0f;
@@ -289,10 +290,11 @@ void AimThread::loop() {
                 speed_kp_cfg = frame_profile->mouse.speed_adaptive_kp;
                 global_wave_cfg = frame_profile->mouse.global_wave;
                 bezier_cfg = frame_profile->mouse.bezier;
+                // V1.0.13：smooth 已从参数面删除（折叠进 kp/kd）⇒ 第 5 参恒 0（直通）。
                 pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
-                                 frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
+                                 frame_profile->mouse.rate_x, 0.0);
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
-                                 frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
+                                 frame_profile->mouse.rate_y, 0.0);
             }
             // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
             // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
@@ -311,9 +313,9 @@ void AimThread::loop() {
                     selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f);
                 if (skp_mult != 1.0f) {
                     pid_x_.configure(kp_x * skp_mult, kd_x, frame_profile->mouse.predict_x,
-                                     frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
+                                     frame_profile->mouse.rate_x, 0.0);
                     pid_y_.configure(kp_y * skp_mult, kd_y, frame_profile->mouse.predict_y,
-                                     frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
+                                     frame_profile->mouse.rate_y, 0.0);
                 }
             }
             // 热键解析/挂起/选档/边沿复位已在选靶之前完成（见上面「热键解析与选档」段）——

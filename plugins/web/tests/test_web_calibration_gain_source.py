@@ -2,7 +2,7 @@
 #
 # 背景（2026-09-24 上板三组对照定死的事）：
 #   1) 旧实现把「参考点偏置的 px」当成注入量当分母 ⇒ 量纲是 px/px ⇒ 拟合出的 gain 恒 ≈1.0，
-#      再经 derive_pid_params 恒推出 kp=15 —— **与游戏灵敏度无关**，标定成功也改不了手感。
+#      再经 derive_pid_params 恒推出 kp=0.07 —— **与游戏灵敏度无关**，标定成功也改不了手感。
 #   2) 幅度表 [8,16,24,32,40] 全为正值、轮间只清 bias 不等瞄点归位 ⇒ 慢环下位移逐轮累加
 #      ⇒ 比值散开 ⇒ 必挂一致性门（MAD/|中位|>0.35）⇒ 表现为"永远标定不到"。
 #   3) 中途取消/失败时未清 calibration_bias_* ⇒ 参考点被永久顶偏（只能重启恢复）。
@@ -102,7 +102,7 @@ def test_out_counts_tolerates_shapeless_status(web_mod, monkeypatch, bad):
 def test_worker_fails_loudly_when_counts_metric_missing(web_mod):
     """★ 缺字段时必须**失败**，绝不能悄悄退回"用 px 当分母"那套。
 
-    退回的代价是"永远成功、永远是错的"：gain 恒 1.0 ⇒ kp 恒 15 ⇒ 用户以为标定好了，
+    退回的代价是"永远成功、永远是错的"：gain 恒 1.0 ⇒ kp 恒 0.07 ⇒ 用户以为标定好了，
     实际手感一点没变。宁可明确报错。
     """
     body = _worker_src()
@@ -316,14 +316,16 @@ def test_payload_exposes_new_diagnostics():
 # ===========================================================================
 # 8. 标定期"温和档" PID（2026-09-24 板上 A/B 定死）
 #
-#   实战参数（kp=25/kd=25）在 ~50ms 采集回路延迟下，bias 阶跃（±8..32px 换向）
-#   会把环打进持续振荡（实测准星 ±150px），目标被甩出画面 ⇒ 整轮 no_target。
-#   kp=10/kd=30 同一链路 16 轮全稳、gain 一致性 0.94/0.90。
+#   实战参数（kp=0.25/kd=0.25，V1.0.13 起都是**生效值**）在 ~50ms 采集回路延迟下，
+#   bias 阶跃（±8..32px 换向）会把环打进持续振荡（实测准星 ±150px），目标被甩出画面
+#   ⇒ 整轮 no_target。kp=0.10/kd=0.30 同一链路 16 轮全稳、gain 一致性 0.94/0.90。
 #   gain=Δpx/ΔΣcounts 是闭环恒等式 ⇒ 压 PID 不影响测量结果。
 # ===========================================================================
 
 def test_calib_gentle_pid_constants_are_sane(web_mod):
-    assert 4.0 <= web_mod.CALIB_PID_KP_MAX <= 15.0
+    # ★ V1.0.13：10.0 是**旧名义值**（实际生效 0.10）。kp 换成生效值之后这里必须同步，
+    #   否则标定期会把 10 直接写进 mouse.kp_x ⇒ 环路自激 100 倍 ⇒ 整轮标定白跑。
+    assert 0.04 <= web_mod.CALIB_PID_KP_MAX <= 0.15
     assert 2.0 <= web_mod.CALIB_PID_KD_RATIO <= 4.0
 
 
