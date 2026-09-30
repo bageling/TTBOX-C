@@ -667,7 +667,11 @@ struct MouseProfile {
     bool reject_clip_top = false;         // 上边贴裁剪区边界 ⇒ 剔除（默认关，近身仰角目标易误伤）
     float clip_margin_px = 6.0f;          // 框边距裁剪区边界多远算"被切断"
     float clip_center_max_px = 105.0f;    // 离准星超过这个距离才判贴边
-    float track_size_ratio = 2.0f;        // 锁定换块的框高比上限（0 = 关）
+    float track_size_ratio = 1.35f;       // 锁定换块的框高比上限（0 = 关）
+                                          // ★ V1.0.11：2.0 → 1.35。2.0 太宽（实测尖峰帧
+                                          //   框高比 p90=1.86 ⇒ 92.3% 的坏量测被放行）；
+                                          //   实际生效值另有硬上限 kSizeRatioCap=1.35
+                                          //   （见 TargetSelector.cpp）—— 配置只能更严。
     // ---- 选靶四项机制（对齐 BB 目标选择/锁定，见 bb-port/01 §1）----
     // ★ 默认 0/false ⇒ 不开时选靶行为与本参数加入前**逐字节一致**（1.5.46 兼容）。
     //   对应 TargetSelectorConfig 里的同名字段，由 AimThread 逐帧灌进 scfg。

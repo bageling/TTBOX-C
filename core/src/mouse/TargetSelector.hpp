@@ -84,7 +84,25 @@ struct TargetSelectorConfig {
     // 实测跨类别 |Δtgt_y| p90=64 / p99=159，同类别 p90=10（类别跳变 94% 都是 cls5↔cls0）。
     // 第 1 层 track_lock 此前只比"谁离上帧锁定框中心近"，不看尺寸 ⇒ 整块换掉。
     // 框高比 max(新/旧, 旧/新) > 此值的候选不参与竞争。0 = 关闭（回到加此参数前行为）。
-    float track_size_ratio = 2.0f;
+    // ★ V1.0.11：默认 2.0 → 1.35。2.0 太宽 —— 实测（板端 34 万帧）落点尖峰帧的框高比
+    //   p50=1.43 / p90=1.86，**92.3% 落在 2.0 以内 ⇒ 全被放行**。
+    //   另外 .cpp 里对生效值加了硬上限 kSizeRatioCap=1.35（配置只能调得更严，不能放宽），
+    //   这样板端存量配置里写的 2 会被自动钳到 1.35，不必改板端 config.d。
+    float track_size_ratio = 1.35f;
+
+    // ---- V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）----
+    // 开火中若第 1 层没保住锁定，**不再去第 2/3 层另选目标** ⇒ 本帧无目标。
+    // 理由：压枪时切靶 = 准星从压着的目标甩到别人身上，是最难受的一种"晃"。
+    // 由 AimThread 每帧填（扳机激活状态）。
+    bool fire_active = false;
+
+    // ---- V1.0.11：切靶确认窗（照 yu 的 pending_switch_frames + selector_acquire_delay_ms）----
+    // 只在「本来锁着一个目标 → 掉了 → 正要另选」**且候选不止一个**时生效：
+    // 新目标要在同一处连续出现这么多帧才真正切过去（首次锁定、单候选瞬移都不延迟）。
+    // 用帧数而不是毫秒 —— 照 yu 的 pending_switch_frames，且不受调用方时钟口径影响。
+    // 0 或 1 = 关（回到加此机制前行为，供测试 / A-B）。
+    // ★ 不进面板：这是算法内部状态，不是用户旋钮（对齐 yu 口径）。
+    uint32_t switch_confirm_frames = 4;
 
         // ---- ByteTrack 增强（多轨迹跟踪与长时间静默裁剪）----
         // 在保持原有 track_lock/rect_lock/score 三层选择语义不变的前提下，
@@ -149,6 +167,13 @@ struct TargetSelection {
     float lock_radius = 0.0f;        // 自适应锁定半径（px）
     // 选择层级 reason（对齐参考 trace reason）
     enum Reason { kNone = 0, kTrackLock, kRectLock, kScore } reason = kNone;
+    // ---- V1.0.11 ----
+    // held：本帧几何**没更新**，用的是上一帧的框（照 yu 的 *_holding_previous）。
+    //   上游据此可以知道"这一帧的量测被判为坏"，用于遥测与调试。
+    bool held = false;
+    // continuity：本帧是「同一个目标的延续」而不是新目标（id 变了但框重叠 + 尺寸一致）。
+    //   上游据此**不重置**平滑器/PID（避免落点跳与重新起步）。
+    bool continuity = false;
 };
 
 // 单个追踪轨迹
@@ -171,6 +196,16 @@ struct TrackEntry {
     uint32_t hits = 0;               // 累计命中帧数
     bool confirmed = false;          // 是否已确认（hits 达标）
     uint32_t created_ms = 0;         // 创建时间（用于存在时长排序，裁剪最旧）
+
+    // ---- V1.0.11：量测跳变门控状态（照 yu 的 jump_rejected_holding_previous）----
+    // d_hist：最近 4 次**被接受**的帧间位移（px）。用中位数当"局部速度"基准 ——
+    //   单帧噪声不会抬高基准（均值会被尖峰污染），真运动则基准随之上抬、阈值自动放宽。
+    // hold_frames：连续 holding_previous 的帧数；到 kMeasMaxHold 就必须认输放行（防锁死）。
+    // rejected_total：累计拒绝帧数（遥测用，看门控有没有在工作）。
+    float d_hist[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    uint8_t d_hist_n = 0;
+    uint32_t hold_frames = 0;
+    uint32_t rejected_total = 0;
 };
 
 // TargetSelector — 目标选择器：从多个检测框(DetectionBox)中挑出唯一要跟踪的目标。
@@ -203,9 +238,19 @@ public:
         has_last_target_ = false;
         last_target_x_ = 0.0f;
         last_target_y_ = 0.0f;
+        // V1.0.11：切靶确认窗 + 上一帧输出框 + 门控遥测一并清零
+        has_pending_ = false;
+        pending_cx_ = 0.0f;
+        pending_cy_ = 0.0f;
+        pending_frames_ = 0;
+        has_last_out_box_ = false;
+        selector_holds_total_ = 0;
     }
 
     const std::vector<TrackEntry>& tracks() const { return tracks_; }
+
+    // V1.0.11：累计「量测被判坏 ⇒ 沿用上一帧」的帧数（遥测用，看门控在不在工作）。
+    uint64_t selector_holds_total() const { return selector_holds_total_; }
 
 private:
     // 从检测框列表匹配候选（过滤 + 距离排序）
@@ -250,6 +295,19 @@ private:
                     bool has_last_target_ = false;  // last_target_x_/y_ 是否有效
                     float last_target_x_ = 0.0f;    // 上帧选中瞄准点（打分制 stick 项用）
                     float last_target_y_ = 0.0f;
+                    // ---- V1.0.11：切靶确认窗（照 yu 的 pending_switch_frames）----
+                    // 只在「本来锁着一个目标、掉了、正要另选」时生效；首次锁定不延迟。
+                    // 同一位置连续待够 kSwitchConfirmMs 才真切，避免切到一闪而过的错框上。
+                    bool has_pending_ = false;
+                    float pending_cx_ = 0.0f;
+                    float pending_cy_ = 0.0f;
+                    uint32_t pending_frames_ = 0;
+                    // ---- V1.0.11：上一帧输出框（判 continuity：id 变了但是不是同一个目标）----
+                    bool has_last_out_box_ = false;
+                    DetectionBox last_out_box_;
+                    uint32_t last_out_box_ms_ = 0;
+                    // 门控遥测：累计 holding_previous 帧数（供 status 暴露，看门控有没有工作）
+                    uint64_t selector_holds_total_ = 0;
         };
 
 }  // namespace ttbox::core::aim

@@ -64,9 +64,13 @@ private:
     //   - min_cutoff：目标静止（速度≈0）时截止频率压到 0.8Hz，高频框噪声被强衰减
     //   - beta：目标真实移动时截止频率随速度升高（低延迟跟随，稳态滞后 <1.5px@100px/s）
     //   - d_cutoff：速度信号本身的低通截止（防止噪声速度尖峰抬高位置截止）
-    // 实测：18.2px 抖动脉冲 → 平滑后逐帧 step ≤3.5px（衰减 80%），静止无滞后
+    // ★ V1.0.11：beta 0.10 → 0.03。定障（板端 34 万帧离线回放）：
+    //   beta 项把**突跳**当成"高速"⇒ cutoff 随之抬高 ⇒ 滤波形同取消、噪声原样通过
+    //   （beta=0.10 时落点尖峰 max=165px；beta=0.03 时降到 114px；beta=0 时 6.5px）。
+    //   取 0.03 是保守档：不一刀切到 0（那会让快速移动明显跟不上），先削一档看手感。
+    //   min_cutoff 不动 —— 降它会明显伤跟手，beta 更安全。
     static constexpr float kPosMinCutoffHz = 0.8f;
-    static constexpr float kPosBeta = 0.10f;
+    static constexpr float kPosBeta = 0.03f;
     static constexpr float kPosDCutoffHz = 1.0f;
     // OneEuro 平滑器状态（不进 TrackedTarget，state() 只暴露平滑后位置）
     float pos_fx_ = 0.0f;      // 平滑后位置（低通输出）

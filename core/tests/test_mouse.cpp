@@ -193,11 +193,17 @@ TEST(mouse_aim_tracker_velocity_and_switch) {
     tr.update(110.0f, 100.0f, 0, 100000);
     CHECK_EQ(tr.state().vx, 40.0f);
     CHECK_EQ(tr.state().vy, 0.0f);
-    // 预测 0.5s（EMA 速度 40）：位置经 OneEuro 平滑后为 107.45（100+0.745×10），
-    // 预测 = 平滑位置 + 40×0.5 = 127.45（速度估计仍用原始帧差，见 AimTracker.cpp）
+    // 预测 = 平滑位置 + 速度×时域（速度估计仍用原始帧差，见 AimTracker.cpp）。
+    // ★ V1.0.11：One-Euro 的 beta 从 0.10 降到 0.03 ⇒ 平滑更强、平滑位置更靠后，
+    //   旧期望值 127.45（= 平滑位置 107.45 + 40×0.5）随之失效。
+    //   改为以「当前平滑位置」推期望：测的是语义（预测 = 平滑位置 + v×t），
+    //   不是某个 beta 下的具体数字 —— 否则每调一次滤波常数都要改一次测试。
+    const float smooth_x = tr.state().x;
+    CHECK(smooth_x > 100.0f);   // 平滑确实在跟随
+    CHECK(smooth_x < 110.0f);   // 且没有直接等于原始值（确实滤了）
     float px = 0, py = 0;
     tr.predict(0.5f, &px, &py);
-    CHECK(std::abs(px - 127.45f) < 0.1f);  // 107.45 + 40*0.5 = 127.45
+    CHECK(std::abs(px - (smooth_x + 40.0f * 0.5f)) < 0.05f);
     // 目标切换（target_id 变化）→ 速度清零
     tr.update(200.0f, 200.0f, 1, 200000);
     CHECK_EQ(tr.state().vx, 0.0f);

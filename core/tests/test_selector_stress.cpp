@@ -239,6 +239,9 @@ TEST(selector_switch_hysteresis_blocks_far_candidate) {
         cfg.switch_cooldown_ms = 0.0f;
         cfg.switch_hysteresis = 0.5f;
         cfg.lost_grace_ms = 0.0f;
+        // V1.0.11：本用例专测切靶滞后 ⇒ 关掉切靶确认窗，
+        //   否则两种机制都会让结果 invalid，判不出是谁挡的。
+        cfg.switch_confirm_frames = 0;
         CHECK(sel.select(first, cfg, 0).valid);
         // B 的 dist_sq=10000，锁定基准 400：10000×1.5² = 22500 不小于 400 ⇒ 挡
         CHECK(!sel.select(second, cfg, 1000).valid);
@@ -249,6 +252,7 @@ TEST(selector_switch_hysteresis_blocks_far_candidate) {
         cfg.switch_cooldown_ms = 0.0f;
         cfg.switch_hysteresis = 0.0f;
         cfg.lost_grace_ms = 0.0f;
+        cfg.switch_confirm_frames = 0;   // V1.0.11：同上，本用例只测滞后
         CHECK(sel.select(first, cfg, 0).valid);
         CHECK(sel.select(second, cfg, 1000).valid);
     }

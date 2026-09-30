@@ -107,6 +107,10 @@ struct PipelineMetrics {
     int64_t aim_out_counts_x = 0;
     int64_t aim_out_counts_y = 0;
     bool aim_has_target = false; // 当前帧是否检测到目标（标定状态机用）
+    // V1.0.11：选靶量测门控累计帧数（照 yu 的 jump_rejected / low_quality_holding_previous）。
+    // 含义：这些帧的量测被判为坏（框位移超过 max(8px, 3×局部速度)）⇒ 沿用上一帧的框。
+    // 判读：为 0 ⇒ 门控没工作（量测一直很稳或门控没接线）；持续增长 ⇒ 门控在挡坏量测。
+    uint64_t aim_selector_hold_frames = 0;
     int32_t aim_target_id = -1;   // 当前选择目标的稳定 ID
     int32_t aim_target_class_id = -1;
     double aim_target_width = 0.0;

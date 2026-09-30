@@ -67,6 +67,9 @@ public:
         uint64_t stale = 0;
         uint64_t target_frames = 0;
         uint64_t no_target_frames = 0;
+        // V1.0.11：选靶量测门控遥测 —— 累计「本帧量测被判为坏 ⇒ 沿用上一帧框」的帧数。
+        // 用途：上板后直接从记录器核"门控有没有在工作、拒了多少"，不必让业主配合做实验。
+        uint64_t selector_hold_frames = 0;
         uint32_t tracks = 0;           // 当前跟踪中的目标数（detections/tracks 显示）
         float predicted_x = 0.0f;
         float predicted_y = 0.0f;

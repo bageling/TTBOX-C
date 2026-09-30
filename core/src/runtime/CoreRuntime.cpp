@@ -497,6 +497,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     out->aim_pos_x = aim_status.predicted_x;
     out->aim_pos_y = aim_status.predicted_y;
     out->aim_has_target = aim_status.has_target;
+    out->aim_selector_hold_frames = aim_status.selector_hold_frames;  // V1.0.11 门控遥测
     out->aim_target_id = aim_status.target_id;
     out->aim_target_class_id = aim_status.target_class_id;
     out->aim_target_width = aim_status.target_width;

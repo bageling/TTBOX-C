@@ -1120,6 +1120,9 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("aim_out_counts_x", JsonValue::number(static_cast<double>(status.metrics.aim_out_counts_x)));
     m.set("aim_out_counts_y", JsonValue::number(static_cast<double>(status.metrics.aim_out_counts_y)));
     m.set("aim_has_target", JsonValue::boolean(status.metrics.aim_has_target));
+    // V1.0.11：选靶量测门控累计帧数（照 yu 的 *_holding_previous），上板后核门控是否在工作
+    m.set("aim_selector_hold_frames",
+          JsonValue::number(static_cast<double>(status.metrics.aim_selector_hold_frames)));
     m.set("aim_target_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_id)));
     m.set("aim_target_class_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_class_id)));
     m.set("aim_target_width", JsonValue::number(status.metrics.aim_target_width));

@@ -319,6 +319,10 @@ void AimThread::loop() {
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
                                  frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
             }
+            // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
+            // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
+            // 也不在压枪时把准星从正压着的目标甩到别人身上）。
+            scfg.fire_active = trigger_.auto_trigger2().activated();
             const auto selected = selector_.select(task.detections, scfg,
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
             const uint32_t now_ms32 = static_cast<uint32_t>(task.timestamp_us / 1000ULL);
@@ -443,7 +447,10 @@ void AimThread::loop() {
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
                 // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。
                 // prediction_time_s_>0 时用预测点做控制误差；=0 保持原行为（直接用瞄准点）。
-                if (tracker_.target_switched(selected.target_id)) {
+                // ★ V1.0.11：continuity（同一个目标被重新编号）时**不重置** ——
+                //   照 yu 的 continuity_reference_rect：id 变了但参考框重叠+尺寸一致就是
+                //   同一目标，重置 One-Euro 反而让落点跳一下、跟随重新起步。
+                if (tracker_.target_switched(selected.target_id) && !selected.continuity) {
                     tracker_.reset();
                 }
                 // V3 阶段 3a：滤波强度按框高自适应（默认关 ⇒ 与加此机制前逐字节一致）。
@@ -465,7 +472,10 @@ void AimThread::loop() {
                 if (prediction_time_s_ > 0.0f) {
                     tracker_.predict(prediction_time_s_, &pred_tx, &pred_ty);
                 }
-                if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
+                // ★ V1.0.11：continuity 时**不重置**整条链（照 yu 的 continuity 语义）——
+                //   同一个目标被重新编号不需要清 PID/拉枪/压枪计时，清了反而制造一次落点跳。
+                if (last_target_id_ != -1 && selected.target_id != last_target_id_ &&
+                    !selected.continuity) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     pid_x_.reset(); pid_y_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
@@ -482,7 +492,9 @@ void AimThread::loop() {
                 // BB 原版口径：速度波动的一次性标志在**新锁定目标**时置 true
                 // （原版 main.lua:5742 `st.speed_fluctuation_first_lock=true`），
                 // 用完一帧即清（见尾链调用处）。锁定同一个目标期间不再作用。
-                if (last_target_id_ != selected.target_id) speed_fluct_first_lock_ = true;
+                if (last_target_id_ != selected.target_id && !selected.continuity) {
+                    speed_fluct_first_lock_ = true;
+                }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
                 // 速度信息只进入 P_PID 的前馈/Kalman，不在目标坐标层 coast。
@@ -1056,6 +1068,9 @@ void AimThread::loop() {
             status_.recoil_add_y = recoil_add_y;
             status_.recoil_acc_px = recoil_.acc_px();
             status_.recoil_rate_px_s = recoil_rate_px_s;
+            // V1.0.11：选靶量测门控遥测 —— 累计「判为坏量测 ⇒ 沿用上一帧」的帧数。
+            // 上板后直接从记录器核门控有没有在工作（不需要业主配合做实验）。
+            status_.selector_hold_frames = selector_.selector_holds_total();
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;

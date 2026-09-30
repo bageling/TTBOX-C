@@ -40,6 +40,81 @@ bool size_ratio_ok(float h_ref, float h_cand, float ratio) {
     const float r = h_ref > h_cand ? h_ref / h_cand : h_cand / h_ref;
     return r <= ratio;
 }
+
+// ---- V1.0.11：量测门控 / 切靶确认 的阈值 ------------------------------------
+// 全部**写死在算法里、不进面板**（对齐 yu 口径：精细量只遥测、不暴露成旋钮）。
+// 定障依据（板端 2026-09-29 完整录制 341,859 帧，见
+// .workbuddy/artifacts/yu-选靶与落点抖动方案-2026-09-30.md）：
+//   · 稳态（已对准）误差每秒过零 3.67 次、帧间只动 0.13px ⇒ 幅度小、频率高，就是眼睛看到的"晃"；
+//   · corr(框高极差, 落点极差)=0.744，落点对 y1 敏感度 0.69（对 y2 只 0.31）⇒ 是框顶在摆；
+//   · 落点尖峰（>20px，占 1.26% 帧）里 88.6% 是**突跳** ⇒ 可用连续性判据拦，不误杀跟枪；
+//   · 离线回放：本门控让 p90 落点抖动 2.759 → 1.706（−38.2%），互相关滞后 0 帧。
+namespace selgate {
+// 绝对下限：位移小于它一律当正常（正常头顶边界抖动 ~±1px、目标慢移 ~6px/帧@144fps）
+constexpr float kMeasJumpAbsPx = 8.0f;
+// 相对倍数：位移要超过「局部速度」的这么多倍才算突跳
+constexpr float kMeasJumpRel = 3.0f;
+// 连续 hold 到这么多帧就认输放行（说明目标真的换了或真的在快移）—— 防锁死
+constexpr uint32_t kMeasMaxHold = 10;
+// 框高比硬上限：配置只能调得更严、不能放宽（要挡的正是"同一个目标头顶边界抖动"）
+constexpr float kSizeRatioCap = 1.35f;
+// 确认窗内认「还是同一处」的半径（px）
+constexpr float kSwitchConfirmRadiusPx = 40.0f;
+// continuity 判据：IoU 达标 + 框高比达标 + 时间间隔够近 ⇒ 视为同一目标
+constexpr float kContinuityIou = 0.5f;
+constexpr float kContinuitySizeRatio = 1.20f;
+constexpr uint32_t kContinuityMaxGapMs = 300u;
+// 「刚丢了锁定」的窗口（ms）：确认窗只在丢锁后的这段时间内生效。
+// 用「距上一帧输出框的间隔」来表达（丢锁后 last_out_box_ms_ 不再刷新 ⇒ 差值从丢锁那刻起递增），
+// 不需要新增状态字段。超过窗口说明锁早就丢了（比如目标一直不在），按首次锁定处理、不延迟。
+constexpr uint32_t kLockLossWindowMs = 500u;
+
+// 局部速度 = 最近 4 次**被接受**位移的中位数。
+// ★ 用中位数而不是均值：单帧尖峰抬不高基准（均值会被污染）；真运动时基准随之抬升，
+//   阈值自动放宽 ⇒ 不需要额外的"目标在不在动"判断。
+inline float local_speed(const TrackEntry& t) {
+    if (t.d_hist_n == 0) return 0.0f;
+    const int n = t.d_hist_n < 4 ? t.d_hist_n : 4;
+    float v[4];
+    for (int i = 0; i < n; ++i) v[i] = t.d_hist[i];
+    for (int i = 1; i < n; ++i) {   // n<=4 的插入排序
+        const float key = v[i];
+        int j = i - 1;
+        while (j >= 0 && v[j] > key) { v[j + 1] = v[j]; --j; }
+        v[j + 1] = key;
+    }
+    return v[n / 2];
+}
+
+inline void push_speed(TrackEntry& t, float d) {
+    if (t.d_hist_n < 4) {
+        t.d_hist[t.d_hist_n++] = d;
+    } else {
+        t.d_hist[0] = t.d_hist[1];
+        t.d_hist[1] = t.d_hist[2];
+        t.d_hist[2] = t.d_hist[3];
+        t.d_hist[3] = d;
+    }
+}
+
+// 生效的框高比上限：0 保持"关"的语义；非 0 一律钳到 kSizeRatioCap 以内。
+inline float effective_size_ratio(float configured) {
+    if (configured <= 0.0f) return 0.0f;
+    return configured < kSizeRatioCap ? configured : kSizeRatioCap;
+}
+
+inline float box_iou(const DetectionBox& a, const DetectionBox& b) {
+    const float ix1 = a.x1 > b.x1 ? a.x1 : b.x1;
+    const float iy1 = a.y1 > b.y1 ? a.y1 : b.y1;
+    const float ix2 = a.x2 < b.x2 ? a.x2 : b.x2;
+    const float iy2 = a.y2 < b.y2 ? a.y2 : b.y2;
+    const float iw = ix2 - ix1, ih = iy2 - iy1;
+    if (iw <= 0.0f || ih <= 0.0f) return 0.0f;
+    const float inter = iw * ih;
+    const float uni = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter;
+    return uni > 0.0f ? inter / uni : 0.0f;
+}
+}  // namespace selgate
 }  // namespace
 
 std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
@@ -246,6 +321,9 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
 
     // ---- 第 1 层：track_lock（候选与激活 track 相同 id）----
     // 激活 track 的匹配范围：自身对角 × 2（容忍检测抖动）
+    // V1.0.11：先记下"本帧进来时本来就锁着" —— 第 3 层的切靶确认窗与开火期禁切
+    //   都以「本来锁着 → 掉了 → 正要另选」为前提（首次锁定不延迟、也不禁）。
+    const bool had_active_lock = (active_track_ >= 0);
     if (active_track_ >= 0) {
         TrackEntry* at = nullptr;
         for (auto& t : tracks_) {
@@ -266,31 +344,68 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     const float h_ref = at->box.y2 - at->box.y1;
                     const Candidate* best = nullptr;
                     float best_d = match_r_sq;
+                    // V1.0.11：生效值钳到 kSizeRatioCap —— 配置只能调得更严、不能放宽。
+                    // 这样板端存量配置里写的 2 会被自动按 1.35 走，不必改 config.d。
+                    const float ratio_eff = selgate::effective_size_ratio(cfg.track_size_ratio);
                     for (const auto& c : cands) {
-                        if (!size_ratio_ok(h_ref, c.box.y2 - c.box.y1, cfg.track_size_ratio)) continue;
+                        if (!size_ratio_ok(h_ref, c.box.y2 - c.box.y1, ratio_eff)) continue;
                         const float d = (c.cx - ref_cx) * (c.cx - ref_cx) +
                                         (c.cy - ref_cy) * (c.cy - ref_cy);
                         if (d < best_d) { best_d = d; best = &c; }
                     }
                     if (best) {
-                        // 更新 track（框体 + 卡尔曼状态）
-                        at->box = best->box;
-                        at->cx = best->cx;
-                        at->cy = best->cy;
-                        at->lost_frames = 0;
-                        kalman_update(*at, best->box, cfg, now_ms);
+                        // ---- V1.0.11：量测跳变门控（照 yu 的 jump_rejected_holding_previous）----
+                        // 板端定障：同一 track 下框顶 y1 帧间跳 ±17px，噪声经落点 y1+0.31h
+                        // 直接进控制环；实测稳态误差每秒过零 3.67 次 = 眼睛看到的"晃"。
+                        // 尖峰里 88.6% 是突跳（跳变量 ÷ 邻帧位移中位 ≥2）⇒ 连续性判据能拦，
+                        // 且不误杀正常跟枪（离线回放：p90 抖动 −38.2%、滞后 0 帧）。
+                        const float mv = std::hypot(best->cx - at->cx, best->cy - at->cy);
+                        const float thr = std::fmax(selgate::kMeasJumpAbsPx,
+                                                    selgate::kMeasJumpRel * selgate::local_speed(*at));
+                        const bool reject = (ratio_eff > 0.0f) && mv > thr &&
+                                            at->hold_frames < selgate::kMeasMaxHold;
+                        if (reject) {
+                            // holding_previous：不更新几何，沿用上一帧的框。
+                            // ★ last_seen_ms 必须刷新 —— 目标确实还在（有候选匹配上了），
+                            //   不刷新会被 lost_grace 判成"丢失"，把刚稳住的锁定放掉。
+                            at->hold_frames++;
+                            at->rejected_total++;
+                            selector_holds_total_++;
+                            at->lost_frames = 0;
+                            at->last_seen_ms = now_ms;
+                        } else {
+                            // 认输放行这一帧：把这一跳记进历史 ⇒ 局部速度基准抬升，
+                            // 阈值随之放宽（真快移的目标被 hold 满 10 帧后自然恢复跟随）。
+                            if (mv > 0.0f) selgate::push_speed(*at, mv);
+                            at->hold_frames = 0;
+                            // 更新 track（框体 + 卡尔曼状态）
+                            at->box = best->box;
+                            at->cx = best->cx;
+                            at->cy = best->cy;
+                            at->lost_frames = 0;
+                            kalman_update(*at, best->box, cfg, now_ms);
+                        }
                         out.valid = true;
-                out.box = best->box;
+                        out.held = reject;
+                out.box = at->box;              // reject ⇒ 本帧输出沿用上一帧的框
                 out.target_id = at->id;
-                out.distance = std::sqrt(best->dist_sq);
-                out.lock_radius = std::max(1.0f, 0.06f * (best->box.x2 - best->box.x1));
+                {
+                    const float odx = (at->box.x1 + at->box.x2) * 0.5f - cx;
+                    const float ody = (at->box.y1 + at->box.y2) * 0.5f - cy;
+                    out.distance = std::sqrt(odx * odx + ody * ody);
+                }
+                out.lock_radius = std::max(1.0f, 0.06f * (at->box.x2 - at->box.x1));
                 out.reason = TargetSelection::kTrackLock;
                 last_reason_ = out.reason;
                 last_locked_dist_sq_ = best->dist_sq;  // 供丢失后切靶滞后比较用
                 // BB 对标：记录本帧选中点，供打分制的 stick（粘滞）项使用
-                last_target_x_ = best->box.x1 + (best->box.x2 - best->box.x1) * cfg.aim_ratio_x;
-                last_target_y_ = best->box.y1 + (best->box.y2 - best->box.y1) * cfg.aim_ratio_y;
+                last_target_x_ = at->box.x1 + (at->box.x2 - at->box.x1) * cfg.aim_ratio_x;
+                last_target_y_ = at->box.y1 + (at->box.y2 - at->box.y1) * cfg.aim_ratio_y;
                 has_last_target_ = true;
+                // V1.0.11：记上一帧输出框（供 continuity 判定：id 变了但框重叠 ⇒ 同一目标）
+                last_out_box_ = at->box;
+                last_out_box_ms_ = now_ms;
+                has_last_out_box_ = true;
                 return out;
             }
             // 激活 track 未匹配：丢失宽限
@@ -320,6 +435,27 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             active_track_ = -1;  // 激活 track 不存在（被清理）
         }
     }
+
+    // ---- V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）----
+    // 走到这里说明第 1 层没保住锁定（激活 track 掉了或被裁剪）。开火中不允许另选目标：
+    // 宁可本帧无目标，也不在压枪时把准星从正压着的目标甩到别人身上。
+    if (cfg.fire_active && had_active_lock) {
+        last_reason_ = TargetSelection::kNone;
+        return out;
+    }
+
+    // V1.0.11：continuity 判据（照 yu 的 continuity_reference_rect）——
+    //   新框与上一帧输出框 IoU ≥ 0.5 且框高比 ≤ 1.20 且间隔 ≤ 300ms
+    //   ⇒ 判为「同一个目标被重新编号」，上游据此**不重置**平滑器/PID（避免落点跳与重新起步）。
+    auto is_continuity = [&](const DetectionBox& b) -> bool {
+        if (!has_last_out_box_) return false;
+        if (static_cast<uint32_t>(now_ms - last_out_box_ms_) > selgate::kContinuityMaxGapMs) return false;
+        const float h0 = last_out_box_.y2 - last_out_box_.y1;
+        const float h1 = b.y2 - b.y1;
+        if (h0 <= 0.0f || h1 <= 0.0f) return false;
+        if (std::fmax(h0, h1) / std::fmin(h0, h1) > selgate::kContinuitySizeRatio) return false;
+        return selgate::box_iou(b, last_out_box_) >= selgate::kContinuityIou;
+    };
 
     // ---- 切靶防抖守卫（对齐 BB：target_switch_hysteresis + switch_cooldown）----
     // 只作用在「锁定已丢失、正要另选目标」的第 2/3 层；
@@ -385,7 +521,12 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     out.distance = std::sqrt(best_c->dist_sq);
                     out.lock_radius = std::max(1.0f, 0.06f * (best_c->box.x2 - best_c->box.x1));
                     out.reason = TargetSelection::kRectLock;
+            // V1.0.11：第 2 层本身是"位置匹配 ⇒ 大概率同一目标"，是否算连续性仍按框重叠判
+            out.continuity = is_continuity(best_c->box);
             last_reason_ = out.reason;
+            last_out_box_ = best_c->box;
+            last_out_box_ms_ = now_ms;
+            has_last_out_box_ = true;
             return out;
         }
     }
@@ -454,6 +595,31 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                 }
             }
             const Candidate& c = *chosen;
+            // ---- V1.0.11：切靶确认窗（照 yu 的 pending_switch_frames / selector_acquire_delay_ms）----
+            // 只在「刚丢了锁定（≤500ms）→ 正要另选」**且候选不止一个**时生效；
+            // 首次锁定、锁早就没了、单候选瞬移都立即生效（单目标世界没有"切错"的风险）。
+            const bool recent_lock_loss = has_last_out_box_ &&
+                static_cast<uint32_t>(now_ms - last_out_box_ms_) <= selgate::kLockLossWindowMs;
+            if (recent_lock_loss && cfg.switch_confirm_frames > 1 && cands.size() >= 2) {
+                const bool same_spot = has_pending_ &&
+                    std::hypot(c.cx - pending_cx_, c.cy - pending_cy_) <=
+                        selgate::kSwitchConfirmRadiusPx;
+                if (!same_spot) {
+                    pending_cx_ = c.cx;
+                    pending_cy_ = c.cy;
+                    pending_frames_ = 1;
+                    has_pending_ = true;
+                    last_reason_ = TargetSelection::kNone;
+                    return out;   // 本轮先不切
+                }
+                pending_frames_++;
+                if (pending_frames_ < cfg.switch_confirm_frames) {
+                    last_reason_ = TargetSelection::kNone;
+                    return out;   // 还没在同一处待够
+                }
+            }
+            has_pending_ = false;
+            pending_frames_ = 0;
             // 切靶防抖：冷却未过 / 新目标不够近 ⇒ 本帧不选新目标（返回无效）。
             // 宁可短暂无目标，也不在两个目标之间来回拉锯（对齐 BB 的 cooldown + hysteresis）。
             if (switch_blocked(c.dist_sq)) {
@@ -523,6 +689,11 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             last_target_y_ = c.box.y1 + (c.box.y2 - c.box.y1) * cfg.aim_ratio_y;
             has_last_target_ = true;
             out.reason = TargetSelection::kScore;
+            // V1.0.11：continuity —— id 是新建/复用的，但框与上一帧重叠 ⇒ 告诉上游别重置
+            out.continuity = is_continuity(c.box);
+            last_out_box_ = c.box;
+            last_out_box_ms_ = now_ms;
+            has_last_out_box_ = true;
             last_reason_ = out.reason;
             return out;
         }

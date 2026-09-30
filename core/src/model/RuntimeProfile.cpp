@@ -1064,7 +1064,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.reject_clip_top = obj_bool(*m, "reject_clip_top", false);
         p.mouse.clip_margin_px = static_cast<float>(obj_num(*m, "clip_margin_px", 6.0));
         p.mouse.clip_center_max_px = static_cast<float>(obj_num(*m, "clip_center_max_px", 105.0));
-        p.mouse.track_size_ratio = static_cast<float>(obj_num(*m, "track_size_ratio", 2.0));
+        // V1.0.11：默认 2.0 → 1.35（2.0 太宽，实测 92.3% 的坏量测从这过）
+        p.mouse.track_size_ratio = static_cast<float>(obj_num(*m, "track_size_ratio", 1.35));
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));
