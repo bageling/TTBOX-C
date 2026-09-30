@@ -236,9 +236,9 @@ int main() {
         check(got_move, "Case5 humanize 开启 -> 近距离也出现非零输出（接线生效）");
     }
 
-    // Case6: BB 三段查表压枪接线生效。
-    // 判据：近距离目标 PID 误差≈0（基线输出 0），压枪量只可能来自 recoil_bb 引擎；
-    // 预设1 段1 vert=1.5px、global_vert=1 ⇒ 约 2 count 的纯下压。
+    // Case6: yu 式速率压枪接线生效（2026-09-30 重做；原来测的是已删除的 BB 三段查表）。
+    // 判据：近距离目标 PID 误差≈0（基线输出 0），压枪量只可能来自压枪引擎；
+    // strength=100 × speed=1 ⇒ 300 px/s ⇒ 每帧（4ms）约 1.2px ≈ 1.8 count 的纯下压。
     {
         TestCtx ctx(false);
         auto& m = ctx.profile->mouse;
@@ -246,15 +246,11 @@ int main() {
         m.recoil.hotkey = 0x01;          // 左键作压枪热键
         m.recoil.hotkey2 = 0x00;
         m.recoil.hotkey_mode = 1;        // any
-        m.recoil_bb.enabled = true;
-        m.recoil_bb.preset = 1;
-        m.recoil_bb.global_vert = 1.0f;
-        m.recoil_bb.global_horiz = 0.0f;
-        m.recoil_bb.smooth = 0.0f;       // 关平滑，输出确定
-        m.recoil_bb.delay_ms = 0.0f;
-        m.recoil_bb.distance_limit = 0.0f;
-        m.recoil_bb.drift_enabled = false;
-        m.vertical_correction.enabled = false;  // 只看压枪本体
+        m.recoil.only_when_target_visible = false;  // 只看引擎本体，量测门控不参与
+        m.recoil.strength = 100.0f;
+        m.recoil.speed = 1.0f;
+        m.recoil.curve_strength = 0.0f;             // 关释放渐出，输出确定
+        m.recoil.roi_h = 300.0f;
         ctx.reapply();
         if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
         ctx.buttons.store(0x03);         // 左键(压枪) + 右键(瞄准)
@@ -264,7 +260,7 @@ int main() {
             return false;
         });
         ctx.thread.stop();
-        check(got_pull, "Case6 BB 三段查表压枪开启 -> 误差≈0 仍出现向下压枪量（接线生效）");
+        check(got_pull, "Case6 yu 式速率压枪开启 -> 误差≈0 仍出现向下压枪量（接线生效）");
     }
 
     // Case7: 新老提前量互斥（业主 2026-09-24 裁定「新版替老版，界面只留一套」）。

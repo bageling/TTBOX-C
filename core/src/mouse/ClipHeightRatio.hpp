@@ -20,6 +20,9 @@ public:
     static constexpr float kMinRatio = 0.8f;
     static constexpr float kMaxRatio = 12.0f;
 
+    // 换模型世代时清空（旧目标的比值与新目标无关，禁止跨世代继承）。
+    void reset() { per_target_ = 0.0f; per_target_id_ = -1; ema_ = 0.0f; }
+
     // 每帧喂一次。bottom_clipped = 本帧框底是否贴到裁剪区下边界。
     void observe(float box_w, float box_h, bool bottom_clipped, int track_id) {
         if (!(box_w > 1.0f) || !(box_h > 1.0f)) return;

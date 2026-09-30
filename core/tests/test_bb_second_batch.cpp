@@ -1,14 +1,12 @@
 // test_bb_second_batch.cpp — BB 对标第二批模块单元测试（2026-09-24）
 //
 // 覆盖：
-//   A. RecoilController BB 三段查表引擎（开关/延迟/距离门/三段边界/超时末段/
-//      最大下压截断/垂直修正渐变）
 //   C. Lead2 积分累积（开关/冷却/钳制/死区衰减/Y 抑制）
 //   D. HumanizeShaper（开关/过冲单调/制动/噪声有界/低通）
 //   E. AntiOvershoot（开关/内圈衰减帧数/越界冷却复位）
 //   F. SpeedAdaptiveKp（开关/静止乘子/移动乘子）
 //   G. GlobalWave（开关/幅度有界）
-//   H. RuntimeProfile 新键往返（recoil_bb / lead2 / humanize /
+//   H. RuntimeProfile 新键往返（lead2 / humanize /
 //      anti_overshoot / speed_adaptive_kp / global_wave）
 //
 // ★ 全默认（enabled=false）零输出是硬约束：逐模块都有 "默认关 ⇒ 行为零变化" 用例。
@@ -19,7 +17,6 @@
 #include "mouse/GlobalWave.hpp"
 #include "mouse/HumanizeShaper.hpp"
 #include "mouse/LeadPredictor.hpp"
-#include "mouse/RecoilController.hpp"
 #include "mouse/SpeedAdaptiveKp.hpp"
 #include "mouse/SpeedFluctuation.hpp"
 #include "mouse/AccuracySim.hpp"
@@ -42,203 +39,6 @@ void check(bool cond, const char* msg) {
 
 constexpr float kDt = 10.0f;     // 帧间隔 10ms（100Hz）
 constexpr float kPpc = 0.65f;    // px/count
-
-RecoilConfig make_recoil_cfg() {
-    RecoilConfig c;
-    c.enabled = true;
-    c.hotkey = 0x01;
-    c.hotkey2 = 0x00;
-    c.hotkey_mode = 1;
-    return c;
-}
-
-RecoilBbConfig make_bb_cfg() {
-    RecoilBbConfig b;
-    b.enabled = true;
-    b.preset = 3;                 // vert 三段 1.0 / 1.3 / 1.6，便于区分
-    b.preset_total_time_ms[0] = 1500.0f;
-    b.preset_total_time_ms[1] = 1500.0f;
-    b.preset_total_time_ms[2] = 1500.0f;
-    b.global_vert = 1.0f;         // 关掉全局倍率，直接看表值
-    b.global_horiz = 1.0f;
-    b.delay_ms = 0.0f;
-    b.smooth = 0.0f;              // 关平滑，便于断言精确值
-    b.distance_limit = 0.0f;      // 不限距离
-    b.drift_enabled = false;
-    b.max_down_distance = 0.0f;
-    b.adv_mult = 1.0f;
-    return b;
-}
-
-// ============================ A. Recoil BB 引擎 ============================
-
-void test_bb_disabled_zero() {
-    std::printf("[A1] BB 引擎默认关 ⇒ 零输出\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb;  // enabled = false（默认）
-    VerticalCorrectionConfig vc;
-    float sum = 0.0f;
-    for (int i = 0; i < 100; ++i) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        sum += std::fabs(o.recoil_y) + std::fabs(o.recoil_x) + std::fabs(o.vert_y) + std::fabs(o.vert_x);
-    }
-    check(sum == 0.0f, "bb.enabled=false ⇒ 全零输出（行为零变化）");
-}
-
-void test_bb_hotkey_not_pressed() {
-    std::printf("[A2] 热键未按 ⇒ 零输出\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();
-    VerticalCorrectionConfig vc;
-    float sum = 0.0f;
-    for (int i = 0; i < 100; ++i) {
-        const auto o = rc.update_bb(0x00, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        sum += std::fabs(o.recoil_y);
-    }
-    check(sum == 0.0f, "热键未按 ⇒ 不压枪");
-}
-
-void test_bb_delay() {
-    std::printf("[A3] 开火延迟：delay 前零输出\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();
-    bb.delay_ms = 50.0f;
-    VerticalCorrectionConfig vc;
-    // 前 4 帧（10/20/30/40ms，含上升沿那帧起算）应全零；第 6 帧（50ms）开始有输出
-    bool before_zero = true;
-    for (int i = 1; i <= 4; ++i) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        if (std::fabs(o.recoil_y) > 1e-6f) before_zero = false;
-    }
-    check(before_zero, "delay_ms=50 内不压");
-    float last = 0.0f;
-    for (int i = 5; i <= 8; ++i) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        last = o.recoil_y;
-    }
-    check(last > 0.0f, "delay 过后开始下压（Y>0）");
-}
-
-void test_bb_three_segments() {
-    std::printf("[A4] 三段查表边界（t = 1/3、2/3、超总时长）\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();   // total=1500 ⇒ 段边界 500 / 1000
-    VerticalCorrectionConfig vc;
-    // 每帧 10ms；先按 1 帧确认（第 1 帧 el=0 ⇒ seg1）
-    const auto o1 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o1.recoil_y - 1.0f / kPpc) < 1e-4f, "第 1 帧 = 段1 vert 1.0");
-
-    // 跑到 el≈600ms（段2）
-    for (int i = 2; i <= 61; ++i) {
-        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    }
-    const auto o2 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o2.recoil_y - 1.3f / kPpc) < 1e-4f, "el≈620ms = 段2 vert 1.3");
-
-    // 跑到 el≈1100ms（段3）
-    for (int i = 0; i < 48; ++i) {
-        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    }
-    const auto o3 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o3.recoil_y - 1.6f / kPpc) < 1e-4f, "el≈1100ms = 段3 vert 1.6");
-
-    // 超总时长仍用段3（持续压，不会停）
-    for (int i = 0; i < 60; ++i) {
-        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    }
-    const auto o4 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o4.recoil_y - 1.6f / kPpc) < 1e-4f, "el>总时长仍固定段3");
-}
-
-void test_bb_distance_gate() {
-    std::printf("[A5] 距离门 / 无目标策略\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();
-    bb.distance_limit = 80.0f;
-    VerticalCorrectionConfig vc;
-    const auto o = rc.update_bb(0x01, true, 200.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o.recoil_y) < 1e-6f, "目标距中心 200px > 80 ⇒ 不压");
-
-    RecoilController rc2;
-    const auto o2 = rc2.update_bb(0x01, false, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o2.recoil_y) < 1e-6f, "无目标且 no_target_always=false ⇒ 不压");
-
-    RecoilController rc3;
-    RecoilBbConfig bb3 = make_bb_cfg();
-    bb3.no_target_always = true;
-    const auto o3 = rc3.update_bb(0x01, false, 10.0f, 100.0f, 100.0f, cfg, bb3, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(o3.recoil_y > 0.0f, "no_target_always=true + 无目标 ⇒ 仍压");
-}
-
-void test_bb_max_down_clamp() {
-    std::printf("[A6] 最大下压距离截断 clampRecoilDown\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();
-    bb.max_down_distance = 2.0f;   // budget = fy + 2
-    VerticalCorrectionConfig vc;
-    // 目标在准星下方 1px ⇒ budget = 3px，表值 1.0px 不超 ⇒ 不截断
-    const auto o1 = rc.update_bb(0x01, true, 10.0f, 101.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o1.recoil_y - 1.0f / kPpc) < 1e-4f, "budget=3px > 1.0px ⇒ 原样");
-
-    RecoilController rc2;
-    RecoilBbConfig bb2 = make_bb_cfg();
-    bb2.max_down_distance = 2.0f;
-    // 目标在准星**上方** 5px ⇒ budget = -3 ⇒ 全截断为 0
-    const auto o2 = rc2.update_bb(0x01, true, 10.0f, 95.0f, 100.0f, cfg, bb2, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o2.recoil_y) < 1e-6f, "budget<=0 ⇒ 截断为 0");
-}
-
-void test_bb_vertical_ramp() {
-    std::printf("[A7] 垂直修正 + 力度渐变\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_recoil_cfg();
-    RecoilBbConfig bb = make_bb_cfg();
-    bb.preset = 1;
-    VerticalCorrectionConfig vc;
-    vc.enabled = true;
-    vc.strength = 1.0f;
-    vc.horiz = 0.0f;
-    vc.delay_ms = 0.0f;
-    vc.ramp1_enabled = true;
-    vc.ramp1_duration_ms = 100.0f;
-    vc.ramp1_start = 1.0f;
-    vc.ramp1_middle = 2.0f;
-    vc.ramp1_end = 4.0f;
-
-    // 热键上升沿那一帧 el=0 ⇒ 修正还没起算，输出为 0
-    const auto o0 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-    check(std::fabs(o0.vert_y) < 1e-6f, "el=0（上升沿帧）无垂直修正");
-
-    // 第 4 帧：el=30 ⇒ t=0.3 ⇒ 前半段 1.0→2.0 插值 = 1.6
-    float v4 = 0.0f;
-    for (int k = 2; k <= 4; ++k) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        v4 = o.vert_y;
-    }
-    check(std::fabs(v4 - 1.6f / kPpc) < 1e-3f, "渐变前半段（t<0.5）线性 start→middle");
-
-    // 第 9 帧：el=80 ⇒ t=0.8 ⇒ 后半段 2.0→4.0 插值 = 3.2
-    float v9 = 0.0f;
-    for (int k = 5; k <= 9; ++k) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        v9 = o.vert_y;
-    }
-    check(std::fabs(v9 - 3.2f / kPpc) < 1e-3f, "渐变后半段（t>0.5）middle→end");
-
-    // 第 12 帧：el=110 > duration ⇒ 固定 end=4.0
-    float v12 = 0.0f;
-    for (int k = 10; k <= 12; ++k) {
-        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
-        v12 = o.vert_y;
-    }
-    check(std::fabs(v12 - 4.0f / kPpc) < 1e-3f, "渐变跑满 ⇒ 固定 end");
-}
 
 // ============================ C. Lead2 ============================
 
@@ -599,15 +399,6 @@ void test_global_wave() {
 void test_profile_roundtrip() {
     std::printf("[H1] RuntimeProfile 新键序列化/解析往返\n");
     ttbox::core::RuntimeProfile p;
-    p.mouse.recoil_bb.enabled = true;
-    p.mouse.recoil_bb.preset = 2;
-    p.mouse.recoil_bb.preset_total_time_ms[2] = 1234.0f;
-    p.mouse.recoil_bb.preset_vert[2][1] = 1.75f;
-    p.mouse.recoil_bb.preset_horiz[1][2] = -3.5f;
-    p.mouse.recoil_bb.drift_enabled = true;
-    p.mouse.recoil_bb.drift_freq = 2.5f;
-    p.mouse.vertical_correction.ramp1_enabled = true;
-    p.mouse.vertical_correction.ramp1_start = 1.25f;
     p.mouse.lead2.enabled = true;
     p.mouse.lead2.gain = 0.075f;
     p.mouse.lead2.decay = 0.9f;
@@ -642,19 +433,6 @@ void test_profile_roundtrip() {
     const auto json = p.to_json();
     const auto q = ttbox::core::RuntimeProfile::from_json(json);
 
-    check(q.mouse.recoil_bb.enabled && q.mouse.recoil_bb.preset == 2,
-          "recoil_bb.enabled/preset 往返一致");
-    check(std::fabs(q.mouse.recoil_bb.preset_total_time_ms[2] - 1234.0f) < 1e-3f,
-          "recoil_bb.preset_total_time_ms[2] 往返一致");
-    check(std::fabs(q.mouse.recoil_bb.preset_vert[2][1] - 1.75f) < 1e-4f,
-          "recoil_bb.preset_vert[2][1] 往返一致（二维表）");
-    check(std::fabs(q.mouse.recoil_bb.preset_horiz[1][2] + 3.5f) < 1e-4f,
-          "recoil_bb.preset_horiz[1][2] 往返一致（可为负）");
-    check(q.mouse.recoil_bb.drift_enabled && std::fabs(q.mouse.recoil_bb.drift_freq - 2.5f) < 1e-4f,
-          "recoil_bb 漂移键往返一致");
-    check(q.mouse.vertical_correction.ramp1_enabled &&
-              std::fabs(q.mouse.vertical_correction.ramp1_start - 1.25f) < 1e-4f,
-          "vertical_correction 渐变键往返一致");
     check(q.mouse.lead2.enabled && std::fabs(q.mouse.lead2.gain - 0.075f) < 1e-5f &&
               std::fabs(q.mouse.lead2.decay - 0.9f) < 1e-5f,
           "lead2 键往返一致");
@@ -694,7 +472,7 @@ void test_profile_defaults_zero_behavior() {
     ttbox::core::RuntimeProfile p;
     std::string err;
     check(p.validate(&err), "RuntimeProfile 默认值校验通过");
-    check(!p.mouse.recoil_bb.enabled && !p.mouse.lead2.enabled &&
+    check(!p.mouse.lead2.enabled &&
               !p.mouse.humanize.enabled && !p.mouse.anti_overshoot.enabled &&
               !p.mouse.speed_adaptive_kp.enabled && !p.mouse.global_wave.enabled,
           "第二批模块默认全关（输出链逐字节不变的前提）");
@@ -823,13 +601,6 @@ void test_accuracy_sim() {
 
 int main() {
     std::printf("=== test_bb_second_batch：BB 对标第二批模块测试 ===\n");
-    test_bb_disabled_zero();
-    test_bb_hotkey_not_pressed();
-    test_bb_delay();
-    test_bb_three_segments();
-    test_bb_distance_gate();
-    test_bb_max_down_clamp();
-    test_bb_vertical_ramp();
 
     test_lead2_disabled_zero();
     test_lead2_cooldown_then_integrate();

@@ -11,6 +11,7 @@
 #include "output/IHidOutput.hpp"
 #include "mouse/AimStateMachine.hpp"
 #include "mouse/ClipHeightRatio.hpp"
+#include "mouse/FrozenRect.hpp"     // V1.0.10：冻结落点（腿被切就停更新，yu holding_previous 思路）
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
@@ -22,7 +23,6 @@
 #include "mouse/ContinuousLead.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
-#include "mouse/RecoilClosedLoop.hpp"   // 开火期闭环纠偏（压枪 v1，2026-09-29）
 #include "mouse/TriggerController.hpp"
 #include "mouse/BezierTrajectory.hpp"
 // BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
@@ -105,18 +105,13 @@ public:
         uint64_t trigger_fire_count = 0;  // 自 start() 起累计开火次数（按下命令成功投递才算）
         bool trigger_active = false;      // 任一扳机处于激活态（面板 pill 用）
         uint8_t trigger_button = 0;       // 最近一次开火使用的键位掩码（0 = 未开火）
-        // ---- 开火期闭环纠偏遥测（压枪 v1，2026-09-29）----
-        // 压枪此前**零观测面**（ttbox-web.py 里没有任何 recoil 运行期字段）⇒ 优化无从验收。
-        // 这四个字段就是闭环的观测面：state 是状态机档位、integral 是内部积分量、
-        // add_y 是实际注入量（可与 scheduler_input_y − pid_output_y 的差分互为印证）、
-        // obs_frames 说明"这次开火已经连续有效观测了多少帧"。
-        float recoil_cl_add_y = 0.0f;    // 本帧闭环注入的下压量（count）
-        float recoil_cl_integral = 0.0f; // 闭环积分量（px·s）
-        int recoil_cl_state = 0;         // 0=未开火/无观测 1=观测中 2=正在压
-        int recoil_cl_obs_frames = 0;    // 本次开火内的连续有效观测帧数
-        float recoil_cl_p_term = 0.0f;   // 上一帧比例项贡献（限幅前，count）
-        float recoil_cl_i_term = 0.0f;   // 上一帧积分项贡献（限幅前，count）
-        float recoil_cl_baseline = 0.0f; // 偏差底子（px；NaN 表示未就绪，序列化时转 0）
+        // ---- 压枪遥测（2026-09-30 对照 yu 重做后收敛为 3 个字段）----
+        // 旧版有 7 个闭环字段（add_y/integral/state/obs_frames/p_term/i_term/baseline），
+        // 随闭环引擎一并删除。现在压枪只有一条 yu 式速率链路，观测面就三样：
+        // 本帧注入量、本次开火累计下压量、当前拉力。
+        float recoil_add_y = 0.0f;     // 本帧压枪注入的下压量（count）
+        float recoil_acc_px = 0.0f;    // 本次开火累计下压量（px，受 roi_h 钳制）
+        float recoil_rate_px_s = 0.0f; // 当前拉力 = 3×strength×speed（px/s；未激活为 0）
     };
     AimThread() = default;
     ~AimThread() { stop(); }
@@ -169,8 +164,7 @@ private:
     PullCurve pull_curve_;          // 拉枪曲线：远距离拉枪时附加弧线/抖动（deadzone 前生效）
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
-    RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
-    RecoilClosedLoop recoil_cl_;    // 开火期闭环纠偏（压枪 v1，2026-09-29；默认关，不开时零影响）
+    RecoilController recoil_;       // 压枪引擎（2026-09-30 对照 yu 重做：单套速率模型）
     // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
     // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
     TriggerController trigger_;
@@ -208,18 +202,13 @@ private:
     // 状态机抽在 ClipHeightRatio.hpp（纯状态、可单测）。为什么不能写死一个「人体宽高比」：
     // 本模型 cls5 的框宽高比在 0.29~0.52 之间漂（远距离常只框上半身），写死会过度修正。
     ClipHeightRatioTracker clip_ratio_tracker_;
-    // ---- V1.0.06：压枪观测的「短暂丢目标容忍」----
-    // 定障（2026-09-29 21:00 实机，MR277 + 无框瞄具）：开火段内 has_tgt/nbox 每 60~90ms
-    // （约一个推理帧的节奏）跳一次 0，而 RecoilClosedLoop::update() 只要 obs_ok=false 就
-    // reset_fire() 清积分 ⇒ 积分永远爬不过 start_frames ⇒ 输出≈0
-    //（实测 8 秒开火窗内 intg 峰值仅 1.1，而满格需要 12；顶格率全段 0%）。
-    // 修法：锁定中若目标**短暂**丢失，容忍窗内沿用上一次有效观测继续压；超窗即严格清零。
-    // 依据：实测丢失间隔 60~90ms ⇒ 取 150ms 可覆盖连续两次丢帧，又不至于"打幽灵"。
-    // ★ 只放宽压枪这一路；瞄准侧不动 —— TargetSelector 在无检测时仍立即返回 invalid，
-    //   那是"不允许凭旧坐标产生移动"的安全红线（见 TargetSelector.cpp:131）。
-    static constexpr uint64_t kClObsHoldUs = 150000ull;   // 150 ms
-    uint64_t last_cl_obs_us_ = 0;    // 最近一次"有目标 && 框高稳定"的时刻（0 = 尚未起算）
-    float last_cl_err_y_ = 0.0f;     // 该时刻的归一域误差（容忍窗内沿用）
+    // ---- V1.0.10：冻结落点（腿被切 ⇒ 停止更新框，用上一次能看全的框算落点）----
+    // 优先于 V1.0.09 的外推；没有可冻结的框（拐角撞脸）时才退回外推。零新配置项。
+    FrozenRectTracker frozen_rect_;
+    // ---- 压枪观测的「短暂丢目标容忍」：2026-09-30 已删 ----
+    // 旧版这里有一条 kClObsHoldUs=150ms 的"沿用上次有效观测"补丁，是为已删除的闭环引擎
+    // 续积分用的。对照 yu 后不需要了：yu 的做法是**开火门控 + target_lost_release_ms
+    // 渐出**（压枪在释放窗内自己继续跑，不依赖"沿用旧误差"）。同一个坑换了个正确解法。
     // ---- V3 阶段 5：拟人化抖动前馈扣除（2026-09-28）----
     // 两条拟人化链（humanize / personal_trajectory）都只往输出里"加"抖动，
     // 但抖动会在 response_delay_ms（实测 51ms）之后出现在采集画面里，被 PID 当成

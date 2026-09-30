@@ -11,10 +11,11 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-29 起产品版本为 "V1.0.09"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-30 起产品版本为 "V1.0.10"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
-project(ttbox_core VERSION 1.0.09 LANGUAGES CXX)
+#   V1.0.10 相对 V1.0.09：贴边帧改用冻结落点（FrozenRect）＋压枪按 yu 收敛成单一速率引擎。
+project(ttbox_core VERSION 1.0.10 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -678,14 +679,9 @@ if(TTBOX_CORE_BUILD_TESTS)
                         target_link_libraries(test_recoil PRIVATE ttbox_core)
                         add_test(NAME test_recoil COMMAND test_recoil)
 
-  # 开火期闭环纠偏（压枪 v1，2026-09-29）：观测门控/观察期/单向/限幅/默认关/闭环收敛。
-  #   只依赖 header-only 的 mouse/RecoilClosedLoop.hpp ⇒ host 与板端同跑一份断言。
-  add_executable(test_recoil_closed_loop tests/test_recoil_closed_loop.cpp)
-  target_link_libraries(test_recoil_closed_loop PRIVATE ttbox_core)
-  add_test(NAME test_recoil_closed_loop COMMAND test_recoil_closed_loop)
-
-  # BB 对标第二批（2026-09-24）：压枪三段查表 / 两代提前量 / 拟人化链 / 抗过冲 /
+  # BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 /
   # 速度自适应 Kp / 全局正弦扰动 + 新配置键往返 —— 每模块含"默认关=行为零变化"用例
+  # （压枪三段查表 / 垂直修正 / 开火期闭环 三块 2026-09-30 已删，测试随之摘除）
   add_executable(test_bb_second_batch tests/test_bb_second_batch.cpp)
   target_link_libraries(test_bb_second_batch PRIVATE ttbox_core)
   add_test(NAME test_bb_second_batch COMMAND test_bb_second_batch)

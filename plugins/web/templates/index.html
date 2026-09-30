@@ -5585,12 +5585,13 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
           <div class="assist-section-stack">
             <section id="assist-section-recoil" class="assist-section is-active" data-assist-section>
               <div class="assist-grid control-group-grid">
-                <article class="module-tile assist-card-recoil">
+                <article class="module-tile is-three">
                   <div class="module-title">
                     <h3>压枪</h3>
                     <label class="switch"><input id="recoil_enabled" data-config type="checkbox"><span></span></label>
                   </div>
                   <div class="assist-section-body">
+                    <div class="field-hint">开火期间按固定速率往下拉，拉速 = 3 × 拉力 × 速度（像素/秒），跟帧率无关。调法只有两步：压不够加拉力，压过头减拉力；速度倍率是细调。</div>
                     <div class="tile-subtitle">触发键</div>
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">主按键<select id="recoil_hotkey" data-config></select><span class="field-hint">压枪的主要触发键，通常保持左键。</span></label>
@@ -5602,126 +5603,23 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                         </select>
                         <span class="field-hint">选了副按键后，决定任一键触发还是两键同时按住才触发。</span>
                       </label>
-                      <label class="field">目标距离上限 px<input id="recoil_bb_distance_limit" data-config type="number" min="0" step="5"><span class="field-hint">目标离准星超过它就不压；0 为不限。</span></label>
                     </div>
-                    <div class="tile-subtitle">下压量</div>
+                    <div class="tile-subtitle">拉力</div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="field">开火后延迟 ms<input id="recoil_bb_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按下热键后先等这么久再压，避免单点时误压。</span></label>
-                      <label class="field">一阶平滑<input id="recoil_bb_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">每帧下压量与上一帧混合，越大越柔；0 为不平滑。</span></label>
-                      <label class="field">最大下压距离 px<input id="recoil_bb_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">从准星起最多下压这么多像素就停；0 为不限。</span></label>
-                      <label class="field">扳机联动倍率<input id="recoil_bb_adv_mult" data-config type="number" min="0" max="2" step="0.05"><span class="field-hint">自动扳机开火时整体压枪量的倍率，默认 0.9。</span></label>
+                      <label class="field">拉力<input id="recoil_strength" data-config type="number" min="0" max="300" step="5"><span class="field-hint">下压快慢的主旋钮，0~300，默认 100。压不够就加，压过头就减。</span></label>
+                      <label class="field">速度倍率<input id="recoil_speed" data-config type="number" min="0.1" max="3" step="0.1"><span class="field-hint">拉力之上的第二级倍率，0.1~3，默认 1。要微调就动它。</span></label>
+                      <label class="field">累计上限 px<input id="recoil_roi_h" data-config type="number" min="0" step="10"><span class="field-hint">一次开火最多往下压这么多像素就停住；0 = 不限制。默认 300。</span></label>
+                      <label class="field">松手渐出<input id="recoil_curve_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">松开按键后不立刻停，而是在 80 毫秒内把力道收掉。0 = 硬停，1 = 完全慢收。默认 0.6。</span></label>
                     </div>
+                    <div class="tile-subtitle">门控</div>
                     <div class="check-row">
-                      <label class="check-line"><input id="recoil_bb_no_target_always" data-config type="checkbox"> 无目标时也压枪</label>
+                      <label class="check-line"><input id="recoil_only_when_target_visible" data-config type="checkbox"> 仅有目标时压枪</label>
+                      <label class="check-line"><input id="recoil_trigger_delay_enabled" data-config type="checkbox"> 延迟触发（防单点误压）</label>
                     </div>
-                    <div class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</div>
-                    <div class="tile-subtitle">开火期闭环纠偏（自动适应，不用选枪）</div>
-                    <div class="field-hint">开火后每一帧看实际偏了多少、下一帧反向补回来，连续纠偏让弹道自己收敛；不需要选枪、录枪或提前采数据。没有可靠的实时观测时整套不动作 —— 宁可前几发不压，也不拿上一次开火的经验去猜。</div>
-                    <div class="field-hint">它补的是瞄准本身补不了的那一环：纵向没有「积分」，枪口匀速上抬这种持续偏移只能靠积分吃掉。所以这套的正确用法是<b>慢修正</b>——慢慢把弹道拉回来，不是一帧猛踢。</div>
-                    <div class="field-hint">开着它的时候，上面的三段查表整套停用（两套不会叠加，避免过压和来回摆）；关掉就完全走老引擎。想对比两套效果，只切这一个勾就行。</div>
+                    <div class="field-hint">勾上「仅有目标时压枪」：没识别到人就不压，避免对着空气压。目标框被画面边缘截断的那几帧也按「没看清」处理，不压 —— 那条截断帧上的落点算不准。</div>
                     <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="recoil_cl_enabled" data-config type="checkbox"> 启用闭环纠偏（顶替上面的三段查表）</label>
-                      <label class="field">即时纠偏比例<input id="recoil_cl_kp" data-config type="number" min="0" step="0.1"><span class="field-hint">默认 0，不要动。瞄准本身已经有一份比例纠正，这里再加一份就是两条腿抢同一个轮子 ⇒ 会来回摆（上一版摆动的真凶）。</span></label>
-                      <label class="field">纠偏强度<input id="recoil_cl_gain" data-config type="number" min="0" step="0.05"><span class="field-hint">每累计 1 像素·秒的偏差补多少 count 下压，也就是"修得快不快"。压不够就加，开始摆就减。</span></label>
-                      <label class="field">积分上限 px·s<input id="recoil_cl_integral_max" data-config type="number" min="0" step="1"><span class="field-hint">偏差累计到这么多就不再涨，防止越压越狠。</span></label>
-                      <label class="field">起步观测帧数<input id="recoil_cl_start_frames" data-config type="number" min="1" step="1"><span class="field-hint">连续看清目标这么多帧后才开始压；前面几帧不压是故意的。</span></label>
-                      <label class="field">单帧下压上限<input id="recoil_cl_press_max_count" data-config type="number" min="0" step="0.5"><span class="field-hint">一帧最多补这么多 count（0 = 不限），作为安全阀。按 0.65 px/count 算，3 ≈ 每秒 490 像素的下压能力。</span></label>
-                      <label class="field">单帧变化上限<input id="recoil_cl_slew_count_per_frame" data-config type="number" min="0" step="0.1"><span class="field-hint">每帧输出最多变这么多 count（0 = 不限）= 阻尼，防止一帧猛踢。这是压摆动的旋钮。</span></label>
-                      <label class="field">底子学习速度 ms<input id="recoil_cl_baseline_tau_ms" data-config type="number" min="0" step="100"><span class="field-hint">没开火时学"平时偏差底子"的速度，越小跟得越快。0 = 不学底子（第一版口径，一般更差）。</span></label>
-                    </div>
-                    <div class="field-hint">这套自动纠偏只管<b>纵向</b>（枪口上抬）。横向那条左右漂它不管，由下面这个勾决定谁来补。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="recoil_cl_keep_horiz" data-config type="checkbox"> 保留横向补偿（横向仍走上面的三段查表）</label>
-                    </div>
-                    <div class="field-hint">默认勾上。不勾 = 横向也交给瞄准自己拉（旧行为，实机测下来弹道会往左漂出人）。</div>
-                  </div>
-                </article>
-                <article class="module-tile is-wide">
-                  <div class="module-title"><strong>三段查表</strong></div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">开火时长按「总时长」三等分，每段用各自的垂直/水平量。三个预设互不影响，切换预设只换下面这组数值。</div>
-                    <div class="tile-subtitle">预设与总时长</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">当前预设
-                        <select id="recoil_bb_preset" data-config>
-                          <option value="1">预设 1</option>
-                          <option value="2">预设 2</option>
-                          <option value="3">预设 3</option>
-                        </select>
-                        <span class="field-hint">换枪就换预设，三套各自独立保存。</span>
-                      </label>
-                      <label class="field">总时长 ms<input id="recoil_bb_seg_total" data-config type="number" min="1" step="50"><span class="field-hint">该预设按住多久算压完；超过后固定用第 3 段继续压。</span></label>
-                    </div>
-                    <div class="tile-subtitle">每段每帧量（垂直 / 水平）</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">第 1 段垂直 px<input id="recoil_bb_seg_v1" data-config type="number" step="0.1"><span class="field-hint">开火最开始那 1/3 时间，每帧往下压多少（正数 = 向下压）。</span></label>
-                      <label class="field">第 1 段水平 px<input id="recoil_bb_seg_h1" data-config type="number" step="0.1"><span class="field-hint">同时间段每帧左右修正多少：正数 = 往右，负数 = 往左。</span></label>
-                      <label class="field">第 2 段垂直 px<input id="recoil_bb_seg_v2" data-config type="number" step="0.1"><span class="field-hint">中间 1/3 时间每帧下压量。枪口一般这时候抬得最凶，往往比第 1 段大。</span></label>
-                      <label class="field">第 2 段水平 px<input id="recoil_bb_seg_h2" data-config type="number" step="0.1"><span class="field-hint">正数 = 往右，负数 = 往左。</span></label>
-                      <label class="field">第 3 段垂直 px<input id="recoil_bb_seg_v3" data-config type="number" step="0.1"><span class="field-hint">最后 1/3 时间每帧下压量。按住超过「总时长」后也一直用这一段。</span></label>
-                      <label class="field">第 3 段水平 px<input id="recoil_bb_seg_h3" data-config type="number" step="0.1"><span class="field-hint">正数 = 往右，负数 = 往左。</span></label>
-                    </div>
-                    <div class="tile-subtitle">全局倍率</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">垂直全局倍率<input id="recoil_bb_global_vert" data-config type="number" min="0" max="3" step="0.05"><span class="field-hint">上面三段的下压量统一乘这个数：1 = 不变，小于 1 压得轻，大于 1 压得重。压过头了调小它最快。</span></label>
-                      <label class="field">水平全局倍率<input id="recoil_bb_global_horiz" data-config type="number" min="0" max="3" step="0.05"><span class="field-hint">三段水平修正统一乘这个数，用法同上。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>Y 路屏蔽</strong>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="check-field">
-                      <label class="check-line"><input id="recoil_bb_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路下压</label>
-                      <span class="field-hint">按下面的乘子削弱垂直下压；0 为完全屏蔽（只做水平修正）。</span>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">屏蔽乘子<input id="recoil_bb_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile is-full">
-                  <div class="module-title">
-                    <strong>垂直修正</strong>
-                    <label class="switch"><input id="vc_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">和压枪可以同时生效，它是直接再加一份下压量（不是乘倍率）。压枪那套三段查表没调好时，可以用它单独补一点。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">每帧下压 px<input id="vc_strength" data-config type="number" min="0" step="0.1"><span class="field-hint">开火期间每一帧往下压多少像素。压不够就加，压过头就减。</span></label>
-                      <label class="field">水平修正 px/帧<input id="vc_horiz" data-config type="number" step="0.1"><span class="field-hint">每帧左右补多少：正数 = 往右，负数 = 往左。</span></label>
-                      <label class="field">等多久开始 ms<input id="vc_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按下开火键后先等这么久再开始压（1000 毫秒 = 1 秒）。单点时不想被压到就调大。</span></label>
-                      <label class="field">最多压到多少 px<input id="vc_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">从准星起最多往下压这么多像素就停住；0 = 不限制。</span></label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="vc_no_target" data-config type="checkbox"> 无目标时也修正</label>
-                      <label class="field">屏蔽乘子<input id="vc_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
-                      <label class="check-line"><input id="vc_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路（垂直修正）</label>
-                    </div>
-                    <div class="tile-subtitle">力度渐变（三段只能生效一个，排在上面的优先）</div>
-                    <div class="field-hint">让下压力度在开火过程中慢慢变化（都是倍率：1 = 不变）。时间过半取「起始→中段」的中间值，跑满时长后固定用「末段」。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="vc_ramp1_enabled" data-config type="checkbox"> 渐变 1</label>
-                      <label class="field">时长 ms<input id="vc_ramp1_duration_ms" data-config type="number" min="0" step="50"><span class="field-hint">这段渐变跑多久（1000 毫秒 = 1 秒）。</span></label>
-                      <label class="field">起始<input id="vc_ramp1_start" data-config type="number" step="0.05"><span class="field-hint">刚开火时下压力度乘多少。1 = 不变，1.4 = 开头压得重一点。</span></label>
-                      <label class="field">中段<input id="vc_ramp1_middle" data-config type="number" step="0.05"><span class="field-hint">开火到一半时的倍率。</span></label>
-                      <label class="field">末段<input id="vc_ramp1_end" data-config type="number" step="0.05"><span class="field-hint">这段跑完之后的倍率，之后一直用它。设 0.01 = 后面基本不再压。</span></label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="vc_ramp2_enabled" data-config type="checkbox"> 渐变 2</label>
-                      <label class="field">时长 ms<input id="vc_ramp2_duration_ms" data-config type="number" min="0" step="50"></label>
-                      <label class="field">起始<input id="vc_ramp2_start" data-config type="number" step="0.05"></label>
-                      <label class="field">中段<input id="vc_ramp2_middle" data-config type="number" step="0.05"></label>
-                      <label class="field">末段<input id="vc_ramp2_end" data-config type="number" step="0.05"></label>
-                    </div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="check-line"><input id="vc_ramp3_enabled" data-config type="checkbox"> 渐变 3</label>
-                      <label class="field">时长 ms<input id="vc_ramp3_duration_ms" data-config type="number" min="0" step="50"></label>
-                      <label class="field">起始<input id="vc_ramp3_start" data-config type="number" step="0.05"></label>
-                      <label class="field">中段<input id="vc_ramp3_middle" data-config type="number" step="0.05"></label>
-                      <label class="field">末段<input id="vc_ramp3_end" data-config type="number" step="0.05"></label>
+                      <label class="field">目标丢失后继续压 ms<input id="recoil_target_lost_release_ms" data-config type="number" min="0" max="3000" step="20"><span class="field-hint">目标短暂丢失（换弹、过烟、被挡）时还继续压多久，0 = 立即松手。默认 300。</span></label>
+                      <label class="field">延迟时长 ms<input id="recoil_trigger_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按住超过这么久才真正开始压，单点一下就松手不会触发。默认 120。</span></label>
                     </div>
                   </div>
                 </article>
@@ -5760,9 +5658,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <div class="tile-subtitle">联动</div>
                     <div class="check-row">
                       <label class="check-line"><input id="trigger2_with_aim" data-config type="checkbox"> 附带自瞄</label>
-                      <label class="check-line"><input id="trigger2_with_crosshair" data-config type="checkbox"> 中心须被目标框覆盖</label>
                       <label class="check-line"><input id="trigger2_with_simple_recoil" data-config type="checkbox"> 联动简易压枪</label>
-                      <label class="check-line"><input id="trigger2_with_adv_recoil" data-config type="checkbox"> 联动进阶压枪</label>
                       <label class="check-line"><input id="trigger2_precision_enabled" data-config type="checkbox"> 精度模拟</label>
                     </div>
                     <div class="field-grid compact assist-field-pair">
@@ -6729,51 +6625,13 @@ const BB_CTRL_MODULES = [
     ["dir_right", "b", false],
     ["min_move", "n", 0.1],
   ]],
-  ["vc", [
-    ["enabled", "b", true],
-    ["no_target", "b", false],
-    ["strength", "n", 1.0],
-    ["horiz", "n", 0.0],
-    ["delay_ms", "n", 0.0],
-    ["max_down_distance", "n", 0.0],
-    ["y_suppress_enabled", "b", false],
-    ["y_suppress_strength", "n", 0.0],
-    ["ramp1_enabled", "b", false],
-    ["ramp1_duration_ms", "n", 1300.0],
-    ["ramp1_start", "n", 1.4],
-    ["ramp1_middle", "n", 1.6],
-    ["ramp1_end", "n", 0.01],
-    ["ramp2_enabled", "b", false],
-    ["ramp2_duration_ms", "n", 2000.0],
-    ["ramp2_start", "n", 1.0],
-    ["ramp2_middle", "n", 0.5],
-    ["ramp2_end", "n", 0.1],
-    ["ramp3_enabled", "b", false],
-    ["ramp3_duration_ms", "n", 2000.0],
-    ["ramp3_start", "n", 1.0],
-    ["ramp3_middle", "n", 0.5],
-    ["ramp3_end", "n", 0.1],
-  ]],
-  ["recoil_cl", [
-    ["enabled", "b", false],
-    ["kp", "n", 0.0],
-    ["gain", "n", 0.25],
-    ["integral_max", "n", 12.0],
-    ["start_frames", "i", 6],
-    ["press_max_count", "n", 3.0],
-    ["slew_count_per_frame", "n", 0.3],
-    ["baseline_tau_ms", "n", 2000.0],
-    ["keep_horiz", "b", true],
-  ]],
   ["trigger2", [
     ["enabled", "b", false],
     ["key1", "key", 16],
     ["key2", "key", 0],
     ["fire_button", "key", 1],
     ["with_aim", "b", true],
-    ["with_crosshair", "b", false],
     ["with_simple_recoil", "b", false],
-    ["with_adv_recoil", "b", false],
     ["confidence", "n", 0.5],
     ["first_err", "n", 30.0],
     ["first_delay", "n", 0.0],
@@ -6792,18 +6650,15 @@ const BB_CTRL_MODULES = [
     ["stop_detect_range", "n", 80.0],
     ["stop_detect_interval", "i", 10],
   ]],
-  ["recoil_bb", [
-    ["preset", "i", 1],
-    ["global_vert", "n", 0.5],
-    ["global_horiz", "n", 0.5],
-    ["delay_ms", "n", 50.0],
-    ["smooth", "n", 0.9],
-    ["distance_limit", "n", 80.0],
-    ["no_target_always", "b", false],
-    ["y_suppress_enabled", "b", false],
-    ["y_suppress_strength", "n", 0.0],
-    ["max_down_distance", "n", 0.0],
-    ["adv_mult", "n", 0.9],
+  ["recoil", [
+    ["only_when_target_visible", "b", true],
+    ["target_lost_release_ms", "n", 300.0],
+    ["trigger_delay_enabled", "b", false],
+    ["trigger_delay_ms", "n", 120.0],
+    ["strength", "n", 100.0],
+    ["speed", "n", 1.0],
+    ["curve_strength", "n", 0.6],
+    ["roi_h", "n", 300.0],
   ]],
   ["selector", [
     ["lock_hold_ms", "n", 0.0],
@@ -6824,7 +6679,7 @@ const BB_CTRL_MODULES = [
 
 // 每个分区管哪些模块（「恢复本页默认值」按这张表取值）。
 const BB_SECTION_MODULES = {
-  "assist-section-recoil": ["recoil_bb", "vc", "recoil_cl"],
+  "assist-section-recoil": ["recoil"],
   "assist-section-trigger": ["trigger2"],
   "assist-section-lead": ["lead2"],
   "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "bezier"],
@@ -6836,9 +6691,9 @@ const MOVEMENT_CONTROL_DEFAULTS = {
   controller: CONTROLLER_DEFAULTS,
 };
 const RECOIL_DEFAULTS = {
-  // 压枪面板只剩「开关 + 触发键」这一组共用参数（算法换 BB 三段查表，
-  // 见 bb-port/06 与业主 2026-09-24 裁定）；老速率模型的 strength/speed/
-  // humanize_* 仍在 Core 与 JSON 里保留（已装机设备的旧值不丢），但面板不再暴露。
+  // 压枪面板的共用参数（开关 + 触发键）；算法参数（strength/speed/roi_h/
+  // curve_strength/门控）在 BB_CTRL_MODULES 的 recoil 块里，两边一起构成
+  // mouse.recoil 这个子对象。
   enabled: false,
   hotkey: "left",
   hotkey2: "",
@@ -9486,90 +9341,6 @@ function collectControllerModules() {
   return out;
 }
 
-// ---- 压枪三段查表：三预设数据放在本地模型，面板只显示当前预设那一组 ----
-// Core 存的是完整数组（preset_total_time_ms[3] / preset_vert[3][3] / preset_horiz[3][3]），
-// 面板按裁定「换枪就换预设、切预设只换下面这组数值」呈现 ⇒ 切预设时先把输入框那组
-// 写回镜像，再渲染新的一组；提交时整体发三个数组，避免"切一下就丢另外两套"。
-const RECOIL_BB_SEG_DEFAULTS = {
-  total: [1500, 1500, 1500],
-  vert: [[1.5, 1.5, 1.5], [1.5, 1.5, 1.5], [1.0, 1.3, 1.6]],
-  horiz: [[0, 0, 0], [-2, -2, -2], [0, 0, 0]],
-};
-const recoilBbPresetState = {
-  total: RECOIL_BB_SEG_DEFAULTS.total.slice(),
-  vert: RECOIL_BB_SEG_DEFAULTS.vert.map((row) => row.slice()),
-  horiz: RECOIL_BB_SEG_DEFAULTS.horiz.map((row) => row.slice()),
-  activeIndex: 0,
-};
-
-function recoilBbPresetIndexFromPanel() {
-  const raw = Number(getNumber("recoil_bb_preset", 1));
-  const index = Math.round(Number.isFinite(raw) ? raw : 1) - 1;
-  return Math.min(2, Math.max(0, index));
-}
-
-function recoilBbNumber(id, fallback) {
-  const value = Number(getNumber(id, fallback));
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function pushRecoilBbInputsToPresetState() {
-  const i = recoilBbPresetState.activeIndex;
-  recoilBbPresetState.total[i] = recoilBbNumber("recoil_bb_seg_total", RECOIL_BB_SEG_DEFAULTS.total[i]);
-  for (let seg = 0; seg < 3; seg += 1) {
-    recoilBbPresetState.vert[i][seg] = recoilBbNumber(
-      `recoil_bb_seg_v${seg + 1}`, RECOIL_BB_SEG_DEFAULTS.vert[i][seg]);
-    recoilBbPresetState.horiz[i][seg] = recoilBbNumber(
-      `recoil_bb_seg_h${seg + 1}`, RECOIL_BB_SEG_DEFAULTS.horiz[i][seg]);
-  }
-}
-
-function renderRecoilBbPresetInputs() {
-  const i = recoilBbPresetState.activeIndex;
-  setValue("recoil_bb_seg_total", recoilBbPresetState.total[i]);
-  for (let seg = 0; seg < 3; seg += 1) {
-    setValue(`recoil_bb_seg_v${seg + 1}`, recoilBbPresetState.vert[i][seg]);
-    setValue(`recoil_bb_seg_h${seg + 1}`, recoilBbPresetState.horiz[i][seg]);
-  }
-}
-
-function populateRecoilBbPresets(controller) {
-  const src = controller || {};
-  const readVec = (key, fallback) => {
-    const v = src[key];
-    if (!Array.isArray(v) || v.length !== fallback.length || !v.every((x) => Number.isFinite(Number(x)))) {
-      return fallback.slice();
-    }
-    return v.map((x) => Number(x));
-  };
-  const readTable = (key, fallback) => {
-    const v = src[key];
-    const shaped = Array.isArray(v) && v.length === 3
-      && v.every((row) => Array.isArray(row) && row.length === 3
-        && row.every((x) => Number.isFinite(Number(x))));
-    if (!shaped) {
-      return fallback.map((row) => row.slice());
-    }
-    return v.map((row) => row.map((x) => Number(x)));
-  };
-  recoilBbPresetState.total = readVec("recoil_bb_preset_total_time_ms", RECOIL_BB_SEG_DEFAULTS.total);
-  recoilBbPresetState.vert = readTable("recoil_bb_preset_vert", RECOIL_BB_SEG_DEFAULTS.vert);
-  recoilBbPresetState.horiz = readTable("recoil_bb_preset_horiz", RECOIL_BB_SEG_DEFAULTS.horiz);
-  recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
-  renderRecoilBbPresetInputs();
-}
-
-// 提交三段查表：当前预设的输入框收进镜像，再整体发出三预设数组
-function collectRecoilBbPresets() {
-  recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
-  pushRecoilBbInputsToPresetState();
-  return {
-    recoil_bb_preset_total_time_ms: recoilBbPresetState.total.slice(),
-    recoil_bb_preset_vert: recoilBbPresetState.vert.map((row) => row.slice()),
-    recoil_bb_preset_horiz: recoilBbPresetState.horiz.map((row) => row.slice()),
-  };
-}
-
 function populateForm(config) {
   if (!config) {
     return;
@@ -9621,15 +9392,14 @@ function populateForm(config) {
   updateDynamicOffsetControlLimits({ clampValues: true });
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
 
-  // 压枪：面板只留一套（「新版替老版」）—— 总开关同时驱动 BB 三段查表引擎，
-  // 其余参数归「三段查表 / 水平漂移 / 垂直修正」三张卡片，由 BB_CTRL_MODULES 表驱动。
+  // 压枪：开关与触发键走 config.recoil，其余（拉力/速度/上限/渐出/门控）走
+  // BB_CTRL_MODULES 的 recoil 前缀，即 controller_recoil_* 之外的扁平键 recoil_*。
   setCheckbox("recoil_enabled", recoil.enabled ?? RECOIL_DEFAULTS.enabled);
   setValue("recoil_hotkey", recoil.hotkey ?? RECOIL_DEFAULTS.hotkey);
   setValue("recoil_hotkey2", recoil.hotkey2 ?? RECOIL_DEFAULTS.hotkey2);
   setValue("recoil_hotkey_mode", recoil.hotkey_mode ?? RECOIL_DEFAULTS.hotkey_mode);
 
   populateControllerModules(controller);
-  populateRecoilBbPresets(controller);
 
   setValue("hailo_pipeline_depth", latency.hailo_pipeline_depth ?? 3);
 
@@ -9790,10 +9560,6 @@ function resetCurrentAssistSectionDefaults() {
   state.isPopulating = true;
   const sectionId = state.activeAssistSectionId || "assist-section-recoil";
   resetFieldDefaults(assistDefaultsForSection(sectionId));
-  if (sectionId === "assist-section-recoil") {
-    // 三段查表的三个预设是本地镜像，DOM 复位不会自动带回去 ⇒ 显式重建
-    populateRecoilBbPresets({});
-  }
   state.isPopulating = false;
   updateAssistModuleCollapseStates();
   requestConfigApply(0);
@@ -9865,9 +9631,8 @@ function collectConfig() {
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
-        // BB 对标模块（表驱动，见 BB_CTRL_MODULES）+ 压枪三段查表三数组
+        // BB 对标模块（表驱动，见 BB_CTRL_MODULES）
         ...collectControllerModules(),
-        ...collectRecoilBbPresets(),
       },
     },
     recoil: {
@@ -13454,12 +13219,6 @@ function bindEvents() {
     });
   }
 
-  // 三段查表：换预设时先把手上的那组收进本地镜像，再切组渲染（三套数值互不覆盖）
-  on("recoil_bb_preset", "change", () => {
-    pushRecoilBbInputsToPresetState();
-    recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
-    renderRecoilBbPresetInputs();
-  });
 
   on("savePresetButton", "click", () => runUiAction(async () => {
     const name = $("presetName").value.trim();

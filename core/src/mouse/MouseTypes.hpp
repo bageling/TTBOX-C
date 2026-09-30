@@ -286,21 +286,37 @@ struct JitterFeedforwardConfig {
 //   压枪量在 AimThread 输出链 pull_curve 之后、deadzone 之前注入 scaled_y，
 //   与 PID 输出融合后统一走 deadzone → remainder → int16 → 拟人化整形 → 热键 Gate。
 // 不照搬独立 recoil 链路；默认全关，保持旧行为。
+// ---------------------------------------------------------------------------
+// 压枪（recoil assist）—— 2026-09-30 按 yu（yuai v2）重做后的**唯一**配置面
+//
+// yu 的压枪引擎（aiassistance_daemon，汇编级还原见
+// .workbuddy/artifacts/yu-压枪深挖与TTBOX方案-2026-09-30.md §1）：
+//   每帧拉量 = 3 · strength · speed · ramp · dt    （纯 Y，X 恒 0，无枪械表）
+//   ramp     = 1 − curve_strength · smoothstep(clamp(t/80ms,0,1))，t = 释放后时长
+//   钳制     = 累计补偿量夹在 roi_h 内（yu 的 roi_w/roi_h）
+//   门控     = 开火按住 + 目标量测有效；目标丢失后 target_lost_release_ms 内继续跑
+//
+// 与旧版的差别（旧版臃肿在哪）：
+//   · 删掉 RecoilBbConfig 三段查表 / VerticalCorrectionConfig 三档渐变 /
+//     RecoilClConfig 开火期闭环 —— 三套并存互相打架，且 yu 一套都没有；
+//   · 删掉 humanize_jitter_*（yu 的抖动上限只有 2px，且我们 2026-09-29 已判定为
+//     重复抖动机制、零消费）；
+//   · 删掉缓入（旧版开火后 ramp 从 0 爬到 1，等于前 ~200ms 压不住）——
+//     yu 是**开火即全量**，只在释放段做渐出。
+// ---------------------------------------------------------------------------
 struct RecoilConfig {
     bool enabled = false;            // 总开关
-    int hotkey = 0x01;               // 开火热键位掩码（1=left，复用 y_axis_fire_hotkey 语义）
+    int hotkey = 0x01;               // 开火热键位掩码（1=left）
     int hotkey2 = 0x00;              // 副开火热键位掩码（0=不使用）
     int hotkey_mode = 1;             // 触发方式：1=any 任一命中 2=all 同时按下
-    bool only_when_target_visible = true;  // 仅有目标时才压（防空压）
-    float target_lost_release_ms = 200.0f; // 目标丢失后仍压时长（ms），0=立即释放
+    bool only_when_target_visible = true;  // 仅有目标量测时才压（防空压）
+    float target_lost_release_ms = 300.0f; // 目标丢失后仍压时长（ms），0=立即释放（yu [0,3000]）
     bool trigger_delay_enabled = false;    // 延迟触发开关（防单点误触）
     float trigger_delay_ms = 120.0f;       // 按住超过该时长才开始压（松开重新计时）
-    float strength = 0.0f;           // 下压速率基准（px/s，0=不输出）
-    float speed = 1.0f;              // 下压倍率（乘在 strength 上）
-    bool humanize_enabled = true;    // 拟人化开关（缓入缓出 + X 轴微动）
-    float humanize_curve_strength = 0.45f;  // 下压拆步缓入缓出比例
-    float humanize_jitter_px = 0.25f;       // 压枪时附加 X 轴微动幅度（px）
-    float humanize_jitter_frequency = 8.0f; // X 轴微动变化频率（Hz）
+    float strength = 100.0f;         // 拉力基准 [0,300]；拉速 = 3×strength×speed px/s
+    float speed = 1.0f;              // 拉力倍率 [0.1,3.0]
+    float curve_strength = 0.6f;     // 释放渐出深度 [0,1]；0=硬停，1=80ms 内衰减到 0
+    float roi_h = 300.0f;            // 累计下压钳制（px，≤0=不限）；对齐 yu 的 roi_h
 };
 
 // 2026-09-29：自动扳机 v7.26（TriggerConfig）已整段删除 —— 业主裁定「自动开火只留 2.0」。
@@ -317,7 +333,9 @@ struct RecoilConfig {
 //     首枪之后**不再校验距离**，只要有锁定就按间隔继续打；
 //   · 目标丢失超过 retarget_reset_ms 才重置首枪态（重新走误差+延迟）；
 //   · 可选「急停检测」：中心出现指定准星颜色才允许开枪（打狙急停用）；
-//   · 支持随枪压枪（简易 / 进阶 / 准星三路触发）。
+//   · 随枪压枪：`with_simple_recoil` 一个开关（2026-09-30 收敛：原来简易/进阶/准星三路，
+//     后两路挂的是已删除的 BB 查表与准星找色引擎，一并删除。yu 也只有一路
+//     `auto_trigger_spray_assist`）。
 // ---------------------------------------------------------------------------
 struct Trigger2Config {
     bool enabled = false;            // 总开关
@@ -325,9 +343,7 @@ struct Trigger2Config {
     uint8_t key2 = 0x00;             // 组合键2（0 = 常满足）
     uint8_t fire_button = 0x01;      // 开火键位掩码（BB 默认 1=左键）
     bool with_aim = true;            // 附带自瞄
-    bool with_crosshair = false;     // 附带准星压枪（组合键按下即生效）
-    bool with_simple_recoil = false; // 附带简易压枪
-    bool with_adv_recoil = false;    // 附带进阶压枪
+    bool with_simple_recoil = false; // 随枪压枪：扳机连发期间自动附带压枪（对齐 yu auto_trigger_spray_assist）
     float confidence = 0.5f;         // 本扳机专用检测置信
     float first_err = 30.0f;         // 首枪允许误差上限（px）
     float first_delay = 0.0f;        // 首枪延迟（ms，从首次进入误差圈起算）
@@ -349,7 +365,8 @@ struct Trigger2Config {
 };
 
 // ===========================================================================
-// BB 对标第二批（2026-09-24）：压枪升级 / 两代提前量 / 拟人化链 / 三个小件
+// BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 三个小件
+//  （原第 1 项「压枪升级」及垂直修正、开火期闭环 2026-09-30 已删，见上方 RecoilConfig 注释）
 //   提取来源：bb-port/02-压枪与小件.md、03-提前量与拟人化.md（只取结构与标定值，
 //   实现全部 C++ 自写）。
 //   ★ 统一约定：全部 enabled 默认 false。不开时 AimThread 不跑该模块，
@@ -357,131 +374,15 @@ struct Trigger2Config {
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// 压枪三段查表引擎（BB `recoil_presets` / `getRecoilMove`，见 02 号 §1、§2.3）
-//
-// 与原有 RecoilConfig 的关系：
-//   · RecoilConfig 是 TTBOX 原有的「速率模型」：下压速率 = strength × speed（px/s）× dt。
-//   · RecoilBbConfig 是 BB 的「三段查表模型」：开火时长按 total_time 三等分，
-//     每段查一组 (vert, horiz) **相对像素/帧**，再乘全局倍率，末尾叠漂移正弦与一阶平滑。
-//   · 两者以 RecoilBbConfig::enabled 互斥：false（默认）⇒ 完全走原速率模型，行为零变化。
-// ---------------------------------------------------------------------------
-struct RecoilBbConfig {
-    bool enabled = false;            // 三段查表引擎开关（false ⇒ 走原速率模型）
-    int preset = 1;                  // 当前预设编号 1..3
-    float preset_total_time_ms[3] = {1500.0f, 1500.0f, 1500.0f};  // 各预设总时长（ms）
-    // 每预设 3 段的垂直/水平量（px/帧，vert 正=向下压，horiz 正=向右修正）。
-    // 段序号按开火时长三等分：1=[0,t/3) 2=[t/3,2t/3) 3=[2t/3,∞)。
-    float preset_vert[3][3] = {{1.5f, 1.5f, 1.5f}, {1.5f, 1.5f, 1.5f}, {1.0f, 1.3f, 1.6f}};
-    float preset_horiz[3][3] = {{0.0f, 0.0f, 0.0f}, {-2.0f, -2.0f, -2.0f}, {0.0f, 0.0f, 0.0f}};
-    float global_vert = 0.5f;        // 垂直全局倍率
-    float global_horiz = 0.5f;       // 水平全局倍率
-    float delay_ms = 50.0f;          // 开火后延迟多久开始压（ms）
-    float smooth = 0.90f;            // 一阶平滑系数 s（0 = 不平滑）
-    float distance_limit = 80.0f;    // 目标距中心超过它不压（px，≤0 = 不限）
-    bool no_target_always = false;   // 无目标时也压
-    bool drift_enabled = false;      // 水平漂移正弦开关
-    float drift_amplitude = 0.20f;   // 漂移幅度（px）
-    float drift_freq = 1.0f;         // 漂移频率（Hz）
-    bool y_suppress_enabled = false; // 垂直修正 Y 路屏蔽（进阶压枪）
-    float y_suppress_strength = 0.0f; // 屏蔽乘子（0 = 全屏蔽）
-    float max_down_distance = 0.0f;  // 最大下压距离（px，0 = 不限）
-    float adv_mult = 0.9f;           // BB 扳机开火后整体压枪倍率（默认 0.9）
-};
 
+// 2026-09-30：开火期闭环纠偏（RecoilClConfig，压枪 v1/v2）已整段删除 ——
+//   对照 yu 后业主裁定「压枪太臃肿、参数太多、算法逻辑不对」⇒ 只留一套 yu 式速率引擎。
+//   删除理由（留档，防回潮）：
+//     · yu 没有任何闭环纠偏；它的"稳"来自量测门控（框无效 ⇒ 拒绝量测 + 保持上一帧）
+//       ⇒ 压枪输入端永远拿不到坏框，不需要自己闭环；
+//     · 闭环与瞄准 PID 抢同一个执行器（P 项叠加），v1 实机「乱晃」的病根就在这；
+//     · 旧配置残留的 `mouse.recoil_cl` 段会被 RuntimeProfile 忽略。
 // ---------------------------------------------------------------------------
-// 垂直修正 + 力度渐变（BB `getVerticalCorrection`，见 02 号 §3.3）
-// 输出是**直接叠加**进最终位移的像素量（不是乘子），可与压枪同时生效。
-// ---------------------------------------------------------------------------
-struct VerticalCorrectionConfig {
-    bool enabled = true;             // 垂直修正开关（BB 默认 true；但外层 RecoilBbConfig.enabled 未开则整段不跑）
-    bool no_target = false;          // 无目标也修正
-    float strength = 1.0f;           // 垂直修正基准强度（px/帧）
-    float horiz = 0.0f;              // 水平修正量（px/帧）
-    float delay_ms = 0.0f;           // 起始延迟（ms，从热键按下起算）
-    float max_down_distance = 0.0f;  // 最大下压距离（px，0 = 不限）
-    bool y_suppress_enabled = false; // Y 路屏蔽开关（BB `auto_recoil_y_suppress_*`）
-    float y_suppress_strength = 0.0f; // Y 路屏蔽乘子（0 = 全屏蔽）
-    // 三档渐变互斥（都开则顺序靠前者生效）
-    bool ramp1_enabled = false;      // 渐变 1
-    float ramp1_duration_ms = 1300.0f;
-    float ramp1_start = 1.4f, ramp1_middle = 1.6f, ramp1_end = 0.01f;
-    bool ramp2_enabled = false;      // 渐变 2
-    float ramp2_duration_ms = 2000.0f;
-    float ramp2_start = 1.0f, ramp2_middle = 0.5f, ramp2_end = 0.1f;
-    bool ramp3_enabled = false;      // 渐变 3
-    float ramp3_duration_ms = 2000.0f;
-    float ramp3_start = 1.0f, ramp3_middle = 0.5f, ramp3_end = 0.1f;
-};
-
-// ---------------------------------------------------------------------------
-// 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）
-//
-// 为什么需要（代码事实，不是设计偏好）：
-//   · core/src/aim/AimThread.cpp:25 `pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0)`；
-//     第 3 个实参是 predict，而它只乘在积分通道上（Pid1Controller.hpp:80-90
-//     `ki_raw = ((error_diff + last_u) * predict) * integral_gain`）
-//     ⇒ predict_y = 0 把 K_i 整个乘成 0 ⇒ **默认配置下 Y 轴只有 P+D、没有 I**。
-//   · 枪口上抬 ⇒ 准星不动、画面整体上移 ⇒ 目标框在画面里匀速下移（斜坡输入）。
-//     斜坡只有 I 项吃得掉：P 必留稳态误差、D 在稳态下不干活
-//     ⇒ **PID 结构上补不了后坐力**，这才是压枪模块存在的全部理由。
-//   本模块 = 把这一环补回来：一个**只在开火期生效的闭环积分项**。
-//
-// 设计约束（业主 2026-09-29 定案，实现不得偏离）：
-//   ① 「有实时观测就压，没有实时观测就不猜」—— 观测不成立时立即清零，
-//      不留跨开火记忆（换枪/换倍镜/换节奏最怕的就是拿上次的经验去猜）；
-//   ② 不需要选枪/录枪/预采数据 —— 观测量是**实时实测**的画面偏移（error_y），
-//      不含任何枪械先验，枪械差异一律由实测自己表达；
-//   ③ 只下压（单向）—— 积分下限钳到 0，永远不会把准星往上推。
-//
-// 与既有两套压枪引擎的关系：**互斥**（2026-09-29 业主令）。本引擎 enabled 时
-// RecoilConfig（老速率模型）与 RecoilBbConfig（BB 三段查表）整段不跑；默认
-// enabled=false ⇒ 不开时输出链与加入前逐字节一致。
-//
-// ★★ v2 重做（2026-09-29 16:xx，实机「开始乱晃」定障）
-// ------------------------------------------------------
-// v1 上板后业主实测「更垃圾、开始乱晃」。板端记录器数据定障（V1.0.03 测窗 74 个
-// 开火采样）：
-//   · add_y 合计 713.8 count，是 V1.0.02 同口径的 11.6 倍（每采样 9.65 vs 0.83）；
-//   · 27% 的采样顶死在 press_max_count=20 上（单帧 20 count，比瞄准 PID 整段输出
-//     (scheduler_input_y ≈ 1.4) 还大 14 倍 ⇒ 闭环成了开火期的主导驱动）；
-//   · i_term 最大 108，而单帧上限只有 20 ⇒ 积分限幅 100 px·s 配 gain=2.0 让
-//     积分自己就超上限 5 倍，一旦积起来就永久顶格（无抗饱和）；
-// 结构病根（与增益高低无关）三条：
-//   ① **P 项与瞄准 PID 抢同一个执行器**：scaled_y += recoil_add_y 与 PID 输出同域相加
-//      （AimThread.cpp:819），而 PID 本来就在闭环地把 control_y 往 0 拉
-//      ⇒ 同一个误差上叠两个控制器，等效 P 增益翻数倍 ⇒ 必然摆动；
-//   ② **积分无抗饱和**：输出被限幅后积分继续积 ⇒ 顶格输出 + 拖尾，弹道被压过头；
-//   ③ **输出无阻尼**：整段没有限速/微分，250Hz 下任何检测跳变都变成整帧猛踢。
-// v2 改法（保留业主第一原则「有实时偏移就纠偏」，只改结构）：
-//   · kp 默认 0 —— P 是瞄准 PID 的职责，闭环只补 PID 结构上缺的那一环（积分）；
-//   · 积分项结构上限 = press_max_count（积分单独不得超单帧上限）+ 条件积分 +
-//     限幅后反算回写（抗饱和）；
-//   · 新增 slew_count_per_frame 限速（单帧输出变化上限）= 阻尼，防整帧猛踢；
-//   · 量级整体下调：press_max_count 20→3（≈490 px/s 下压能力，见 0.65 px/count；
-//     取这个值是为了**不低于老引擎的工作点** —— BB 三段查表典型 1.5 px/帧 ≈ 2.3 count/帧，
-//     比它低又会变成"没效果"）、gain 2.0→0.25、integral_max 100→12，底子 τ 1500→2000ms。
-// ---------------------------------------------------------------------------
-struct RecoilClConfig {
-    bool enabled = false;            // 总开关（默认关；不开时行为零变化）
-    float kp = 0.0f;                 // P 项（count/px）。★默认 0：P 已由瞄准 PID 承担，
-                                     //   非 0 就是在同一个执行器上与 PID 抢 ⇒ 过压摆动（v1 教训）
-    float gain = 0.25f;              // 积分增益（count/(px·s)）：慢修正，吃掉 PID 吃不掉的稳态残差
-    float integral_max = 12.0f;      // 积分限幅（px·s）；下压量 = gain × clamp(积分)
-    int start_frames = 6;            // 起压前最少连续有效观测帧数（前几发不压 = 设计内代价）
-    float press_max_count = 3.0f;    // 单帧最大下压（count，安全阀）；0 = 不限
-    float slew_count_per_frame = 0.3f; // 单帧输出变化上限（count）：限速=阻尼，防整帧猛踢；0 = 不限
-    float baseline_tau_ms = 2000.0f; // 偏差底子 EMA 时间常数（ms）；0 = 关基线（第一版原始口径）
-                                     //   观测量 = 偏差 − 没开火时学到的底子（2026-09-29 实机
-                                     //   数据定障：原始偏差开火时仅 41% 为正，被静态负偏移埋住）
-    // ★★ 2026-09-29 19:xx 新增（业主实机「弹道偏左边已经偏出人身」定障）：
-    //   本引擎**只有纵向一条通道**（Output 里就一个 add_y）。而「两套互斥」让老引擎整段不跑
-    //   ⇒ `scaled_x += recoil_add_x` 加的一直是 0 ⇒ **横向补偿 100% 消失**。
-    //   keep_horiz=true（默认）时，接管期间仍让老引擎跑、**只取它的横向分量**；纵向一律只认本引擎。
-    //   false 可退回 V1.0.04 行为（横向也停）做 A/B。
-    //   为什么横向不自己做闭环：X 轴瞄准 PID 本来就有积分项（predict_x=3.0）在拉同一个误差，
-    //   再叠一条积分就是 v1「两个控制器抢同一个执行器」的重演。
-    bool keep_horiz = true;          // 接管期间保留老引擎的横向补偿（默认保留）
-};
 
 // 2026-09-29：提前量一代（Lead1Config，帧窗口投票法）已整段删除 —— 业主裁定
 //   「提前量只留 2.0」。一代与二代原本是**相加**关系（不是替代），删掉之后二代自己
@@ -723,11 +624,8 @@ struct MouseProfile {
         // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
         ContinuousLeadConfig continuous_lead;
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
-    // ---- BB 对标第二批（2026-09-24）----
+    // ---- BB 对标第二批（2026-09-24；压枪升级三件 2026-09-30 已删）----
     // 全部默认 false ⇒ 不开时 AimThread 不跑这些模块，输出链与本批加入前逐字节一致。
-    RecoilBbConfig recoil_bb;               // 压枪三段查表引擎（recoil.enabled 且 recoil_bb.enabled 才走）
-    VerticalCorrectionConfig vertical_correction;  // 垂直修正 + 力度渐变（叠加进最终位移）
-    RecoilClConfig recoil_cl;               // 开火期闭环纠偏（压枪 v1，2026-09-29；默认 enabled=false）
     Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）；一代 2026-09-29 已删
     HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
     // BB 927 原版里这两个是**独立开关**，不归 humanize.enabled 管（照搬，2026-09-28）。

@@ -1109,14 +1109,10 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("scheduler_input_y", JsonValue::number(status.metrics.scheduler_input_y));
     // 控制域误差（平滑瞄准点 − 参考点）：开火期闭环纠偏的输入量，判闭环效果只看它
     m.set("aim_control_y", JsonValue::number(status.metrics.aim_control_y));
-    // 压枪 v1 闭环遥测（面板 control_trace.recoil_cl 消费）
-    m.set("recoil_cl_add_y", JsonValue::number(status.metrics.recoil_cl_add_y));
-    m.set("recoil_cl_integral", JsonValue::number(status.metrics.recoil_cl_integral));
-    m.set("recoil_cl_state", JsonValue::number(static_cast<double>(status.metrics.recoil_cl_state)));
-    m.set("recoil_cl_obs_frames", JsonValue::number(static_cast<double>(status.metrics.recoil_cl_obs_frames)));
-    m.set("recoil_cl_p_term", JsonValue::number(status.metrics.recoil_cl_p_term));
-    m.set("recoil_cl_i_term", JsonValue::number(status.metrics.recoil_cl_i_term));
-    m.set("recoil_cl_baseline", JsonValue::number(status.metrics.recoil_cl_baseline));
+    // 压枪遥测（2026-09-30 收敛为 3 项，对齐 yu 的 recoil_* 观测面）
+    m.set("recoil_add_y", JsonValue::number(status.metrics.recoil_add_y));
+    m.set("recoil_acc_px", JsonValue::number(status.metrics.recoil_acc_px));
+    m.set("recoil_rate_px_s", JsonValue::number(status.metrics.recoil_rate_px_s));
     // 目标中心（标定状态机的真实目标位移数据源）
     m.set("aim_pos_x", JsonValue::number(status.metrics.aim_pos_x));
     m.set("aim_pos_y", JsonValue::number(status.metrics.aim_pos_y));

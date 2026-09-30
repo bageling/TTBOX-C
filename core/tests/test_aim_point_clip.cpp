@@ -28,6 +28,7 @@
 
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/ClipHeightRatio.hpp"
+#include "mouse/FrozenRect.hpp"    // V1.0.10：冻结落点
 #include "test_util.hpp"
 
 using namespace ttbox::core;
@@ -313,6 +314,97 @@ TEST(clip_ratio_tracker_end_to_end_pull_back_to_chest) {
     // h_eff = 180×3.0 = 540 ⇒ ty = 550 + 167.4 = 717.4（不修的话是 667.18，落在头上）
     CHECK(near(ty, 717.4f));
     CHECK(ty > 667.18f + 50.0f);
+}
+
+// ==================== V1.0.10：冻结落点（FrozenRectTracker） ====================
+// 思路来源：yu 的 holding_previous —— 腿被裁掉时**不修坏量测，而是拒绝它**，
+// 落点保持上一次能看全的那一帧。走近时框顶上升与身高变大互相抵消，
+// 「你正在瞄的那个点，屏幕上本来就不该动」。
+
+// ㉓ 未截断帧：冻结点更新成这一帧。
+TEST(frozen_rect_updates_on_unclipped_frame) {
+    FrozenRectTracker fr;
+    fr.observe(clipped_box_416(), false, 3);
+    CHECK(fr.valid());
+    CHECK(fr.id() == 3);
+    DetectionBox out{};
+    CHECK(fr.frozen_for(3, &out));
+    CHECK(near(out.y2, 928.0f));
+}
+
+// ㉔ 截断帧：冻结器不更新，frozen_for 仍给上一帧的完整框。
+TEST(frozen_rect_keeps_previous_on_clipped_frame) {
+    FrozenRectTracker fr;
+    const DetectionBox full = mk(1080, 400, 1260, 900);   // 能看全：h=500
+    fr.observe(full, false, 7);
+    fr.observe(clipped_box_416(), true, 7);               // 腿被 928 截断
+    DetectionBox out{};
+    CHECK(fr.frozen_for(7, &out));
+    CHECK(near(out.y1, 400.0f));
+    CHECK(near(out.y2, 900.0f));
+    CHECK(!near(out.y2, 928.0f));                          // 没被截断帧污染
+}
+
+// ㉕ 换目标（track id 变）：旧冻结框立即作废，新目标要等第一次未截断帧才重建。
+TEST(frozen_rect_invalidates_on_target_switch) {
+    FrozenRectTracker fr;
+    fr.observe(mk(1000, 400, 1180, 900), false, 1);
+    DetectionBox out{};
+    CHECK(fr.frozen_for(1, &out));
+    fr.observe(clipped_box_416(), true, 2);                // 新目标、且被截
+    CHECK(!fr.frozen_for(1, &out));                        // 老目标的框已作废
+    CHECK(!fr.frozen_for(2, &out));                        // 新目标还没见过完整框
+    fr.observe(mk(1080, 380, 1260, 880), false, 2);
+    CHECK(fr.frozen_for(2, &out));
+    CHECK(near(out.y2, 880.0f));
+}
+
+// ㉖ 目标一出现就被截（拐角撞脸）：没有可冻结的帧 ⇒ false，调用方退回 V1.0.09 外推兜底。
+TEST(frozen_rect_no_baseline_returns_false) {
+    FrozenRectTracker fr;
+    fr.observe(clipped_box_416(), true, 9);
+    DetectionBox out{};
+    CHECK(!fr.frozen_for(9, &out));
+    CHECK(!fr.valid());
+}
+
+// ㉗ 退化框（宽或高 <= 1px）不参与冻结；reset 清空。
+TEST(frozen_rect_ignores_degenerate_box_and_resets) {
+    FrozenRectTracker fr;
+    fr.observe(mk(1200, 500, 1200.5f, 900), false, 4);     // 宽 0.5
+    CHECK(!fr.valid());
+    fr.observe(mk(1100, 800, 1300, 800.5f), false, 4);     // 高 0.5
+    CHECK(!fr.valid());
+    fr.observe(mk(1100, 400, 1280, 900), false, 4);
+    CHECK(fr.valid());
+    fr.reset();
+    CHECK(!fr.valid());
+    CHECK(fr.id() == -1);
+}
+
+// ㉘ 端到端：走近一帧，冻结落点不动；直接吃这一帧会抬头 ~40px。
+TEST(frozen_rect_end_to_end_landing_point_does_not_drift) {
+    auto prof = board_prof();
+    FrozenRectTracker fr;
+    const DetectionBox full = mk(1080, 420, 1250, 900);    // w=170 h=480
+    fr.observe(full, false, 7);
+    float tx = 0, ty = 0;
+    CHECK(aim_point_at(full, 5, prof, &tx, &ty, -1.0f, 0.0f));
+    const float ty_far = ty;                               // 420 + 0.31*480 = 568.8
+    CHECK(near(ty_far, 568.8f));
+
+    const DetectionBox near_clipped = mk(1075, 350, 1255, 928);   // 框顶上冒、腿被截
+    fr.observe(near_clipped, true, 7);
+    DetectionBox frozen{};
+    CHECK(fr.frozen_for(7, &frozen));
+    float fx = 0, fy = 0;
+    CHECK(aim_point_at(frozen, 5, prof, &fx, &fy, -1.0f, 0.0f));
+    CHECK(near(fy, ty_far));                               // 冻结 ⇒ 落点不动
+
+    float nx = 0, ny = 0;
+    CHECK(aim_point_at(near_clipped, 5, prof, &nx, &ny, -1.0f, 0.0f));
+    CHECK(near(ny, 529.18f));                              // 350 + 0.31*578
+    CHECK(ny < ty_far - 39.0f);                            // 不冻就抬头约 40px
 }
 
 int main() { return ttbox_test::run_all(); }

@@ -222,37 +222,18 @@ bool RuntimeProfile::validate(std::string* error) const {
     }
     // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 整段删除 ⇒ 对应的两段校验一并删除。
     // 旧配置里残留的 `mouse.trigger` 段会被下面的解析逻辑直接忽略。
-    // ---- BB 对标第二批（2026-09-24）：压枪三段查表 / 提前量 / 拟人化 / 三个小件 ----
-    // 规则：ms 与 px 类参数 <0 拒绝；比例/系数类越界拒绝。
-    if (mouse.recoil_bb.preset_total_time_ms[0] < 0.0f ||
-        mouse.recoil_bb.preset_total_time_ms[1] < 0.0f ||
-        mouse.recoil_bb.preset_total_time_ms[2] < 0.0f ||
-        mouse.recoil_bb.delay_ms < 0.0f || mouse.recoil_bb.drift_amplitude < 0.0f ||
-        mouse.recoil_bb.drift_freq < 0.0f || mouse.recoil_bb.max_down_distance < 0.0f ||
-        mouse.recoil_bb.adv_mult < 0.0f ||
-        mouse.vertical_correction.delay_ms < 0.0f ||
-        mouse.vertical_correction.max_down_distance < 0.0f ||
-        mouse.vertical_correction.ramp1_duration_ms < 0.0f ||
-        mouse.vertical_correction.ramp2_duration_ms < 0.0f ||
-        mouse.vertical_correction.ramp3_duration_ms < 0.0f) {
-        if (error) *error = "recoil_bb/vertical_correction 时长与距离不能为负";
+    // ---- 压枪（recoil，2026-09-30 对照 yu 重做）----
+    // 参数面收敛到 4 个数值项；越界一律拒绝（yu 也是在解析时钳制的）。
+    if (mouse.recoil.target_lost_release_ms < 0.0f || mouse.recoil.target_lost_release_ms > 3000.0f ||
+        mouse.recoil.trigger_delay_ms < 0.0f ||
+        mouse.recoil.strength < 0.0f || mouse.recoil.strength > 300.0f ||
+        mouse.recoil.curve_strength < 0.0f || mouse.recoil.curve_strength > 1.0f ||
+        mouse.recoil.roi_h < 0.0f) {
+        if (error) *error = "recoil 参数越界（strength[0,300] release_ms[0,3000] curve[0,1] roi_h>=0）";
         return false;
     }
-    if (mouse.recoil_bb.smooth < 0.0f || mouse.recoil_bb.smooth > 1.0f ||
-        mouse.recoil_bb.y_suppress_strength < 0.0f || mouse.recoil_bb.y_suppress_strength > 1.0f ||
-        mouse.vertical_correction.y_suppress_strength < 0.0f ||
-        mouse.vertical_correction.y_suppress_strength > 1.0f) {
-        if (error) *error = "recoil_bb.smooth / y_suppress_strength 超出 [0,1]";
-        return false;
-    }
-    // 开火期闭环纠偏（压枪 v2，2026-09-29）：增益/限幅/安全阀不能为负；
-    // start_frames 必须 >= 1 —— 0 会退化成"第一帧就压"，与「先观测再压」定案冲突。
-    if (mouse.recoil_cl.kp < 0.0f || mouse.recoil_cl.gain < 0.0f ||
-        mouse.recoil_cl.integral_max < 0.0f ||
-        mouse.recoil_cl.press_max_count < 0.0f || mouse.recoil_cl.start_frames < 1 ||
-        mouse.recoil_cl.slew_count_per_frame < 0.0f ||
-        mouse.recoil_cl.baseline_tau_ms < 0.0f) {
-        if (error) *error = "recoil_cl 参数越界（start_frames 需 >= 1）";
+    if (mouse.recoil.speed < 0.1f || mouse.recoil.speed > 3.0f) {
+        if (error) *error = "recoil.speed 需在 [0.1,3.0]（对齐 yu）";
         return false;
     }
     // 提前量：一代 Lead1 已于 2026-09-29 删除，校验只剩二代。
@@ -537,7 +518,7 @@ JsonValue RuntimeProfile::to_json() const {
     lk.set("instant_enter_dist", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_dist)));
     lk.set("instant_enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_conf)));
     m.set("lock_confirm", std::move(lk));
-    // 压枪（recoil）：开火期间下压补偿后坐力（12 参数语义，输出链基于 TTBOX 自身）
+    // 压枪（recoil）：2026-09-30 对照 yu 重做后的**唯一**配置面（速率 + 释放渐出 + ROI）
     JsonValue rc = JsonValue::object();
     rc.set("enabled", JsonValue::boolean(mouse.recoil.enabled));
     rc.set("hotkey", JsonValue::number(static_cast<double>(mouse.recoil.hotkey)));
@@ -549,91 +530,13 @@ JsonValue RuntimeProfile::to_json() const {
     rc.set("trigger_delay_ms", JsonValue::number(static_cast<double>(mouse.recoil.trigger_delay_ms)));
     rc.set("strength", JsonValue::number(static_cast<double>(mouse.recoil.strength)));
     rc.set("speed", JsonValue::number(static_cast<double>(mouse.recoil.speed)));
-    rc.set("humanize_enabled", JsonValue::boolean(mouse.recoil.humanize_enabled));
-    rc.set("humanize_curve_strength", JsonValue::number(static_cast<double>(mouse.recoil.humanize_curve_strength)));
-    rc.set("humanize_jitter_px", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_px)));
-    rc.set("humanize_jitter_frequency", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_frequency)));
+    rc.set("curve_strength", JsonValue::number(static_cast<double>(mouse.recoil.curve_strength)));
+    rc.set("roi_h", JsonValue::number(static_cast<double>(mouse.recoil.roi_h)));
     m.set("recoil", std::move(rc));
-    // ---- BB 对标第二批（2026-09-24）：压枪三段查表 / 两代提前量 / 拟人化链 / 三个小件 ----
+    // ---- BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 三个小件 ----
     // 全部默认 enabled=false ⇒ 未显式开启时 AimThread 不跑这些模块，输出链逐字节不变。
+    // （压枪三段查表 / 垂直修正 / 开火期闭环 三块 2026-09-30 已删，不再序列化）
     {
-        JsonValue rb = JsonValue::object();
-        rb.set("enabled", JsonValue::boolean(mouse.recoil_bb.enabled));
-        rb.set("preset", JsonValue::number(static_cast<double>(mouse.recoil_bb.preset)));
-        JsonValue tt = JsonValue::array();
-        for (int i = 0; i < 3; ++i) {
-            tt.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_total_time_ms[i])));
-        }
-        rb.set("preset_total_time_ms", std::move(tt));
-        JsonValue pv = JsonValue::array();
-        JsonValue ph = JsonValue::array();
-        for (int i = 0; i < 3; ++i) {
-            JsonValue rv = JsonValue::array();
-            JsonValue rh = JsonValue::array();
-            for (int j = 0; j < 3; ++j) {
-                rv.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_vert[i][j])));
-                rh.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_horiz[i][j])));
-            }
-            pv.push_back(std::move(rv));
-            ph.push_back(std::move(rh));
-        }
-        rb.set("preset_vert", std::move(pv));
-        rb.set("preset_horiz", std::move(ph));
-        rb.set("global_vert", JsonValue::number(static_cast<double>(mouse.recoil_bb.global_vert)));
-        rb.set("global_horiz", JsonValue::number(static_cast<double>(mouse.recoil_bb.global_horiz)));
-        rb.set("delay_ms", JsonValue::number(static_cast<double>(mouse.recoil_bb.delay_ms)));
-        rb.set("smooth", JsonValue::number(static_cast<double>(mouse.recoil_bb.smooth)));
-        rb.set("distance_limit", JsonValue::number(static_cast<double>(mouse.recoil_bb.distance_limit)));
-        rb.set("no_target_always", JsonValue::boolean(mouse.recoil_bb.no_target_always));
-        rb.set("drift_enabled", JsonValue::boolean(mouse.recoil_bb.drift_enabled));
-        rb.set("drift_amplitude", JsonValue::number(static_cast<double>(mouse.recoil_bb.drift_amplitude)));
-        rb.set("drift_freq", JsonValue::number(static_cast<double>(mouse.recoil_bb.drift_freq)));
-        rb.set("y_suppress_enabled", JsonValue::boolean(mouse.recoil_bb.y_suppress_enabled));
-        rb.set("y_suppress_strength", JsonValue::number(static_cast<double>(mouse.recoil_bb.y_suppress_strength)));
-        rb.set("max_down_distance", JsonValue::number(static_cast<double>(mouse.recoil_bb.max_down_distance)));
-        rb.set("adv_mult", JsonValue::number(static_cast<double>(mouse.recoil_bb.adv_mult)));
-        m.set("recoil_bb", std::move(rb));
-
-        JsonValue vc = JsonValue::object();
-        vc.set("enabled", JsonValue::boolean(mouse.vertical_correction.enabled));
-        vc.set("no_target", JsonValue::boolean(mouse.vertical_correction.no_target));
-        vc.set("strength", JsonValue::number(static_cast<double>(mouse.vertical_correction.strength)));
-        vc.set("horiz", JsonValue::number(static_cast<double>(mouse.vertical_correction.horiz)));
-        vc.set("delay_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.delay_ms)));
-        vc.set("max_down_distance", JsonValue::number(static_cast<double>(mouse.vertical_correction.max_down_distance)));
-        vc.set("y_suppress_enabled", JsonValue::boolean(mouse.vertical_correction.y_suppress_enabled));
-        vc.set("y_suppress_strength", JsonValue::number(static_cast<double>(mouse.vertical_correction.y_suppress_strength)));
-        vc.set("ramp1_enabled", JsonValue::boolean(mouse.vertical_correction.ramp1_enabled));
-        vc.set("ramp1_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_duration_ms)));
-        vc.set("ramp1_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_start)));
-        vc.set("ramp1_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_middle)));
-        vc.set("ramp1_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_end)));
-        vc.set("ramp2_enabled", JsonValue::boolean(mouse.vertical_correction.ramp2_enabled));
-        vc.set("ramp2_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_duration_ms)));
-        vc.set("ramp2_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_start)));
-        vc.set("ramp2_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_middle)));
-        vc.set("ramp2_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_end)));
-        vc.set("ramp3_enabled", JsonValue::boolean(mouse.vertical_correction.ramp3_enabled));
-        vc.set("ramp3_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_duration_ms)));
-        vc.set("ramp3_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_start)));
-        vc.set("ramp3_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_middle)));
-        vc.set("ramp3_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_end)));
-        m.set("vertical_correction", std::move(vc));
-
-        // 开火期闭环纠偏（压枪 v2，2026-09-29）：默认 enabled=false ⇒ 不开时行为零变化。
-        JsonValue rcl = JsonValue::object();
-        rcl.set("enabled", JsonValue::boolean(mouse.recoil_cl.enabled));
-        rcl.set("kp", JsonValue::number(static_cast<double>(mouse.recoil_cl.kp)));
-        rcl.set("gain", JsonValue::number(static_cast<double>(mouse.recoil_cl.gain)));
-        rcl.set("integral_max", JsonValue::number(static_cast<double>(mouse.recoil_cl.integral_max)));
-        rcl.set("start_frames", JsonValue::number(static_cast<double>(mouse.recoil_cl.start_frames)));
-        rcl.set("press_max_count", JsonValue::number(static_cast<double>(mouse.recoil_cl.press_max_count)));
-        rcl.set("slew_count_per_frame",
-                JsonValue::number(static_cast<double>(mouse.recoil_cl.slew_count_per_frame)));
-        rcl.set("baseline_tau_ms", JsonValue::number(static_cast<double>(mouse.recoil_cl.baseline_tau_ms)));
-        rcl.set("keep_horiz", JsonValue::boolean(mouse.recoil_cl.keep_horiz));
-        m.set("recoil_cl", std::move(rcl));
-
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 不再序列化 lead1 段。
         JsonValue l2 = JsonValue::object();
         l2.set("enabled", JsonValue::boolean(mouse.lead2.enabled));
@@ -716,9 +619,7 @@ JsonValue RuntimeProfile::to_json() const {
     tg2.set("key2", JsonValue::number(static_cast<double>(mouse.trigger2.key2)));
     tg2.set("fire_button", JsonValue::number(static_cast<double>(mouse.trigger2.fire_button)));
     tg2.set("with_aim", JsonValue::boolean(mouse.trigger2.with_aim));
-    tg2.set("with_crosshair", JsonValue::boolean(mouse.trigger2.with_crosshair));
     tg2.set("with_simple_recoil", JsonValue::boolean(mouse.trigger2.with_simple_recoil));
-    tg2.set("with_adv_recoil", JsonValue::boolean(mouse.trigger2.with_adv_recoil));
     tg2.set("confidence", JsonValue::number(static_cast<double>(mouse.trigger2.confidence)));
     tg2.set("first_err", JsonValue::number(static_cast<double>(mouse.trigger2.first_err)));
     tg2.set("first_delay", JsonValue::number(static_cast<double>(mouse.trigger2.first_delay)));
@@ -991,101 +892,17 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.recoil.hotkey2 = static_cast<int>(obj_int(*rk, "hotkey2", 0));
             p.mouse.recoil.hotkey_mode = static_cast<int>(obj_int(*rk, "hotkey_mode", 1));
             p.mouse.recoil.only_when_target_visible = obj_bool(*rk, "only_when_target_visible", true);
-            p.mouse.recoil.target_lost_release_ms = static_cast<float>(obj_num(*rk, "target_lost_release_ms", 200.0));
+            p.mouse.recoil.target_lost_release_ms = static_cast<float>(obj_num(*rk, "target_lost_release_ms", 300.0));
             p.mouse.recoil.trigger_delay_enabled = obj_bool(*rk, "trigger_delay_enabled", false);
             p.mouse.recoil.trigger_delay_ms = static_cast<float>(obj_num(*rk, "trigger_delay_ms", 120.0));
-            p.mouse.recoil.strength = static_cast<float>(obj_num(*rk, "strength", 0.0));
+            p.mouse.recoil.strength = static_cast<float>(obj_num(*rk, "strength", 100.0));
             p.mouse.recoil.speed = static_cast<float>(obj_num(*rk, "speed", 1.0));
-            p.mouse.recoil.humanize_enabled = obj_bool(*rk, "humanize_enabled", true);
-            p.mouse.recoil.humanize_curve_strength = static_cast<float>(obj_num(*rk, "humanize_curve_strength", 0.45));
-            p.mouse.recoil.humanize_jitter_px = static_cast<float>(obj_num(*rk, "humanize_jitter_px", 0.25));
-            p.mouse.recoil.humanize_jitter_frequency = static_cast<float>(obj_num(*rk, "humanize_jitter_frequency", 8.0));
+            p.mouse.recoil.curve_strength = static_cast<float>(obj_num(*rk, "curve_strength", 0.6));
+            p.mouse.recoil.roi_h = static_cast<float>(obj_num(*rk, "roi_h", 300.0));
         }
         // ---- BB 对标第二批（2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）----
-        if (const JsonValue* rb = m->find("recoil_bb"); rb && rb->is_object()) {
-            p.mouse.recoil_bb.enabled = obj_bool(*rb, "enabled", false);
-            p.mouse.recoil_bb.preset = static_cast<int>(obj_int(*rb, "preset", 1));
-            if (const JsonValue* a = rb->find("preset_total_time_ms"); a && a->is_array()) {
-                const auto& arr = a->as_array();
-                for (size_t i = 0; i < 3 && i < arr.size(); ++i) {
-                    if (arr[i].is_number()) {
-                        p.mouse.recoil_bb.preset_total_time_ms[i] =
-                            static_cast<float>(arr[i].as_number(1500.0));
-                    }
-                }
-            }
-            auto read_table3x3 = [&](const char* key, float dst[3][3]) {
-                const JsonValue* a = rb->find(key);
-                if (!a || !a->is_array()) return;
-                const auto& rows = a->as_array();
-                for (size_t i = 0; i < 3 && i < rows.size(); ++i) {
-                    if (!rows[i].is_array()) continue;
-                    const auto& cols = rows[i].as_array();
-                    for (size_t j = 0; j < 3 && j < cols.size(); ++j) {
-                        if (cols[j].is_number()) dst[i][j] = static_cast<float>(cols[j].as_number(0.0));
-                    }
-                }
-            };
-            read_table3x3("preset_vert", p.mouse.recoil_bb.preset_vert);
-            read_table3x3("preset_horiz", p.mouse.recoil_bb.preset_horiz);
-            p.mouse.recoil_bb.global_vert = static_cast<float>(obj_num(*rb, "global_vert", 0.5));
-            p.mouse.recoil_bb.global_horiz = static_cast<float>(obj_num(*rb, "global_horiz", 0.5));
-            p.mouse.recoil_bb.delay_ms = static_cast<float>(obj_num(*rb, "delay_ms", 50.0));
-            p.mouse.recoil_bb.smooth = static_cast<float>(obj_num(*rb, "smooth", 0.90));
-            p.mouse.recoil_bb.distance_limit = static_cast<float>(obj_num(*rb, "distance_limit", 80.0));
-            p.mouse.recoil_bb.no_target_always = obj_bool(*rb, "no_target_always", false);
-            p.mouse.recoil_bb.drift_enabled = obj_bool(*rb, "drift_enabled", false);
-            p.mouse.recoil_bb.drift_amplitude = static_cast<float>(obj_num(*rb, "drift_amplitude", 0.20));
-            p.mouse.recoil_bb.drift_freq = static_cast<float>(obj_num(*rb, "drift_freq", 1.0));
-            p.mouse.recoil_bb.y_suppress_enabled = obj_bool(*rb, "y_suppress_enabled", false);
-            p.mouse.recoil_bb.y_suppress_strength = static_cast<float>(obj_num(*rb, "y_suppress_strength", 0.0));
-            p.mouse.recoil_bb.max_down_distance = static_cast<float>(obj_num(*rb, "max_down_distance", 0.0));
-            p.mouse.recoil_bb.adv_mult = static_cast<float>(obj_num(*rb, "adv_mult", 0.9));
-        }
-        if (const JsonValue* vc = m->find("vertical_correction"); vc && vc->is_object()) {
-            auto& v = p.mouse.vertical_correction;
-            v.enabled = obj_bool(*vc, "enabled", true);
-            v.no_target = obj_bool(*vc, "no_target", false);
-            v.strength = static_cast<float>(obj_num(*vc, "strength", 1.0));
-            v.horiz = static_cast<float>(obj_num(*vc, "horiz", 0.0));
-            v.delay_ms = static_cast<float>(obj_num(*vc, "delay_ms", 0.0));
-            v.max_down_distance = static_cast<float>(obj_num(*vc, "max_down_distance", 0.0));
-            v.y_suppress_enabled = obj_bool(*vc, "y_suppress_enabled", false);
-            v.y_suppress_strength = static_cast<float>(obj_num(*vc, "y_suppress_strength", 0.0));
-            v.ramp1_enabled = obj_bool(*vc, "ramp1_enabled", false);
-            v.ramp1_duration_ms = static_cast<float>(obj_num(*vc, "ramp1_duration_ms", 1300.0));
-            v.ramp1_start = static_cast<float>(obj_num(*vc, "ramp1_start", 1.4));
-            v.ramp1_middle = static_cast<float>(obj_num(*vc, "ramp1_middle", 1.6));
-            v.ramp1_end = static_cast<float>(obj_num(*vc, "ramp1_end", 0.01));
-            v.ramp2_enabled = obj_bool(*vc, "ramp2_enabled", false);
-            v.ramp2_duration_ms = static_cast<float>(obj_num(*vc, "ramp2_duration_ms", 2000.0));
-            v.ramp2_start = static_cast<float>(obj_num(*vc, "ramp2_start", 1.0));
-            v.ramp2_middle = static_cast<float>(obj_num(*vc, "ramp2_middle", 0.5));
-            v.ramp2_end = static_cast<float>(obj_num(*vc, "ramp2_end", 0.1));
-            v.ramp3_enabled = obj_bool(*vc, "ramp3_enabled", false);
-            v.ramp3_duration_ms = static_cast<float>(obj_num(*vc, "ramp3_duration_ms", 2000.0));
-            v.ramp3_start = static_cast<float>(obj_num(*vc, "ramp3_start", 1.0));
-            v.ramp3_middle = static_cast<float>(obj_num(*vc, "ramp3_middle", 0.5));
-            v.ramp3_end = static_cast<float>(obj_num(*vc, "ramp3_end", 0.1));
-        }
-        // 开火期闭环纠偏（压枪 v2，2026-09-29）。默认值必须与 MouseTypes.hpp 的
-        // RecoilClConfig 结构体默认值一字不差（面板首次回填显示的就是这里）。
-        // ★ v2 换了默认值（kp 0.5→0、gain 2.0→0.25、integral_max 100→12、
-        //   press_max_count 20→3、baseline_tau_ms 1500→2000），并新增字段
-        //   slew_count_per_frame。**板端旧配置里存的是 v1 那套值**，会覆盖这里的默认
-        //   ⇒ 升到 v2 后必须显式把面板那几个值改成 v2 口径（见发布记录）。
-        if (const JsonValue* rcl = m->find("recoil_cl"); rcl && rcl->is_object()) {
-            auto& c = p.mouse.recoil_cl;
-            c.enabled = obj_bool(*rcl, "enabled", false);
-            c.kp = static_cast<float>(obj_num(*rcl, "kp", 0.0));
-            c.gain = static_cast<float>(obj_num(*rcl, "gain", 0.25));
-            c.integral_max = static_cast<float>(obj_num(*rcl, "integral_max", 12.0));
-            c.start_frames = static_cast<int>(obj_int(*rcl, "start_frames", 6));
-            c.press_max_count = static_cast<float>(obj_num(*rcl, "press_max_count", 3.0));
-            c.slew_count_per_frame = static_cast<float>(obj_num(*rcl, "slew_count_per_frame", 0.3));
-            c.baseline_tau_ms = static_cast<float>(obj_num(*rcl, "baseline_tau_ms", 2000.0));
-            c.keep_horiz = obj_bool(*rcl, "keep_horiz", true);
-        }
+        // 压枪三段查表（recoil_bb）/ 垂直修正（vertical_correction）/ 开火期闭环（recoil_cl）
+        // 三块 2026-09-30 已删 ⇒ 旧配置里残留的这三段直接忽略（与 lead1 同口径）。
         // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
         if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {
             auto& c = p.mouse.lead2;
@@ -1148,9 +965,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.trigger2.key2 = static_cast<uint8_t>(obj_int(*tg, "key2", 0) & 0x1F);
             p.mouse.trigger2.fire_button = static_cast<uint8_t>(obj_int(*tg, "fire_button", 1) & 0x1F);
             p.mouse.trigger2.with_aim = obj_bool(*tg, "with_aim", true);
-            p.mouse.trigger2.with_crosshair = obj_bool(*tg, "with_crosshair", false);
             p.mouse.trigger2.with_simple_recoil = obj_bool(*tg, "with_simple_recoil", false);
-            p.mouse.trigger2.with_adv_recoil = obj_bool(*tg, "with_adv_recoil", false);
             p.mouse.trigger2.confidence = static_cast<float>(obj_num(*tg, "confidence", 0.5));
             p.mouse.trigger2.first_err = static_cast<float>(obj_num(*tg, "first_err", 30.0));
             p.mouse.trigger2.first_delay = static_cast<float>(obj_num(*tg, "first_delay", 0.0));

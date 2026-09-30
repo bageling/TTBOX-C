@@ -47,10 +47,8 @@ struct TriggerCmd {
     uint8_t button = 0x00;         // 要点的键位掩码（0 = 不点击）
     int count = 1;                 // 连点次数
     float press_duration_ms = 0.0f; // 按下保持时长
-    // 压枪联动（首枪通知压枪模块，本帧有效）
-    bool recoil_simple = false;
-    bool recoil_adv = false;
-    bool recoil_crosshair = false;
+    // 压枪联动（2026-09-30 收敛：yu 的 auto_trigger_spray_assist 只有一路）
+    bool recoil_simple = false;   // 扳机连发期间自动附带压枪（AimThread 据此补开火键位）
     // 2026-09-29：recoil_y_offset_px（框高 × trigger.y_offset）随 v7.26 一并删除 ——
     //   2.0 没有 y_offset 字段，留着就是一个恒为 0 的死字段。
     // 这一枪是哪套扳机打的：移动节流（trigger2.move_throttle_frames）只对 2.0 生效。
@@ -117,7 +115,6 @@ public:
             return cmd;
         }
         activated_ = true;
-        if (cfg.with_crosshair) cmd.recoil_crosshair = true;
 
         // 急停检测：中心没有准星颜色则本帧禁射（打狙急停）
         if (cfg.stop_detect_enabled && !in.stop_detect_found) return cmd;
@@ -189,7 +186,6 @@ private:
         cmd.press_duration_ms = cfg.press_duration;
         cmd.fired_by_trigger2 = true;
         if (cfg.with_simple_recoil) cmd.recoil_simple = true;
-        if (cfg.with_adv_recoil) cmd.recoil_adv = true;
         fired_ = true;
         last_fire_ms_ = in.now_ms;
         // 连发间隔单位是帧，按 600Hz 折算成 ms（对齐 BB 宿主的 600Hz 刷新）

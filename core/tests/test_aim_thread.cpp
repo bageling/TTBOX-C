@@ -224,21 +224,16 @@ TEST(aim_thread_recoil_keeps_pressing_without_target_when_no_target_always) {
     profile->mouse.enabled = true;
     profile->mouse.aim_profiles[0].hotkey = 0x02;
     profile->mouse.output_deadzone = 0.0f;   // 死区会吃掉小压枪量，断言要看得见
-    // 老压枪配置：update_bb 用它判"开火中"（hotkey_hit）
+    // 压枪热键：新引擎用它判"开火中"（hotkey_hit）
     profile->mouse.recoil.enabled = true;
     profile->mouse.recoil.hotkey = 0x02;
     profile->mouse.recoil.hotkey_mode = 1;   // any
-    // BB 三段查表：开「无目标时也压枪」，关掉延迟/平滑/距离限制便于断言
-    profile->mouse.recoil_bb.enabled = true;
-    profile->mouse.recoil_bb.preset = 3;               // vert 三段 1.0 / 1.3 / 1.6
-    profile->mouse.recoil_bb.preset_total_time_ms[0] = 1500.0f;
-    profile->mouse.recoil_bb.preset_total_time_ms[1] = 1500.0f;
-    profile->mouse.recoil_bb.preset_total_time_ms[2] = 1500.0f;
-    profile->mouse.recoil_bb.no_target_always = true;  // ★ 面板那个复选框
-    profile->mouse.recoil_bb.delay_ms = 0.0f;
-    profile->mouse.recoil_bb.smooth = 0.0f;
-    profile->mouse.recoil_bb.distance_limit = 0.0f;
-    profile->mouse.recoil_bb.global_vert = 1.0f;
+    // 2026-09-30 对照 yu 重做后：只剩一套速率引擎，等价开关是
+    // only_when_target_visible=false（无目标也压，yu 的门控是可关的）
+    profile->mouse.recoil.only_when_target_visible = false;
+    profile->mouse.recoil.strength = 100.0f;   // 拉速 = 3×100×1 = 300 px/s
+    profile->mouse.recoil.speed = 1.0f;
+    profile->mouse.recoil.curve_strength = 0.0f;  // 关释放渐出，输出确定
     config.update(profile);
 
     AimThread thread;

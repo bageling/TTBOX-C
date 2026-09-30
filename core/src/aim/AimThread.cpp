@@ -37,9 +37,8 @@ void AimThread::reset_runtime_state() {
     continuous_lead_.reset();  // 持续提前量累计/方向/渐入电平清零（destroy→init 重建一致）
     personal_shader_.reset();
     recoil_.reset();
-    recoil_cl_.reset();        // 压枪 v1：闭环积分与观测计数随世代清零
-    last_cl_obs_us_ = 0;       // V1.0.06：短暂丢失容忍窗随之清零（跨世代不继承）
-    last_cl_err_y_ = 0.0f;
+    clip_ratio_tracker_.reset();  // V1.0.10：身高反推比随世代清零（禁止跨世代继承旧目标比例）
+    frozen_rect_.reset();        // V1.0.10：冻结框随世代清零（换模型后旧框位置已不可信）
     // BB 对标第二批（2026-09-24）：新模块状态同样必须随世代清零，禁止 A 模型状态漏到 B
     lead_pred_.reset();
     humanize_shaper_.reset();
@@ -109,9 +108,8 @@ void AimThread::loop() {
             PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
             // ---- BB 对标第二批（2026-09-24）：默认全关 ⇒ 不跑即零输出，行为零变化 ----
-            RecoilBbConfig recoil_bb_cfg;           // 三段查表压枪引擎（默认关）
-            VerticalCorrectionConfig vc_cfg;        // 垂直修正 + 力度渐变
-            RecoilClConfig recoil_cl_cfg;           // 开火期闭环纠偏（压枪 v1；默认 enabled=false）
+            // （压枪三段查表 RecoilBbConfig / 垂直修正 VerticalCorrectionConfig /
+            //   开火期闭环 RecoilClConfig 三件 2026-09-30 已删，见 MouseTypes.hpp）
             Lead2Config lead2_cfg;                  // 提前量二代（积分累积）
             HumanizeShaperConfig humanize_cfg;      // BB 拟人化整形链
             AntiOvershootConfig anti_over_cfg;      // 抗过冲
@@ -310,9 +308,6 @@ void AimThread::loop() {
                 lock_confirm_cfg = frame_profile->mouse.lock_confirm;
                 recoil_cfg = frame_profile->mouse.recoil;
                 // BB 对标第二批：每周期重读（改配置即时生效，无需重启）
-                recoil_bb_cfg = frame_profile->mouse.recoil_bb;
-                vc_cfg = frame_profile->mouse.vertical_correction;
-                recoil_cl_cfg = frame_profile->mouse.recoil_cl;   // 压枪 v1：每周期重读，改配置即时生效
                 lead2_cfg = frame_profile->mouse.lead2;
                 humanize_cfg = frame_profile->mouse.humanize;
                 anti_over_cfg = frame_profile->mouse.anti_overshoot;
@@ -379,6 +374,13 @@ void AimThread::loop() {
             //   （RecoilController.hpp 要求 !has_target 才进这些分支，
             //    而此前传给它的 target_visible 就是 selected.valid ⇒ 恒为 true）。
             const bool target_ok = selected.valid && task.frame_width > 0 && task.frame_height > 0;
+            // ---- ★ V1.0.10：压枪的「有效量测」门控（对照 yu，2026-09-30）----
+            // yu 压枪稳的根因不是公式，而是它的输入端永远拿不到坏框：跟踪器量测门控
+            // （框突变/贴边/尺寸非法 ⇒ 拒绝量测 + 保持上一帧）先跑，压枪只吃有效量测。
+            // 我们这一侧对应的信号就是「框底被裁剪区截断 ⇒ 冻结落点（FrozenRect）」，
+            // 即 yu 的 target_near_edge / holding_previous。压枪拿它当门控，
+            // 无效量测按"目标短暂丢失"处理（走 target_lost_release_ms 渐出窗口）。
+            bool measurement_valid = false;
             // 准星到目标距离（px）。无目标时无意义 ⇒ 保持 0（下游据此跳过距离相关项）。
             float dtt_px = 0.0f;
             // 帧间时间基准：**不依赖目标** ⇒ 提到块外，压枪与拉枪曲线都要用。
@@ -387,31 +389,46 @@ void AimThread::loop() {
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
             if (target_ok) {
                 // ---- V1.0.09：框底被裁剪区下边界截断时的身高反推比（按目标自校准）----
+                // V1.0.10 起降级为**兜底**：只在「目标一出现就被截、没有可冻结的框」时使用。
                 // 未截断帧：h/w 就是真实比例 ⇒ 记下来（本目标 EMA + 跨目标 EMA）。
                 // 截断帧：用记住的比例 × 当前框宽反推身高（宽度不随纵向裁剪失真）。
-                // 为什么不用固定比例：cls5 框宽高比实测 0.29~0.52（远距离常只框上半身），
-                // 写死会过度修正；同一目标的比例按距离等比缩放，可直接外推。
                 float clipped_h_over_w = 0.0f;
+                DetectionBox frozen_box;
+                bool have_frozen = false;
                 {
                     const bool box_bottom_clipped =
                         crop_bottom_px_ > 0.0f &&
                         selected.box.y2 >= crop_bottom_px_ - aim_point.clip_bottom_margin_px;
+                    // 有效量测 = 框没被裁剪区截断（见上面 measurement_valid 的说明）
+                    measurement_valid = !box_bottom_clipped;
                     clip_ratio_tracker_.observe(selected.box.x2 - selected.box.x1,
                                                 selected.box.y2 - selected.box.y1,
                                                 box_bottom_clipped, selected.target_id);
+                    // ---- V1.0.10：冻结落点 ----
+                    // 腿被切 ⇒ 停止更新框，落点保持上一次能看全的那一帧（yu 的
+                    // holding_previous 思路）。走近时框顶上升与身高变大互相抵消，
+                    // 那个点在屏幕上本来就不该动 ⇒ 冻整个 rect 比外推更简单也更准。
+                    frozen_rect_.observe(selected.box, box_bottom_clipped, selected.target_id);
                     if (box_bottom_clipped) {
+                        have_frozen = frozen_rect_.frozen_for(selected.target_id, &frozen_box);
+                        // 兜底比：只在 have_frozen=false（拐角撞脸，没看过全框）时被消费。
                         clipped_h_over_w = clip_ratio_tracker_.ratio_for(selected.target_id);
                     }
                 }
-                if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty,
-                                  crop_bottom_px_, clipped_h_over_w)) {
-                    tx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                    ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
+                // 冻结生效 ⇒ 用冻结框算落点；crop_bottom 传 -1 明确关闭外推路径
+                // （冻结框本身在裁剪区内部，不该再被外推改写）。
+                // 没有冻结框 ⇒ 走 V1.0.09 外推（行为不变，留 A/B 通路）。
+                const DetectionBox& aim_box = have_frozen ? frozen_box : selected.box;
+                if (!aim_point_at(aim_box, selected.box.class_id, aim_point, &tx, &ty,
+                                  have_frozen ? -1.0f : crop_bottom_px_,
+                                  have_frozen ? 0.0f : clipped_h_over_w)) {
+                    tx = (aim_box.x1 + aim_box.x2) * 0.5f;
+                    ty = aim_box.y1 + (aim_box.y2 - aim_box.y1) * 0.15f;
                 }
                 // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
                 // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
                 if (aim_point.head_aim.enabled) {
-                    constrain_aim_point_to_head(selected.box, aim_point, &tx, &ty);
+                    constrain_aim_point_to_head(aim_box, aim_point, &tx, &ty);
                 }
                 // ---- BB 命中率随机（照搬 BB 927 原版 main.lua:6445）----
                 // ★ 位置照抄原版：作用在**瞄准点**上、进 PID 之前 ⇒ 它是"瞄歪一点"，
@@ -419,8 +436,8 @@ void AimThread::loop() {
                 // ★ 独立开关，不受 humanize.enabled 管（原版 :5275 同样只判自己）。
                 if (frame_profile && frame_profile->mouse.accuracy_sim.enabled) {
                     accuracy_sim_.apply(&tx, &ty,
-                                        selected.box.x2 - selected.box.x1,
-                                        selected.box.y2 - selected.box.y1,
+                                        aim_box.x2 - aim_box.x1,
+                                        aim_box.y2 - aim_box.y1,
                                         frame_profile->mouse.accuracy_sim);
                 }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
@@ -454,10 +471,7 @@ void AimThread::loop() {
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
                     continuous_lead_.reset();  // 持续提前量累计清零（新目标重新累计"同向距离"）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
-                    recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）
-                    recoil_cl_.reset();  // 压枪 v1：换目标 ⇒ 旧目标的观测作废，重新累积
-                    last_cl_obs_us_ = 0;  // V1.0.06：容忍窗基准一并作废，防跨目标沿用旧误差
-                    last_cl_err_y_ = 0.0f;
+                    recoil_.reset();  // 压枪：换目标 ⇒ 计时/累计量/残差作废（yu 同口径）
                     lead_pred_.reset();       // BB 提前量：新目标重新收帧/清零积分
                     anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
                     humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
@@ -690,124 +704,42 @@ void AimThread::loop() {
             }
 
             // ---- 压枪（recoil）：开火期间持续下压补偿后坐力 ----
-            // ★ 2026-09-25 修：**在目标块外计算**。此前它整段待在 `if (selected.valid)` 里，
-            //   而传给模块的 target_visible 实参就是 selected.valid ⇒ 恒为 true ⇒
-            //   RecoilController 里「无目标时也压枪」(no_target_always) 与「目标丢失保持窗」
-            //   (target_lost_release_ms) 两个分支永远进不去，面板上的复选框是死的。
-            //   （模块级单测直接传 target_visible=false 全过，正好盖住了集成层走不到。）
-            // 无目标时 dtt_px/ty/ref_y 无意义 —— update_bb 在 target_visible=false 时
-            // 本来就不消费它们（见 RecoilController.hpp 的 has_target 分支）。
+            // ★★ 2026-09-30 对照 yu 重做（业主令：「压枪太臃肿、参数太多，算法逻辑也不对」）。
+            //   旧版这里并着三套引擎（速率模型 / BB 三段查表 / 开火期闭环）互相打架，
+            //   现在只剩**一套 yu 式速率模型**（yu 的完整逻辑见
+            //   .workbuddy/artifacts/yu-压枪深挖与TTBOX方案-2026-09-30.md §1）：
+            //     每帧下压 = 3 × strength × speed × ramp × dt     （纯 Y，X 恒 0，无枪械表）
+            //     开火中 ramp = 1（yu 没有缓入）；释放后
+            //       ramp = 1 − curve_strength · smoothstep(t/80ms)，t = 释放后时长
+            //     累计下压量夹在 roi_h 内（yu 的 roi 上限保护）
+            //   门控改用 measurement_valid（本帧量测有效），不是裸 target_ok —— 这是 yu
+            //   压枪稳的根因：框被裁剪/冻结 ⇒ 拒绝量测 ⇒ 压枪走 target_lost_release_ms
+            //   渐出窗口，永远吃不到坏框。
+            //   ★ 仍在目标块外计算：无目标/量测无效时压枪靠释放窗口继续跑，正是 yu 的语义。
             float recoil_add_x = 0.0f;
             float recoil_add_y = 0.0f;
-            // ★★ 两套压枪的**纵向**互斥（2026-09-29 14:3x 业主令；2026-09-29 19:xx 按实机反馈收窄）：
-            //   开火期闭环纠偏 enabled ⇒ 纵向只由闭环出，老引擎的 Y 丢弃。理由两条：
-            //     ① 两套叠加会过压 + 来回摆；
-            //     ② 叠加时分不清"压得好"是谁的功劳，A/B 对比无从谈起。
-            //   闭环关闭 ⇒ 老引擎照旧（闭环内部第一原则会直接清零返回 0，不残留输出）。
-            // ★★ 2026-09-29 19:xx 修（业主实机：「第一个问题是有的枪械压不住，第二弹道偏左已经偏出人身」）：
-            //   闭环 `RecoilClosedLoop::Output` **只有 add_y**，是天生单轴引擎；
-            //   而上面这条互斥让老引擎整段不跑 ⇒ 下面 `scaled_x += recoil_add_x` 加的一直是 0
-            //   ⇒ **横向补偿 100% 消失**，横向只剩瞄准 PID 的 X 轴在扛。这是互斥决策带出来的副作用。
-            //   修法：接管期间**仍让老引擎跑**（保住它的内部时钟 bb_clock_ms_ 与残差连续），
-            //   但只取它的横向分量；纵向仍一律丢弃、只认闭环。
-            //   keep_horiz=false 可退回 V1.0.04 行为（横向一起停）做 A/B。
-            const bool recoil_cl_takeover = recoil_cl_cfg.enabled;
-            const bool keep_horiz = recoil_cl_takeover && recoil_cl_cfg.keep_horiz;
-            if (recoil_cl_takeover && !keep_horiz) {
-                // 横向也不要 ⇒ 老引擎彻底停，复位它的时钟/残差，避免停跑期间滞留陈值
-                recoil_.reset();
-            }
-            if (!recoil_cl_takeover || keep_horiz) {
-                if (recoil_bb_cfg.enabled) {
-                    // BB 三段查表引擎（含垂直修正 + 力度渐变）。
-                    // ★ adv 倍率已真接线：扳机首枪发出 recoil_adv ⇒ 走 recoil_bb.adv_mult（默认 0.9）。
-                    //   扳机没跑（两套都关）时恒 1.0 ⇒ 与接线前逐位一致。
-                    // ★ simple 倍率**仍是死值 1.0**：RecoilBbConfig 没给"简易压枪"留倍率字段，
-                    //   而 update_bb 里 simple_mult<=0 会被兜回 1.0 ⇒ 用 0 表达"不压"根本传不进去。
-                    //   这是接口缺口（不是已接线项），真要按 trigger2.with_simple_recoil 控制
-                    //   简易压枪，得改 update_bb 的语义。此处如实保留 1.0 并标注。
-                    const float adv_mult = trig_cmd.recoil_adv ? recoil_bb_cfg.adv_mult : 1.0f;
-                    const auto bbo = recoil_.update_bb(
-                        hotkey_bits, target_ok, dtt_px, ty, ref_y,
-                        recoil_cfg, recoil_bb_cfg, vc_cfg, dt_ms, recoil_px_per_count,
-                        adv_mult, 1.0f);
-                    recoil_add_x = bbo.recoil_x + bbo.vert_x;
-                    if (!recoil_cl_takeover) {
-                        recoil_add_y = bbo.recoil_y + bbo.vert_y;   // 下压为正（目标偏下方向）
-                    }
-                    // 接管期间：上面的 recoil_add_y 一律不取（纵向归闭环），只留 bbo 的横向。
-                } else {
-                    const auto rd = recoil_.update(hotkey_bits, target_ok, recoil_cfg, dt_ms,
-                                                   recoil_px_per_count);
-                    recoil_add_x = rd.x;   // 拟人 X 微动（可正可负）
-                    if (!recoil_cl_takeover) {
-                        recoil_add_y = rd.y;   // 下压为正
-                    }
+            float recoil_rate_px_s = 0.0f;
+            {
+                // 随枪压枪（trigger2.with_simple_recoil，对齐 yu auto_trigger_spray_assist）：
+                // 扳机连发期间自动附带压枪 —— 等价于"帮它按住开火键"，复用同一 hotkey 语义，
+                // 不另立一套判定（该开关在旧版是死的，没有任何消费点）。
+                uint16_t fire_bits = hotkey_bits;
+                if (trig_cmd.recoil_simple && recoil_cfg.hotkey != 0) {
+                    fire_bits = static_cast<uint16_t>(fire_bits |
+                                                      static_cast<uint16_t>(recoil_cfg.hotkey));
+                }
+                const auto rd = recoil_.update(fire_bits, measurement_valid, recoil_cfg,
+                                               dt_ms, recoil_px_per_count);
+                recoil_add_x = rd.x;   // yu 压枪无横向（恒 0），接口位保留
+                recoil_add_y = rd.y;   // 下压为正
+                if (recoil_.active()) {
+                    float sp = recoil_cfg.speed;
+                    if (!(sp >= 0.1f)) sp = 0.1f;
+                    if (sp > 3.0f) sp = 3.0f;
+                    recoil_rate_px_s = 3.0f * recoil_cfg.strength * sp;
                 }
             }
 
-            // ---- 开火期闭环纠偏（压枪 v1，2026-09-29 业主裁定方案 A）----
-            // 定案原话：「开火后，每一帧看实际偏了多少，下一帧反向拉多少，连续纠偏，
-            //             让弹道自动收敛在一个小区域里」；「有实时观测就压，没有实时观测就不猜」。
-            //
-            // 观测合格性 obs_ok（三条全满足才算"有实时观测"）：
-            //   ① 有目标（target_ok）—— 无目标时观测量无意义；
-            //   ② 开火键按住（与老压枪引擎同一套 hotkey_hit 判据，不另立语义）；
-            //   ③ 框高稳定（|box_h − box_h_ema| <= 0.35 × box_h_ema）—— 框在剧烈缩放说明
-            //      检测不稳 / 目标忽远忽近，此时偏差不可信。
-            // 「换目标」由上面的 recoil_cl_.reset() 处理：换目标即清零 + 重新累积观测帧
-            // ⇒ 天然满足"同目标连续观测"，不需要额外再判 id（而且此处 last_target_id_
-            //   已在 :427 被更新，再判 id 会恒为真，是个假判据）。
-            // 任一不满足 ⇒ 引擎内部立即清零（不猜，且不留跨开火记忆）。
-            //
-            // 观测量用 control_y（像素；目标在准星下方为正 = 后坐力主方向），而不是原始 ey：
-            // control_y 是"平滑后瞄准点 − 参考点"（AimThread.cpp:439），与 PID 同一口径，
-            // 避免把检测框跳变（AimTracker.hpp 记载 y1 帧间 ±18px）当成后坐力。
-            // ★★ 2026-09-29 19:xx 倍镜归一（业主实机「高倍镜表现异常」定障，与 PID 同一招）：
-            //   致动 1 count 在高倍镜下画面位移放大 M 倍，而 gain 是**固定**的标定值
-            //   ⇒ 等效环路增益被放大 M 倍（6 倍镜 ≈ 8.7 倍）⇒ 高倍镜段必然过冲/顶格。
-            //   修法：进闭环前把误差除以本档真实倍率，和下面 PID 用的
-            //   `err_x = control_x / active_zoom_scale_` 完全同一招。
-            //   归一之后 gain（按腰射标定的那个数）对所有档位通吃 —— 不需要逐档重标。
-            //   active_zoom_scale_ 默认 1.0 ⇒ 腰射与未配置档位逐字节不变。
-            const float cl_zoom = (std::isfinite(active_zoom_scale_) && active_zoom_scale_ > 0.0f)
-                                      ? active_zoom_scale_ : 1.0f;
-            const float cl_err_y_now = control_y / cl_zoom;   // 归一域误差（px，腰射当量）
-            const bool cl_hotkey = RecoilController::fire_hotkey_active(hotkey_bits, recoil_cfg);
-            // 没开火但有目标：慢 EMA 学"偏差底子"（静态瞄准偏移）。★底子与误差同域（都归一过）。
-            // 开火期间不学（冻结），防长喷把后坐力本身学进底子 —— 见 RecoilClosedLoop.hpp 文件头。
-            if (target_ok && !cl_hotkey) {
-                recoil_cl_.track_baseline(cl_err_y_now, dt_ms, recoil_cl_cfg);
-            }
-            // ★★ V1.0.06：新鲜观测 = 有目标 && 框高稳定；若非新鲜但距上次新鲜仍在容忍窗内，
-            //   沿用上次归一域误差继续压（不清积分）。定障与取值依据见 AimThread.hpp kClObsHoldUs。
-            bool cl_obs_ok = false;
-            float cl_err_y = cl_err_y_now;
-            if (cl_hotkey) {
-                bool obs_fresh = false;
-                if (target_ok) {
-                    const float cl_box_h = selected.box.y2 - selected.box.y1;
-                    const float cl_box_h_ema = tracker_.state().box_h_ema;
-                    obs_fresh = (cl_box_h_ema <= 0.0f) ||
-                                (std::abs(cl_box_h - cl_box_h_ema) <= 0.35f * cl_box_h_ema);
-                }
-                if (obs_fresh) {
-                    last_cl_obs_us_ = task.timestamp_us;
-                    last_cl_err_y_ = cl_err_y_now;
-                    cl_obs_ok = true;
-                } else if (last_cl_obs_us_ != 0 && task.timestamp_us > last_cl_obs_us_ &&
-                           (task.timestamp_us - last_cl_obs_us_) <= kClObsHoldUs) {
-                    cl_obs_ok = true;      // 容忍窗内：沿用上次有效观测（不清积分、不切目标）
-                    cl_err_y = last_cl_err_y_;
-                }
-            } else {
-                last_cl_obs_us_ = 0;       // 松开开火键 ⇒ 下次开火重新起算
-            }
-            const auto cl_out = recoil_cl_.update(
-                recoil_cl_cfg.enabled, cl_hotkey, cl_obs_ok, cl_err_y, dt_ms, recoil_cl_cfg);
-            // 与老压枪同域相加 —— 但两套**互斥**（见上面的 recoil_cl_takeover）：
-            // 闭环 enabled 时老引擎整段没跑，所以这里加到的就是闭环的全部输出，不存在叠加。
-            recoil_add_y += cl_out.add_y;
             // ---- 输出尾链 ----
             // 有目标 ⇒ PID 已算出 scaled；无目标但压枪在压 ⇒ 也走同一条尾链
             // （deadzone → remainder → int16 → 拟人化 → 热键安全门），
@@ -1120,14 +1052,10 @@ void AimThread::loop() {
             status_.pid_output_y = selected.valid ? aibox_y : 0.0f;
             status_.scheduler_input_x = selected.valid ? scaled_x : 0.0f;
             status_.scheduler_input_y = selected.valid ? scaled_y : 0.0f;
-            // 压枪 v1 闭环遥测（压枪此前零观测面，这几个字段是后续验收的唯一依据）
-            status_.recoil_cl_add_y = recoil_cl_.add_y();
-            status_.recoil_cl_integral = recoil_cl_.integral_px_s();
-            status_.recoil_cl_state = recoil_cl_.state();
-            status_.recoil_cl_obs_frames = recoil_cl_.obs_frames();
-            status_.recoil_cl_p_term = recoil_cl_.p_term();
-            status_.recoil_cl_i_term = recoil_cl_.i_term();
-            status_.recoil_cl_baseline = recoil_cl_.baseline();
+            // 压枪遥测（2026-09-30 收敛为 3 项，对齐 yu 的 recoil_* 观测面）
+            status_.recoil_add_y = recoil_add_y;
+            status_.recoil_acc_px = recoil_.acc_px();
+            status_.recoil_rate_px_s = recoil_rate_px_s;
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;

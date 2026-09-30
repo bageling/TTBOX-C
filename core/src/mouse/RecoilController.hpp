@@ -1,25 +1,33 @@
-// RecoilController.hpp — 压枪引擎（recoil assist）
+// RecoilController.hpp — 压枪引擎（recoil assist）· 2026-09-30 按 yu 重做
 //
-// 功能（小白理解）：
-//   按住开火键（默认左键）时，游戏枪械会有后坐力把准星往上顶。
-//   压枪 = 开火期间自动给鼠标一个持续向下的补偿移动，让弹着点不飘。
+// 小白理解：
+//   按住开火键时枪会自己往上抬，准星不动但画面在跑。压枪 = 开火期间自动往下拉一点，
+//   把弹着点按回原来的位置。
 //
-// 设计原则：
-//   本引擎只负责"算压枪量"，不直接发鼠标命令。
-//   算出的 y 压枪量（count）由 AimThread 注入自身输出链
-//   （pull_curve 之后、deadzone 之前，与 PID 输出融合），
-//   之后统一走 deadzone → remainder → int16 → 拟人化整形 → 热键安全门。
-//   与独立 recoil 链路不同：这里所有输出都受 TTBOX 安全边界约束。
+// 为什么重写（业主 2026-09-30 令：「压枪太臃肿、参数太多，算法有问题、逻辑也不对，
+// 对照 yu 改」）：
+//   旧版把「TTBOX 速率模型 + BB 三段查表 + 垂直修正渐变 + 开火期闭环」四套并在一起跑，
+//   参数 50+ 个、互相打架，其中：
+//     · 缓入 ramp：开火后从 0 爬到 1（≈200ms）⇒ **最需要压的前几发反而没压**，逻辑是反的；
+//     · 残差处理是假的：`out.y = residual_; residual_ = 0;` —— 输出即清零，等于没结转；
+//     · 闭环与瞄准 PID 抢同一个执行器 ⇒ v1 实机「乱晃」（业主已裁定删）。
 //
-// 行为（对齐 TTBOX 压枪模块，参数语义一致）：
-//   1. 热键按住（hotkey/hotkey2，any=任一 / all=同时）才开始计时
-//   2. trigger_delay_ms：按住超过该时长才压（防单点误触），松开重新计时
-//   3. only_when_target_visible：有目标才压；目标丢失后 target_lost_release_ms 内继续压（保持窗口）
-//   4. 下压速率 = strength × speed（px/s）× 帧间隔 dt
-//   5. humanize：缓入缓出拆步（curve_strength）+ X 轴微动（jitter）
-//   6. 亚像素残差累计：压枪量与 PID remainder 同域，小数不丢精度
+// yu 的做法（aiassistance_daemon 汇编级还原，见
+// .workbuddy/artifacts/yu-压枪深挖与TTBOX方案-2026-09-30.md §1）：
+//   每帧拉量 = 3 · strength · speed · ramp · dt        ← 纯 Y，X 恒 0，无枪械表
+//   ramp     = 1                                      （开火中，全量）
+//            = 1 − curve_strength · smoothstep(t/80ms)（释放后渐出，t = 释放后时长）
+//   没按过键 / 从没拿到有效量测 ⇒ 一帧都不输出，也不启动渐出（渐出窗最多 80ms）
+//   钳制      = 累计补偿量夹在 roi_h 内
+//   门控      = 开火按住 + **目标量测有效**；目标丢失后 target_lost_release_ms 内继续跑
+//   残差      = 独立结转（与瞄准 remainder 互不污染）
 //
-// 默认值全部保持"关闭/零输出"，不改变现有行为。
+// 关键：yu 压枪「稳」不在于公式（公式就是上面那行），而在于**它的输入端永远拿不到坏框**
+// ——跟踪器量测门控（框突变/贴边/尺寸非法 → 拒绝量测 + 保持上一帧）先跑，
+// 压枪只吃有效量测。所以本引擎的第二个入参是 `measurement_valid`，不是裸的 target_visible。
+//
+// 本引擎只算量，不发命令：算出的 y（count 域）由 AimThread 在 pull_curve 之后、
+// deadzone 之前注入，统一走 deadzone → remainder → int16 → 拟人化 → 热键安全门。
 #pragma once
 
 #include <cmath>
@@ -31,71 +39,52 @@ namespace ttbox::core::aim {
 
 class RecoilController {
 public:
-    // 压枪输出（count 域）：y 为正下压量；x 为拟人微动量（可正可负）
+    // 压枪输出（count 域）：y 为正下压量；x 恒 0（yu 的压枪是单轴引擎）
     struct RecoilDelta {
         float y = 0.0f;
         float x = 0.0f;
     };
 
     // 每帧调用一次，返回本帧压枪量（count 域）。
-    // hotkey_bits: 物理鼠标按键位图（左1 右2 中4 侧8 侧16）
-    // target_visible: 当前是否有目标（selector 已选中）
-    // cfg: 压枪配置（每帧从 RuntimeProfile 快照更新）
-    // dt_ms: 帧间隔（ms）
-    // px_per_count: 游戏灵敏度标定（gain_y_px_per_count 语义，默认 0.65 px/count）
-    RecoilDelta update(uint16_t hotkey_bits, bool target_visible,
+    // hotkey_bits      : 物理鼠标按键位图（左1 右2 中4 侧8 侧16）
+    // measurement_valid: 本帧是否存在**有效量测**（非 hold-previous / 非贴边 / 尺寸合法）。
+    //                    yu 语义：只有有效量测才让压枪推进；无效量测按丢失处理。
+    // cfg              : 压枪配置（每帧从 RuntimeProfile 快照更新）
+    // dt_ms            : 帧间隔（ms）
+    // px_per_count     : 游戏灵敏度标定（gain_y_px_per_count 语义，默认 0.65 px/count）
+    RecoilDelta update(uint16_t hotkey_bits, bool measurement_valid,
                        const RecoilConfig& cfg, float dt_ms, float px_per_count);
 
-    // -----------------------------------------------------------------------
-    // BB 三段查表引擎（2026-09-24 移植，见 bb-port/02-压枪与小件.md §1/§2/§3）
-    //
-    // 与上面的 update() 是**两套互斥模型**：
-    //   · update()      ：TTBOX 原速率模型（strength × speed × dt，px/s）。
-    //   · update_bb()   ：BB 三段查表（开火时长三等分查 vert/horiz 表）+ 漂移正弦
-    //                     + 一阶平滑 + 垂直修正渐变。
-    //   由 bb.enabled 决定跑哪套；bb.enabled=false（默认）时整套不跑，行为零变化。
-    //
-    // 返回 count 域（与 PID 输出同域）：
-    //   recoil_x/recoil_y → 压枪位移，AimThread 在 pull_curve 之后注入 scaled_y/x
-    //   vert_x/vert_y     → 垂直修正（直接叠加进最终位移，不是乘子）
-    // -----------------------------------------------------------------------
-    struct BbOutput {
-        float recoil_x = 0.0f;
-        float recoil_y = 0.0f;
-        float vert_x = 0.0f;
-        float vert_y = 0.0f;
-    };
-
-    BbOutput update_bb(uint16_t hotkey_bits, bool target_visible, float dist_to_target,
-                       float target_y, float crosshair_y,
-                       const RecoilConfig& cfg, const RecoilBbConfig& bb,
-                       const VerticalCorrectionConfig& vcfg,
-                       float dt_ms, float px_per_count,
-                       float adv_mult, float simple_mult);
-
-    // 目标切换/模型切换等重置：清计时与残差
+    // 目标切换/模型切换等重置：清计时、累计量与残差
     void reset() {
         fire_press_ms_ = 0.0f;
-        target_lost_ms_ = 0.0f;
-        recoil_ramp_ = 0.0f;
-        recoil_residual_y_ = 0.0f;
+        lost_ms_ = 0.0f;
+        release_ms_ = 0.0f;
+        acc_px_ = 0.0f;
+        residual_count_ = 0.0f;
+        was_firing_ = false;
         had_target_ = false;
-        // BB 三段查表引擎状态
-        bb_clock_ms_ = 0.0f;
-        bb_start_ms_ = 0.0f;
-        bb_firing_ = false;
-        bb_last_x_ = 0.0f;
-        bb_last_y_ = 0.0f;
+        ramping_ = false;
+        active_ = false;
     }
 
     // 当前是否处于压枪激活状态（供状态 API/日志用）
     bool active() const { return active_; }
 
-    // 开火键是否按住：语义与 update() / update_bb() 内的判据**完全同源**
-    // （同一 hotkey_hit、同一 hotkey/hotkey2/hotkey_mode），供其它模块复用。
-    // 闭环压枪用它作为"本次开火中"的唯一判据，不另立一套热键语义。
+    // 本次开火累计下压量（px，供遥测）
+    float acc_px() const { return acc_px_; }
+
+    // 开火键是否按住：语义与 update() 内判据**完全同源**（同一 hotkey_hit、
+    // 同一 hotkey/hotkey2/hotkey_mode），供其它模块复用。
     static bool fire_hotkey_active(uint16_t bits, const RecoilConfig& cfg) {
         return hotkey_hit(bits, cfg.hotkey, cfg.hotkey2, cfg.hotkey_mode);
+    }
+
+    // yu 的释放渐出核：C¹ 连续（两端一阶导为 0），t 已归一化到 [0,1]
+    static float smoothstep(float t) {
+        if (t <= 0.0f) return 0.0f;
+        if (t >= 1.0f) return 1.0f;
+        return t * t * (3.0f - 2.0f * t);
     }
 
 private:
@@ -112,34 +101,20 @@ private:
     }
 
     float fire_press_ms_ = 0.0f;      // 本次按住持续时长（ms，松开清零）
-    float target_lost_ms_ = 0.0f;     // 目标丢失持续时长（ms，重新见目标清零）
-    float recoil_ramp_ = 0.0f;        // 缓入缓出系数 [0,1]
-    float recoil_residual_y_ = 0.0f;  // Y 亚像素残差（count）
-    bool had_target_ = false;         // 是否曾经见过目标（丢失窗口仅对曾见目标生效）
+    float lost_ms_ = 0.0f;            // 目标量测无效持续时长（ms，有效时清零）
+    float release_ms_ = 0.0f;         // 释放后经过时长（ms，用于 80ms 渐出）
+    float acc_px_ = 0.0f;             // 本次开火累计下压量（px，受 roi_h 钳制）
+    float residual_count_ = 0.0f;     // 独立亚像素残差（count）
+    bool was_firing_ = false;         // 上一帧是否开火（取上升沿，重置累计量）
+    bool had_target_ = false;         // 是否曾经有过有效量测（丢失窗口仅对曾见目标生效）
+    bool ramping_ = false;            // 是否进入过开火态：没进过就既不压也不渐出
     bool active_ = false;             // 本帧是否激活压枪
-
-    // ---- BB 三段查表引擎状态 ----
-    float bb_clock_ms_ = 0.0f;        // 自维护毫秒时钟（由 dt_ms 累加，不依赖外部时钟源）
-    float bb_start_ms_ = 0.0f;        // 本次开火起始时刻（= 热键按下上升沿的 bb_clock_ms_）
-    bool bb_firing_ = false;          // 上一帧热键是否按下（用于取上升沿）
-    float bb_last_x_ = 0.0f;          // 一阶平滑的上一帧水平输出
-    float bb_last_y_ = 0.0f;          // 一阶平滑的上一帧垂直输出
 };
-
-// clampRecoilDown：最大下压距离截断（见 02 号 §2.2）。
-//   down = 本帧下压量（正 = 向下）；fy = 目标Y - 准星Y（正 = 目标在准星下方多少 px）。
-//   max_dist ≤ 0、down ≤ 0、或没有目标（无 fy）时不做限制，原样返回。
-inline float clamp_recoil_down(float down, bool has_fy, float fy, float max_dist) {
-    if (max_dist <= 0.0f || down <= 0.0f || !has_fy) return down;
-    const float budget = fy + max_dist;
-    if (budget <= 0.0f) return 0.0f;
-    return (down > budget) ? budget : down;
-}
 
 // ==================== 实现 ====================
 
 inline RecoilController::RecoilDelta RecoilController::update(
-    uint16_t hotkey_bits, bool target_visible,
+    uint16_t hotkey_bits, bool measurement_valid,
     const RecoilConfig& cfg, float dt_ms, float px_per_count) {
     RecoilDelta out;
     active_ = false;
@@ -152,195 +127,81 @@ inline RecoilController::RecoilDelta RecoilController::update(
     if (firing) fire_press_ms_ += dt_ms;
     else fire_press_ms_ = 0.0f;
 
-    // 延迟触发：按住超过 trigger_delay_ms 才算"开火中"
+    // 开火上升沿：本次开火重新起算累计下压量与残差（yu 的 roi 是对"这一轮喷射"的钳制）
+    if (firing && !was_firing_) {
+        acc_px_ = 0.0f;
+        release_ms_ = 0.0f;
+    }
+    was_firing_ = firing;
+
+    // 延迟触发：按住超过 trigger_delay_ms 才算"开火中"（防单点误触）
     bool pressing = firing;
     if (cfg.trigger_delay_enabled && cfg.trigger_delay_ms > 0.0f) {
         pressing = firing && (fire_press_ms_ >= cfg.trigger_delay_ms);
     }
 
-    // ---- 目标门控 ----
-    bool target_ok = !cfg.only_when_target_visible || target_visible;
-    if (target_visible) { target_lost_ms_ = 0.0f; had_target_ = true; }
-    else target_lost_ms_ += dt_ms;
+    // ---- 目标量测门控（yu: only_when_target_visible + target_lost_release_ms）----
+    if (measurement_valid) { lost_ms_ = 0.0f; had_target_ = true; }
+    else lost_ms_ += dt_ms;
 
-    // 目标丢失保持窗口：仅当"曾经见过目标"时，丢失 target_lost_release_ms 内仍压。
-    // （从未见过目标 → 窗口无效，防空压；压枪语义一致）
-    if (cfg.only_when_target_visible && !target_visible && had_target_) {
+    bool target_ok = !cfg.only_when_target_visible || measurement_valid;
+    if (cfg.only_when_target_visible && !measurement_valid && had_target_) {
+        // 曾见目标：量测无效的 release 窗口内继续压（yu [0,3000]ms）
         const float keep_ms = (cfg.target_lost_release_ms >= 0.0f) ? cfg.target_lost_release_ms : 0.0f;
-        target_ok = target_lost_ms_ <= keep_ms;
+        target_ok = lost_ms_ <= keep_ms;
     }
 
-    // ---- 缓入缓出 ramp ----
+    // ---- 释放渐出（yu：开火中 ramp=1，无缓入；只在释放段平滑衰减）----
+    // ★ ramping_ 是「这一轮真的压过」的标记：没按过键、或从来没拿到有效量测时，
+    //   既不压也不启动渐出（否则会凭空输出一段无来源的下压量）。
     const bool want = pressing && target_ok;
+    float ramp;
     if (want) {
-        recoil_ramp_ += dt * cfg.humanize_curve_strength * 4.0f;
-        if (recoil_ramp_ > 1.0f) recoil_ramp_ = 1.0f;
+        release_ms_ = 0.0f;
+        ramping_ = true;
+        ramp = 1.0f;
     } else {
-        recoil_ramp_ -= dt * cfg.humanize_curve_strength * 4.0f;
-        if (recoil_ramp_ < 0.0f) recoil_ramp_ = 0.0f;
+        if (!ramping_) return out;
+        release_ms_ += dt_ms;
+        // t ∈ [0,1]：80ms 内走完整个 smoothstep（yu 常数 0x3da3d70a = 0.08s）
+        const float t = release_ms_ / 80.0f;
+        if (t >= 1.0f) { ramping_ = false; return out; }  // 渐出窗最多 80ms（cs=0 也停）
+        const float cs = (cfg.curve_strength < 0.0f) ? 0.0f
+                         : (cfg.curve_strength > 1.0f ? 1.0f : cfg.curve_strength);
+        ramp = 1.0f - cs * smoothstep(t);
+        // release 窗口外（没有目标保持窗接力）就不再输出
+        if (!target_ok && lost_ms_ > ((cfg.target_lost_release_ms > 0.0f) ? cfg.target_lost_release_ms : 0.0f)) {
+            ramp = 0.0f;
+        }
+        if (ramp <= 0.0f) { ramping_ = false; return out; }
     }
 
-    // ---- 下压量生成 ----
-    if (recoil_ramp_ <= 0.0f) return out;
+    // ---- yu 速率公式：rate = 3 × strength × speed（px/s），纯 Y ----
+    const float strength = (cfg.strength < 0.0f) ? 0.0f : (cfg.strength > 300.0f ? 300.0f : cfg.strength);
+    float speed = cfg.speed;
+    if (!(speed >= 0.1f)) speed = 0.1f;      // 出界（含 NaN）一律钉下限，对齐 yu
+    if (speed > 3.0f) speed = 3.0f;
+    const float rate_px_s = 3.0f * strength * speed;
+    if (rate_px_s <= 0.0f || dt <= 0.0f) return out;
 
-    const float rate_px_per_s = cfg.strength * cfg.speed;  // px/s
-    if (rate_px_per_s <= 0.0f) return out;
+    // ---- ROI 钳制：累计下压量不超过 roi_h（yu 的 roi 上限保护）----
+    const float roi = (cfg.roi_h > 0.0f) ? cfg.roi_h : 0.0f;
+    float step_px = rate_px_s * dt * ramp;
+    if (roi > 0.0f) {
+        const float room = roi - acc_px_;
+        if (room <= 0.0f) { active_ = true; return out; }  // 已顶到 ROI：不再出量
+        if (step_px > room) step_px = room;
+    }
+    acc_px_ += step_px;
 
-    // px → count：复用标定响应（gain_y_px_per_count 语义，默认 0.65 px/count）
+    // ---- px → count，独立亚像素残差结转（不丢小数，也不与瞄准 remainder 打架）----
     const float ppc = (px_per_count > 0.05f) ? px_per_count : 0.65f;
-    const float base_count = rate_px_per_s * dt / ppc;
-    const float ramp_count = base_count * recoil_ramp_;
-
-    // ---- X 轴微动：★ 2026-09-29 已删 ----
-    //   原实现在压枪时叠加固定频率正弦 X 微动（humanize_jitter_px，默认 0.25px、
-    //   8Hz），属 7 套重复抖动机制之一 ⇒ 按业主「合不了就删」口径删除。
-    //   humanize_jitter_px / humanize_jitter_frequency 字段保留在结构体里（老配置可解析），
-    //   本模块不再消费。out.x 保持默认 0。
-
-    // ---- Y 残差累计（与 PID remainder 同域，不丢精度）----
-    recoil_residual_y_ += ramp_count;
-    out.y = recoil_residual_y_;
-    recoil_residual_y_ = 0.0f;
+    const float want_count = step_px / ppc + residual_count_;
+    const float whole = std::floor(want_count + 0.5f);   // 四舍五入到整数 count
+    out.y = whole;
+    out.x = 0.0f;                                        // yu：压枪无横向
+    residual_count_ = want_count - whole;
     active_ = true;
-    return out;
-}
-
-// ==================== BB 三段查表引擎实现 ====================
-
-inline RecoilController::BbOutput RecoilController::update_bb(
-    uint16_t hotkey_bits, bool target_visible, float dist_to_target,
-    float target_y, float crosshair_y,
-    const RecoilConfig& cfg, const RecoilBbConfig& bb,
-    const VerticalCorrectionConfig& vcfg,
-    float dt_ms, float px_per_count, float adv_mult, float simple_mult) {
-    BbOutput out;
-    if (!bb.enabled) {
-        // 关掉时把引擎状态一并清干净，避免重新打开时残留旧的计时/平滑值
-        bb_clock_ms_ = 0.0f;
-        bb_start_ms_ = 0.0f;
-        bb_firing_ = false;
-        bb_last_x_ = 0.0f;
-        bb_last_y_ = 0.0f;
-        return out;
-    }
-    if (dt_ms > 0.0f) bb_clock_ms_ += dt_ms;
-
-    const bool firing = hotkey_hit(hotkey_bits, cfg.hotkey, cfg.hotkey2, cfg.hotkey_mode);
-    if (firing && !bb_firing_) bb_start_ms_ = bb_clock_ms_;  // 上升沿重置开火计时
-    if (!firing) {
-        bb_firing_ = false;
-        bb_last_x_ = 0.0f;
-        bb_last_y_ = 0.0f;
-        return out;  // 热键没按：不压、不修正
-    }
-    bb_firing_ = true;
-
-    // [3] 开火延迟
-    const float el = bb_clock_ms_ - bb_start_ms_;
-    if (el < bb.delay_ms) return out;
-
-    // [4] 目标门：有目标且未超距离；或 允许"无目标也压"
-    const bool has_target = target_visible;
-    const bool ok = (has_target && (bb.distance_limit <= 0.0f || dist_to_target <= bb.distance_limit)) ||
-                    (bb.no_target_always && !has_target);
-    if (!ok) return out;
-
-    // px → count 换算（复用 gain_y_px_per_count 语义）
-    const float ppc = (px_per_count > 0.05f) ? px_per_count : 0.65f;
-    const bool has_fy = has_target;
-    const float fy = target_y - crosshair_y;
-
-    // ---- [5..8] 三段查表 ----
-    int pi = bb.preset;
-    if (pi < 1) pi = 1;
-    if (pi > 3) pi = 3;
-    const int idx = pi - 1;
-    const float total_time = bb.preset_total_time_ms[idx];
-    if (total_time > 0.0f) {
-        int seg = static_cast<int>(std::floor(el / (total_time / 3.0f))) + 1;
-        if (seg > 3) seg = 3;
-        if (seg < 1) seg = 1;
-        if (el > total_time) seg = 3;  // 超出总时长固定用最后一段（仍持续压）
-        float v = bb.preset_vert[idx][seg - 1] * bb.global_vert;
-        float h = bb.preset_horiz[idx][seg - 1] * bb.global_horiz;
-
-        // [9] 水平漂移正弦：★ 2026-09-29 已删
-        //   原实现叠加固定频率正弦水平漂移（drift_amplitude 0.20、drift_freq），
-        //   属 7 套重复抖动机制之一 ⇒ 删除。drift_enabled / drift_amplitude /
-        //   drift_freq 字段保留在结构体里，本模块不再消费。
-
-        // Y 路屏蔽（进阶压枪）
-        if (bb.y_suppress_enabled) v *= bb.y_suppress_strength;
-
-        // 最大下压截断（相对实际准星位置）
-        v = clamp_recoil_down(v, has_fy, fy, bb.max_down_distance);
-
-        // [10] 一阶平滑（自身回路）
-        if (bb.smooth > 0.0f) {
-            const float s = (bb.smooth > 0.99f) ? 0.99f : bb.smooth;
-            h = h * (1.0f - s) + bb_last_x_ * s;
-            v = v * (1.0f - s) + bb_last_y_ * s;
-            bb_last_x_ = h;
-            bb_last_y_ = v;
-        }
-
-        // [11] 扳机联动倍率
-        const float am = (adv_mult > 0.0f) ? adv_mult : 1.0f;
-        out.recoil_x = h * am / ppc;
-        out.recoil_y = v * am / ppc;
-    }
-
-    // ---- 垂直修正 + 力度渐变（见 02 号 §3.3）----
-    if (vcfg.enabled) {
-        const bool tgt_ok = vcfg.no_target || has_target;
-        const float v_el = el - vcfg.delay_ms;
-        if (tgt_ok && v_el > 0.0f) {
-            float vm = vcfg.strength;
-            const float hm = vcfg.horiz;
-
-            // 三档渐变互斥：都开则顺序靠前者生效
-            bool ramp_on = false;
-            float r_dur = 0.0f, r_start = 1.0f, r_mid = 1.0f, r_end = 1.0f;
-            if (vcfg.ramp1_enabled) {
-                ramp_on = true;
-                r_dur = vcfg.ramp1_duration_ms;
-                r_start = vcfg.ramp1_start;
-                r_mid = vcfg.ramp1_middle;
-                r_end = vcfg.ramp1_end;
-            } else if (vcfg.ramp2_enabled) {
-                ramp_on = true;
-                r_dur = vcfg.ramp2_duration_ms;
-                r_start = vcfg.ramp2_start;
-                r_mid = vcfg.ramp2_middle;
-                r_end = vcfg.ramp2_end;
-            } else if (vcfg.ramp3_enabled) {
-                ramp_on = true;
-                r_dur = vcfg.ramp3_duration_ms;
-                r_start = vcfg.ramp3_start;
-                r_mid = vcfg.ramp3_middle;
-                r_end = vcfg.ramp3_end;
-            }
-            if (ramp_on && r_dur > 0.0f) {
-                float mult = r_end;
-                if (v_el < r_dur) {
-                    const float t = v_el / r_dur;
-                    mult = (t < 0.5f) ? (r_start + (r_mid - r_start) * (t / 0.5f))
-                                      : (r_mid + (r_end - r_mid) * ((t - 0.5f) / 0.5f));
-                }
-                vm *= mult;
-            }
-
-            // Y 路屏蔽（简易/自动压枪自己的那组键）
-            if (vcfg.y_suppress_enabled) vm *= vcfg.y_suppress_strength;
-
-            vm = clamp_recoil_down(vm, has_fy, fy, vcfg.max_down_distance);
-            // 扳机联动倍率（简易压枪用的那一路，开关是 with_simple_recoil）
-            const float sm = (simple_mult > 0.0f) ? simple_mult : 1.0f;
-            out.vert_x = hm * sm / ppc;
-            out.vert_y = vm * sm / ppc;
-        }
-    }
-
     return out;
 }
 

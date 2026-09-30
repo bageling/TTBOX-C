@@ -888,40 +888,30 @@ CTRL_BLOCKS = [
     # 贝塞尔弧线（2026-09-26 接线）：只暴露 warp 用法真正读到的字段。
     #   generation / segments 是 path1/path2 拆点列那套用的，主链走 warp_error 不读它们
     #   ⇒ 刻意不进表（不补默认值，由 Core 结构体默认兜住），免得面板摆一堆无效开关。
+    # 压枪速率引擎（2026-09-30 对照 yu 重做后）：只剩「速率 + 门控」两组参数。
+    #   拉速 = 3 x strength x speed（px/s），与帧率无关；roi_h 是累计下压上限。
+    #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilConfig 一字不差。
+    ('recoil', 'recoil', [
+        ('only_when_target_visible', 'b', True),
+        ('target_lost_release_ms', 'n', 300.0),
+        ('trigger_delay_enabled', 'b', False),
+        ('trigger_delay_ms', 'n', 120.0),
+        ('strength', 'n', 100.0),
+        ('speed', 'n', 1.0),
+        ('curve_strength', 'n', 0.6),
+        ('roi_h', 'n', 300.0),
+    ]),
     ('bezier', 'bezier', [
         ('enabled', 'b', False), ('curvature', 'n', 0.20),
         ('linear_threshold', 'n', 45.0), ('peak_min', 'n', 0.20), ('peak_max', 'n', 0.60),
         ('dir_up', 'b', True), ('dir_down', 'b', True),
         ('dir_left', 'b', False), ('dir_right', 'b', False), ('min_move', 'n', 0.10),
     ]),
-    ('vc', 'vertical_correction', [
-        ('enabled', 'b', True), ('no_target', 'b', False), ('strength', 'n', 1.0),
-        ('horiz', 'n', 0.0), ('delay_ms', 'n', 0.0), ('max_down_distance', 'n', 0.0),
-        ('y_suppress_enabled', 'b', False), ('y_suppress_strength', 'n', 0.0),
-        ('ramp1_enabled', 'b', False), ('ramp1_duration_ms', 'n', 1300.0),
-        ('ramp1_start', 'n', 1.4), ('ramp1_middle', 'n', 1.6), ('ramp1_end', 'n', 0.01),
-        ('ramp2_enabled', 'b', False), ('ramp2_duration_ms', 'n', 2000.0),
-        ('ramp2_start', 'n', 1.0), ('ramp2_middle', 'n', 0.5), ('ramp2_end', 'n', 0.1),
-        ('ramp3_enabled', 'b', False), ('ramp3_duration_ms', 'n', 2000.0),
-        ('ramp3_start', 'n', 1.0), ('ramp3_middle', 'n', 0.5), ('ramp3_end', 'n', 0.1),
-    ]),
-    # 开火期闭环纠偏（压枪 v2「保持型积分修正」，2026-09-29 实机「开始乱晃」定障后重做）——
-    #   开火后每一帧按实测偏差（相对"开火前静止位置"）反向补一份下压，连续纠偏让弹道收敛；
-    #   不选枪 / 不录枪 / 不预采数据，没有可靠实时观测时整套不动作（不猜）。
-    #   ★ v2：kp 默认 0（P 归瞄准 PID，闭环只补 PID 缺的积分）；量级整体下调，
-    #     新增 slew_count_per_frame 限速（阻尼）。
-    #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilClConfig 一字不差。
-    ('recoil_cl', 'recoil_cl', [
-        ('enabled', 'b', False), ('kp', 'n', 0.0), ('gain', 'n', 0.25),
-        ('integral_max', 'n', 12.0), ('start_frames', 'i', 6), ('press_max_count', 'n', 3.0),
-        ('slew_count_per_frame', 'n', 0.3), ('baseline_tau_ms', 'n', 2000.0),
-        ('keep_horiz', 'b', True),
-    ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
         ('enabled', 'b', False), ('key1', 'key', 16), ('key2', 'key', 0),
-        ('fire_button', 'key', 1), ('with_aim', 'b', True), ('with_crosshair', 'b', False),
-        ('with_simple_recoil', 'b', False), ('with_adv_recoil', 'b', False),
+        ('fire_button', 'key', 1), ('with_aim', 'b', True),
+        ('with_simple_recoil', 'b', False),
         ('confidence', 'n', 0.5), ('first_err', 'n', 30.0), ('first_delay', 'n', 0.0),
         ('fire_interval', 'n', 1.0), ('fire_random', 'n', 0.0), ('fire_count', 'i', 1),
         ('press_duration', 'n', 50.0), ('move_throttle_frames', 'i', 2),
@@ -934,21 +924,6 @@ CTRL_BLOCKS = [
         ('stop_detect_range', 'n', 80.0), ('stop_detect_interval', 'i', 10),
     ]),
 ]
-
-# 压枪三段查表：标量走 CTRL_BLOCKS 的写法，三个数组单独搬运
-# （Core 侧 from_json 直接读 JSON 嵌套数组，见 RuntimeProfile.cpp read_table3x3）。
-# ★ 2026-09-29：drift_enabled / drift_amplitude / drift_freq 三项已从本表撤下。
-#   那三个键对应的固定正弦水平漂移属 TTBOX 自研的 4 套重复抖动之一，core 侧实现已删，
-#   字段保留只为老配置可解析。面板不再暴露，免得留一个调了没反应的假开关。
-CTRL_RECOIL_BB_FIELDS = [
-    ('enabled', 'b', False), ('preset', 'i', 1), ('global_vert', 'n', 0.5),
-    ('global_horiz', 'n', 0.5), ('delay_ms', 'n', 50.0), ('smooth', 'n', 0.90),
-    ('distance_limit', 'n', 80.0), ('no_target_always', 'b', False),
-    ('y_suppress_enabled', 'b', False), ('y_suppress_strength', 'n', 0.0),
-    ('max_down_distance', 'n', 0.0), ('adv_mult', 'n', 0.9),
-]
-RECOIL_BB_PRESET_DEFAULT_VERT = [[1.5, 1.5, 1.5], [1.5, 1.5, 1.5], [1.0, 1.3, 1.6]]
-RECOIL_BB_PRESET_DEFAULT_HORIZ = [[0.0, 0.0, 0.0], [-2.0, -2.0, -2.0], [0.0, 0.0, 0.0]]
 
 # 选靶四项机制：Core 侧是 mouse 顶层扁平键（不是子对象），面板键统一加 selector_ 前缀区分
 CTRL_SELECTOR_FIELDS = [
@@ -1363,50 +1338,20 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
         recoil['hotkey2'] = _hotkey_to_bits(rk['hotkey2'], 0)
     if rk.get('hotkey_mode') is not None:
         recoil['hotkey_mode'] = 2 if str(rk['hotkey_mode']) == 'all' else 1
-    # 2026-09-29：humanize_jitter_px / humanize_jitter_frequency 已撤下（对应压枪的
-    #   固定正弦 X 微动，core 侧实现已删）。humanize_curve_strength 保留 —— 它是
-    #   「缓入缓出拆步」比例，RecoilController 仍在消费（recoil_ramp_ 的爬升速率）。
-    for yk, tk in [('only_when_target_visible', 'only_when_target_visible'),
-                   ('target_lost_release_ms', 'target_lost_release_ms'),
-                   ('trigger_delay_enabled', 'trigger_delay_enabled'),
-                   ('trigger_delay_ms', 'trigger_delay_ms'),
-                   ('strength', 'strength'),
-                   ('speed', 'speed'),
-                   ('humanize_enabled', 'humanize_enabled'),
-                   ('humanize_curve_strength', 'humanize_curve_strength')]:
-        if rk.get(yk) is not None:
-            recoil[tk] = rk[yk]
+    # 速率/门控参数改由下面的 CTRL_BLOCKS['recoil'] 统一搬运，这里只收开关与热键。
     if recoil:
         mouse['recoil'] = recoil
 
     # ---- BB 对标新模块（2026-09-24）----
     # 表驱动搬运：CTRL_BLOCKS 每个 (前缀, 子对象) 收成 mouse[子对象]。
     # 面板只传它渲染出来的字段 ⇒ 这里"见键就收"，不补默认值（补默认是 Core from_json 的职责）。
+    #   ★ 压枪这一块要与上面 body['recoil'] 收进来的开关/热键**合并**（同一个子对象），
+    #     直接覆盖会把 enabled/hotkey 一起抹掉。
     for prefix, obj_key, fields in CTRL_BLOCKS:
         blk = _ctrl_read_block(ctrl, prefix, fields)
         if blk:
-            mouse[obj_key] = blk
-
-    # 压枪三段查表：标量 + 三个数组（数组形状不对就整套不传，由 Core 保留原值）
-    rb = _ctrl_read_block(ctrl, 'recoil_bb', CTRL_RECOIL_BB_FIELDS)
-    vec = _ctrl_read_vec(ctrl, 'recoil_bb_preset_total_time_ms', 3)
-    if vec is not None:
-        rb['preset_total_time_ms'] = vec
-    for tkey in ('preset_vert', 'preset_horiz'):
-        tbl = _ctrl_read_table(ctrl, 'recoil_bb_' + tkey, 3, 3)
-        if tbl is not None:
-            rb[tkey] = tbl
-    if rb:
-        mouse['recoil_bb'] = rb
-
-    # ★ 压枪面板只留一套（业主 2026-09-24 裁定「新版替老版，界面只留一套」）：
-    #   压枪总开关（recoil.enabled）同时驱动 BB 三段查表引擎。
-    #   面板侧刻意**不发** recoil_bb_enabled（见 index.html 的 BB_CTRL_MODULES 生成注释），
-    #   否则开关按了、引擎没开，就是"无声失效"——用户在界面上看不出来。
-    #   老速率模型的参数（strength/speed/humanize_*）仍在 JSON 里保留：已装机设备的
-    #   旧值不丢，只是面板不再暴露，Core 侧也只在 bb.enabled=false 时才会用到。
-    if 'enabled' in recoil:
-        mouse.setdefault('recoil_bb', {})['enabled'] = recoil['enabled']
+            cur = mouse.get(obj_key)
+            mouse[obj_key] = dict(cur, **blk) if isinstance(cur, dict) else blk
 
     # 选靶四项机制：Core 侧是 mouse 顶层扁平键
     for web_key, core_key, kind, _dflt in CTRL_SELECTOR_FIELDS:
@@ -1723,8 +1668,6 @@ def profile_to_web(prof: dict) -> dict:
         'continuous_lead_fade_in_ms': lead.get('fade_in_ms', 300),
         'continuous_lead_fade_out_ms': lead.get('fade_out_ms', 300),
         'continuous_lead_near_disable_ratio': lead.get('near_disable_ratio', 0.66),
-        'humanize_enabled': hz.get('enabled', True),
-        'humanize_curve_strength': hz.get('curve_strength', 0.45),
         'personal_trajectory_enabled': personal_traj.get('enabled', False),
         'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
         'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),
@@ -1750,17 +1693,6 @@ def profile_to_web(prof: dict) -> dict:
     # 缺字段补 Core 结构体默认值（表里的第三列），保证面板首次打开显示的就是 Core 的实际值。
     for prefix, obj_key, fields in CTRL_BLOCKS:
         _ctrl_write_block(ctrl, prefix, fields, mouse.get(obj_key))
-    rb_web = mouse.get('recoil_bb') or {}
-    _ctrl_write_block(ctrl, 'recoil_bb', CTRL_RECOIL_BB_FIELDS, rb_web)
-    ctrl['recoil_bb_preset_total_time_ms'] = list(
-        rb_web.get('preset_total_time_ms') or [1500.0, 1500.0, 1500.0])
-    for tkey, dflt in (('preset_vert', RECOIL_BB_PRESET_DEFAULT_VERT),
-                       ('preset_horiz', RECOIL_BB_PRESET_DEFAULT_HORIZ)):
-        tbl = rb_web.get(tkey)
-        if not (isinstance(tbl, list) and len(tbl) == 3
-                and all(isinstance(r, list) and len(r) == 3 for r in tbl)):
-            tbl = dflt
-        ctrl['recoil_bb_' + tkey] = [list(r) for r in tbl]
     for web_key, core_key, _kind, dflt in CTRL_SELECTOR_FIELDS:
         ctrl[web_key] = mouse.get(core_key, dflt)
 
@@ -1789,11 +1721,7 @@ def profile_to_web(prof: dict) -> dict:
         'ai': {'controller': ctrl},
         'aim_profiles': _aim_profiles_to_web(mouse, inf),
         'recoil': {
-            # ★ 面板只留一个压枪开关（「新版替老版」）：它同时代表 BB 三段查表引擎的开关，
-            #   所以回填取「两者任一为真」——只认 recoil.enabled 的话，若某设备
-            #   recoil_bb.enabled=true 而 recoil.enabled=false，面板会显示"关"但实际在压枪。
-            'enabled': bool(recoil.get('enabled', False))
-                       or bool((mouse.get('recoil_bb') or {}).get('enabled', False)),
+            'enabled': bool(recoil.get('enabled', False)),
             'hotkey': _bits_to_hotkey(recoil.get('hotkey', 1)) or 'left',
             'hotkey2': _bits_to_hotkey(recoil.get('hotkey2', 0)),
             'hotkey_mode': 'all' if recoil.get('hotkey_mode') == 2 else 'any',
@@ -2033,17 +1961,11 @@ def collect_web_state() -> dict:
                     'control_y': m.get('aim_control_y', 0),
                     'pid_output': {'x': m.get('pid_output_x', 0), 'y': m.get('pid_output_y', 0)},
                     'scheduler_input': {'x': m.get('scheduler_input_x', 0), 'y': m.get('scheduler_input_y', 0)},
-                    # 压枪 v1 闭环遥测（2026-09-29）：压枪此前零观测面，这里补上。
-                    #   add_y 与上层 scheduler_input/pid_output 的差互为印证；
-                    #   state: 0=未开火/无观测 1=观测中 2=正在压。
-                    'recoil_cl': {
-                        'add_y': m.get('recoil_cl_add_y', 0),
-                        'p_term': m.get('recoil_cl_p_term', 0),
-                        'i_term': m.get('recoil_cl_i_term', 0),
-                        'integral': m.get('recoil_cl_integral', 0),
-                        'baseline': m.get('recoil_cl_baseline', 0),
-                        'state': m.get('recoil_cl_state', 0),
-                        'obs_frames': m.get('recoil_cl_obs_frames', 0),
+                    # 压枪速率引擎遥测（2026-09-30）：本帧下压量 / 累计下压 / 当前拉速。
+                    'recoil': {
+                        'add_y': m.get('recoil_add_y', 0),
+                        'acc_px': m.get('recoil_acc_px', 0),
+                        'rate_px_s': m.get('recoil_rate_px_s', 0),
                     },
                     'hid_move': {'x': m.get('mouse_dx', 0), 'y': m.get('mouse_dy', 0)},
                     'injection_allowed': bool(m.get('injection_allowed', False)),

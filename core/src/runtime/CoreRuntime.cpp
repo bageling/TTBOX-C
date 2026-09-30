@@ -491,14 +491,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     out->scheduler_input_y = aim_status.scheduler_input_y;
     out->aim_control_y = aim_status.control_y;   // 闭环纠偏真正消费的控制域误差
     // 压枪 v1 闭环遥测（AimThread::Status → Metrics，再经 IpcServer 投影给面板）
-    out->recoil_cl_add_y = aim_status.recoil_cl_add_y;
-    out->recoil_cl_integral = aim_status.recoil_cl_integral;
-    out->recoil_cl_state = aim_status.recoil_cl_state;
-    out->recoil_cl_obs_frames = aim_status.recoil_cl_obs_frames;
-    out->recoil_cl_p_term = aim_status.recoil_cl_p_term;
-    out->recoil_cl_i_term = aim_status.recoil_cl_i_term;
-    out->recoil_cl_baseline = std::isfinite(aim_status.recoil_cl_baseline)
-                                 ? aim_status.recoil_cl_baseline : 0.0;
+    out->recoil_add_y = aim_status.recoil_add_y;
+    out->recoil_acc_px = aim_status.recoil_acc_px;
+    out->recoil_rate_px_s = aim_status.recoil_rate_px_s;
     out->aim_pos_x = aim_status.predicted_x;
     out->aim_pos_y = aim_status.predicted_y;
     out->aim_has_target = aim_status.has_target;

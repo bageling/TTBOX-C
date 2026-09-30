@@ -1,17 +1,23 @@
-// test_recoil.cpp — 压枪引擎（recoil assist）单元测试
+// test_recoil.cpp — 压枪引擎（recoil assist）单元测试 · 2026-09-30 对照 yu 重做
+//
+// 引擎语义：每帧下压 = 3·strength·speed·ramp·dt（纯 Y，开火即全量），
+// 释放段 ramp = 1 − curve_strength·smoothstep(80ms)，累计量夹在 roi_h 内，残差独立结转。
 //
 // 覆盖场景：
 //   Case1  未启用（enabled=false）→ 零输出
-//   Case2  启用 + 热键按住 + 有目标 + strength>0 → Y 下压输出
+//   Case2  启用 + 热键按住 + 量测有效 + strength>0 → Y 下压输出
 //   Case3  热键未按 → 零输出
-//   Case4  only_when_target_visible=true + 无目标 → 零输出
-//   Case5  目标丢失保持窗口：丢失 200ms 内继续压，超时停止
+//   Case4  only_when_target_visible=true + 从未有过有效量测 → 零输出（防空压）
+//   Case5  释放保持窗：量测无效后 target_lost_release_ms 内继续压，超窗停止
 //   Case6  trigger_delay：按住 <120ms 不压，>=120ms 开始压
-//   Case7  strength=0 → 零输出（有热键有目标也不压）
+//   Case7  strength=0 → 零输出（有热键有量测也不压）
 //   Case8  hotkey_mode=all：需双键同时按下
-//   Case9  亚像素残差累计：低速压枪小数不丢（多帧累加输出）
-//   Case10 缓入缓出 ramp：首帧输出 < 稳态输出
-//   Case11 X 轴微动已删除：jitter_px 不再被消费，X 恒为 0
+//   Case9  亚像素残差独立结转：低速压枪小数不丢（多帧累加）
+//   Case10 ★ 无缓入：首帧就是全量（旧版缓入 ramp 是本轮修掉的逻辑错）
+//   Case11 释放渐出：curve_strength 越大，释放后输出衰减越快
+//   Case12 roi_h 钳制：累计下压不超过 roi_h（yu 的上限保护）
+//   Case13 X 恒为 0（yu 压枪是单轴引擎）
+//   Case14 speed 越界（含 NaN）钉到 [0.1,3.0]
 #include <cstdio>
 #include <cmath>
 
@@ -35,15 +41,13 @@ RecoilConfig make_cfg() {
     c.hotkey2 = 0x00;
     c.hotkey_mode = 1;        // any
     c.only_when_target_visible = true;
-    c.target_lost_release_ms = 200.0f;
+    c.target_lost_release_ms = 300.0f;
     c.trigger_delay_enabled = false;
     c.trigger_delay_ms = 120.0f;
-    c.strength = 60.0f;       // px/s
+    c.strength = 100.0f;      // 拉速 = 3×100×1 = 300 px/s
     c.speed = 1.0f;
-    c.humanize_enabled = true;
-    c.humanize_curve_strength = 1.0f;   // 快速 ramp（便于测试）
-    c.humanize_jitter_px = 0.0f;        // 字段保留兼容老配置；X 微动已于 2026-09-29 删除
-    c.humanize_jitter_frequency = 8.0f;
+    c.curve_strength = 0.6f;
+    c.roi_h = 300.0f;
     return c;
 }
 
@@ -54,205 +58,208 @@ constexpr float kDtMs = 16.0f;  // ~60fps
 void test_disabled() {
     std::printf("[Case1] 未启用（enabled=false）→ 零输出\n");
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.enabled = false;
-    const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-    check(d.y == 0.0f && d.x == 0.0f, "enabled=false 时零输出");
-    check(!rc.active(), "enabled=false 时 active=false");
+    RecoilConfig c = make_cfg();
+    c.enabled = false;
+    const auto d = rc.update(0x01, true, c, kDtMs, kPpc);
+    check(d.y == 0.0f && d.x == 0.0f, "输出恒 0");
+    check(!rc.active(), "active=false");
 }
 
-// Case2: 启用 + 热键 + 有目标 → Y 下压
+// Case2: 启用 + 热键 + 量测有效 → Y 下压
 void test_basic_pull() {
-    std::printf("[Case2] 启用 + 左键按住 + 有目标 → Y 下压\n");
+    std::printf("[Case2] 启用 + 热键 + 量测有效 → Y 下压\n");
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
+    const RecoilConfig c = make_cfg();
     float total = 0.0f;
-    for (int i = 0; i < 64; ++i) {  // ~1.0s，ramp 已到顶
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        total += d.y;
-    }
-    // strength=60px/s × 1.0s = 60px = 92.3 count（ramp 到顶后全速）
-    check(total > 80.0f, "1s 累计下压 > 80 count");
-    check(rc.active(), "压枪激活中 active=true");
+    for (int i = 0; i < 10; ++i) total += rc.update(0x01, true, c, kDtMs, kPpc).y;
+    check(total > 0.0f, "累计下压 > 0");
+    check(rc.active(), "active=true");
+    // 10 帧 × 16ms × 300px/s = 48px ⇒ /0.65 ≈ 73.8 count
+    check(std::fabs(total - 73.0f) <= 3.0f, "累计量 ≈ 3·strength·speed·t/ppc");
 }
 
 // Case3: 热键未按 → 零输出
-void test_no_hotkey() {
+void test_not_pressed() {
     std::printf("[Case3] 热键未按 → 零输出\n");
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    const auto d = rc.update(0x00, true, cfg, kDtMs, kPpc);
-    check(d.y == 0.0f && d.x == 0.0f, "无热键时零输出");
+    const RecoilConfig c = make_cfg();
+    const auto d = rc.update(0x02, true, c, kDtMs, kPpc);
+    check(d.y == 0.0f, "未按开火键不压");
 }
 
-// Case4: 仅有目标才压 + 无目标 → 零输出
-void test_no_target() {
-    std::printf("[Case4] only_when_target_visible + 无目标 → 零输出\n");
+// Case4: 从未有过有效量测 → 零输出
+void test_only_when_visible_no_target() {
+    std::printf("[Case4] 仅有效量测才压 + 从未有效 → 零输出\n");
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    float total = 0.0f;
-    for (int i = 0; i < 30; ++i) {
-        const auto d = rc.update(0x01, false, cfg, kDtMs, kPpc);
-        total += d.y;
-    }
-    check(total == 0.0f, "无目标时全程零输出");
+    const RecoilConfig c = make_cfg();
+    const auto d = rc.update(0x01, false, c, kDtMs, kPpc);
+    check(d.y == 0.0f, "没有有效量测不压（防空压）");
 }
 
-// Case5: 目标丢失保持窗口
-void test_target_lost_release() {
-    std::printf("[Case5] 目标丢失保持窗口（200ms 内继续压，超时停止）\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    // 先有目标压 10 帧建立状态
-    for (int i = 0; i < 10; ++i) rc.update(0x01, true, cfg, kDtMs, kPpc);
-    // 丢失目标：200ms 窗口（约 12.5 帧）内应继续输出
-    float in_window = 0.0f;
-    for (int i = 0; i < 8; ++i) {  // 8 × 16ms = 128ms < 200ms
-        const auto d = rc.update(0x01, false, cfg, kDtMs, kPpc);
-        in_window += d.y;
+// Case5: 释放保持窗
+void test_release_window() {
+    std::printf("[Case5] 释放保持窗：无效后 release_ms 内继续压，超窗停止\n");
+    RecoilConfig c = make_cfg();
+    // 保持窗取 16ms（= 1 帧）：第 1 个无效帧仍在窗内，第 2 帧就已经超窗
+    // （取 100ms 的话"超窗"那一段里还有 4 帧是真在压的，断言会自相矛盾）。
+    c.target_lost_release_ms = 16.0f;
+    c.curve_strength = 0.0f;   // 先关渐出，单独看窗口
+    {
+        RecoilController rc;
+        for (int i = 0; i < 5; ++i) rc.update(0x01, true, c, kDtMs, kPpc);
+        float in_win = 0.0f;
+        for (int i = 0; i < 2; ++i) in_win += rc.update(0x01, false, c, kDtMs, kPpc).y;  // 32ms
+        check(in_win > 0.0f, "窗口内仍压");
+        float after = 0.0f;
+        for (int i = 0; i < 13; ++i) after += rc.update(0x01, false, c, kDtMs, kPpc).y; // 再 208ms
+        check(after == 0.0f, "超窗后停止");
     }
-    check(in_window > 0.0f, "丢失 128ms 内仍压枪");
-    // 超过窗口后目标门控关闭：继续压足够长时间后输出为 0
-    RecoilController rc2;
-    RecoilConfig cfg2 = make_cfg();
-    for (int i = 0; i < 10; ++i) rc2.update(0x01, true, cfg2, kDtMs, kPpc);
-    for (int i = 0; i < 200; ++i) rc2.update(0x01, false, cfg2, kDtMs, kPpc);  // 3.2s 远超窗口
-    const auto d = rc2.update(0x01, false, cfg2, kDtMs, kPpc);
-    check(d.y == 0.0f && d.x == 0.0f, "远超丢失窗口后零输出");
+    {
+        RecoilController rc;
+        for (int i = 0; i < 5; ++i) rc.update(0x01, true, c, kDtMs, kPpc);
+        const auto d = rc.update(0x00, false, c, kDtMs, kPpc);   // 松火
+        check(d.y > 0.0f, "松火瞬间仍有保持量（渐出窗口）");
+    }
 }
 
-// Case6: trigger_delay 延迟触发
+// Case6: trigger_delay
 void test_trigger_delay() {
     std::printf("[Case6] trigger_delay：按住 <120ms 不压，>=120ms 开始压\n");
+    RecoilConfig c = make_cfg();
+    c.trigger_delay_enabled = true;
+    c.trigger_delay_ms = 120.0f;
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.trigger_delay_enabled = true;
-    cfg.trigger_delay_ms = 120.0f;
-    // 前 6 帧（96ms < 120ms）不应输出
-    float before = 0.0f;
-    for (int i = 0; i < 6; ++i) {
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        before += d.y;
-    }
-    check(before == 0.0f, "96ms 内不压枪");
-    // 继续按到 8 帧（128ms >= 120ms）开始输出
-    float after = 0.0f;
-    for (int i = 0; i < 20; ++i) {
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        after += d.y;
-    }
-    check(after > 0.0f, "超过 120ms 后开始压枪");
+    float early = 0.0f;
+    for (int i = 0; i < 5; ++i) early += rc.update(0x01, true, c, kDtMs, kPpc).y;  // 80ms
+    check(early == 0.0f, "延迟内零输出");
+    float late = 0.0f;
+    for (int i = 0; i < 10; ++i) late += rc.update(0x01, true, c, kDtMs, kPpc).y;  // 累计 240ms
+    check(late > 0.0f, "超过延迟后开始压");
 }
 
-// Case7: strength=0 → 零输出
+// Case7: strength=0
 void test_zero_strength() {
     std::printf("[Case7] strength=0 → 零输出\n");
+    RecoilConfig c = make_cfg();
+    c.strength = 0.0f;
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.strength = 0.0f;
-    const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-    check(d.y == 0.0f && d.x == 0.0f, "strength=0 时零输出");
+    const auto d = rc.update(0x01, true, c, kDtMs, kPpc);
+    check(d.y == 0.0f, "拉速 0 不输出");
 }
 
-// Case8: hotkey_mode=all 需双键同时按下
-void test_hotkey_all_mode() {
-    std::printf("[Case8] hotkey_mode=all：需双键同时按下\n");
+// Case8: hotkey_mode=all
+void test_hotkey_all() {
+    std::printf("[Case8] hotkey_mode=all 需双键同时按下\n");
+    RecoilConfig c = make_cfg();
+    c.hotkey = 0x01;
+    c.hotkey2 = 0x02;
+    c.hotkey_mode = 2;
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.hotkey = 0x01;   // left
-    cfg.hotkey2 = 0x04;  // middle
-    cfg.hotkey_mode = 2; // all
-    // 只按左键 → 不压
-    float single = 0.0f;
-    for (int i = 0; i < 20; ++i) {
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        single += d.y;
-    }
-    check(single == 0.0f, "只按主键不压");
-    // 双键同按 → 压
-    RecoilController rc2;
-    float both = 0.0f;
-    for (int i = 0; i < 20; ++i) {
-        const auto d = rc2.update(0x01 | 0x04, true, cfg, kDtMs, kPpc);
-        both += d.y;
-    }
-    check(both > 0.0f, "双键同按开始压");
+    check(rc.update(0x01, true, c, kDtMs, kPpc).y == 0.0f, "只按一个键不压");
+    check(rc.update(0x03, true, c, kDtMs, kPpc).y > 0.0f, "两键同按才压");
 }
 
-// Case9: 亚像素残差累计（低速不丢精度）
+// Case9: 亚像素残差独立结转
 void test_residual() {
-    std::printf("[Case9] 亚像素残差累计：低速压枪小数不丢\n");
+    std::printf("[Case9] 亚像素残差独立结转（低速多帧不丢精度）\n");
+    RecoilConfig c = make_cfg();
+    c.strength = 1.0f;        // 3 px/s ⇒ 每帧 0.048px ≈ 0.074 count
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.strength = 4.0f;   // 4px/s → 每帧 4×0.016/0.65 = 0.098 count，远小于 1
     float total = 0.0f;
-    for (int i = 0; i < 100; ++i) {  // 1.6s
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        total += d.y;
-    }
-    // 期望 ≈ 4px/s × 1.6s / 0.65 = 9.85 count
-    check(total > 7.0f, "低速 1.6s 累计 > 7 count（残差不丢）");
+    const int n = 200;
+    for (int i = 0; i < n; ++i) total += rc.update(0x01, true, c, kDtMs, kPpc).y;
+    // 理论：200 × 16ms × 3px/s = 9.6px ⇒ /0.65 ≈ 14.8 count
+    check(std::fabs(total - 14.8f) <= 2.0f, "多帧累加逼近理论值（残差没丢）");
 }
 
-// Case10: 缓入缓出 ramp
-void test_ramp() {
-    std::printf("[Case10] 缓入缓出 ramp：首帧输出 < 稳态输出\n");
+// Case10: ★ 无缓入（本轮修的逻辑错）
+void test_no_ramp_in() {
+    std::printf("[Case10] 无缓入：首帧即全量（旧版缓入 ≈200ms 压不住，本轮删除）\n");
+    RecoilConfig c = make_cfg();
     RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.humanize_curve_strength = 0.5f;  // 较慢 ramp
-    const auto first = rc.update(0x01, true, cfg, kDtMs, kPpc);
-    // 稳态（ramp 满）：strength=60px/s × 0.016s / 0.65 = 1.48 count/帧
-    float steady = 0.0f;
-    for (int i = 0; i < 60; ++i) {
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        steady = d.y;
-    }
-    check(first.y < steady, "首帧输出小于稳态（缓入）");
-    check(steady > 0.0f, "稳态输出 > 0");
-}
-
-// Case11: X 轴微动已删除（2026-09-29）
-//   旧实现：压枪时叠加固定 8Hz 正弦 X 微动（humanize_jitter_px，默认 0.25px）。
-//   该段属 TTBOX 自研的 4 套固定正弦抖动之一，非 BB 来源，已整段删除。
-//   现在的判据：**即使显式给非零 jitter_px，X 也必须恒为 0**（锁死删除行为）。
-void test_jitter() {
-    std::printf("[Case11] X 轴微动已删除：给非零 jitter_px，X 仍恒为 0\n");
-    RecoilController rc;
-    RecoilConfig cfg = make_cfg();
-    cfg.humanize_jitter_px = 0.25f;   // 字段仍在，但不再有消费点
-    float x_sum = 0.0f;
-    for (int i = 0; i < 60; ++i) {
-        const auto d = rc.update(0x01, true, cfg, kDtMs, kPpc);
-        x_sum += d.x;
-    }
-    check(x_sum == 0.0f, "jitter_px=0.25 时 X 仍为 0（抖动已删除）");
-    // 默认档复核
+    const float first = rc.update(0x01, true, c, kDtMs, kPpc).y;
     RecoilController rc2;
-    RecoilConfig cfg2 = make_cfg();
-    cfg2.humanize_jitter_px = 0.0f;
-    float x_sum2 = 0.0f;
-    for (int i = 0; i < 60; ++i) {
-        const auto d = rc2.update(0x01, true, cfg2, kDtMs, kPpc);
-        x_sum2 += d.x;
+    float steady = 0.0f;
+    for (int i = 0; i < 3; ++i) steady = rc2.update(0x01, true, c, kDtMs, kPpc).y;
+    check(first >= steady - 1.0f, "首帧输出不低于稳态（无渐入）");
+}
+
+// Case11: 释放渐出
+void test_release_fade() {
+    std::printf("[Case11] 释放渐出：curve_strength 越大衰得越快\n");
+    // 逐帧比较会被 count 量化（1 count ≈ 0.65px）吃掉差异 ⇒ 比 5 帧（80ms 窗口）的累计量。
+    auto run = [](float cs) {
+        RecoilConfig c = make_cfg();
+        c.curve_strength = cs;
+        RecoilController rc;
+        for (int i = 0; i < 5; ++i) rc.update(0x01, true, c, kDtMs, kPpc);
+        float sum = 0.0f;
+        for (int i = 0; i < 5; ++i) sum += rc.update(0x00, false, c, kDtMs, kPpc).y;
+        return sum;
+    };
+    const float hard = run(0.0f);
+    const float fade = run(1.0f);
+    check(hard > 0.0f, "硬停时仍有整帧量");
+    check(fade < hard, "渐出比硬停衰得快（同窗累计输出更小）");
+}
+
+// Case12: roi_h 钳制
+void test_roi_clamp() {
+    std::printf("[Case12] roi_h 钳制：累计下压不超过 roi_h\n");
+    RecoilConfig c = make_cfg();
+    c.roi_h = 10.0f;          // 10px 上限
+    c.strength = 300.0f;
+    c.speed = 3.0f;
+    RecoilController rc;
+    float total = 0.0f;
+    for (int i = 0; i < 100; ++i) total += rc.update(0x01, true, c, kDtMs, kPpc).y;
+    const float cap = 10.0f / kPpc;   // ≈15.4 count
+    check(total <= cap + 1.5f, "累计量被 roi_h 夹住（不无限拉）");
+}
+
+// Case13: X 恒 0
+void test_x_always_zero() {
+    std::printf("[Case13] X 恒为 0（yu 压枪单轴）\n");
+    RecoilController rc;
+    const RecoilConfig c = make_cfg();
+    float max_x = 0.0f;
+    for (int i = 0; i < 30; ++i) {
+        const float x = rc.update(0x01, true, c, kDtMs, kPpc).x;
+        if (std::fabs(x) > max_x) max_x = std::fabs(x);
     }
-    check(x_sum2 == 0.0f, "jitter_px=0 时 X 为 0");
+    check(max_x == 0.0f, "X 全程 0");
+}
+
+// Case14: speed 越界钉边界
+void test_speed_clamp() {
+    std::printf("[Case14] speed 越界（含 NaN）钉到 [0.1,3.0]\n");
+    RecoilConfig c = make_cfg();
+    RecoilController a;
+    c.speed = 0.0f;
+    check(a.update(0x01, true, c, kDtMs, kPpc).y > 0.0f, "speed=0 → 钉到 0.1 仍出量");
+    RecoilController b;
+    c.speed = std::nanf("");
+    check(b.update(0x01, true, c, kDtMs, kPpc).y > 0.0f, "speed=NaN → 钉到 0.1 仍出量");
 }
 
 }  // namespace
 
 int main() {
-    std::printf("=== test_recoil 压枪引擎测试 ===\n");
+    std::printf("=== test_recoil (yu 式速率压枪) ===\n");
     test_disabled();
     test_basic_pull();
-    test_no_hotkey();
-    test_no_target();
-    test_target_lost_release();
+    test_not_pressed();
+    test_only_when_visible_no_target();
+    test_release_window();
     test_trigger_delay();
     test_zero_strength();
-    test_hotkey_all_mode();
+    test_hotkey_all();
     test_residual();
-    test_ramp();
-    test_jitter();
-    std::printf("结果: %d failures\n", failures);
+    test_no_ramp_in();
+    test_release_fade();
+    test_roi_clamp();
+    test_x_always_zero();
+    test_speed_clamp();
+    std::printf(failures == 0 ? "=== ALL PASS ===\n" : "=== FAILED: %d ===\n", failures);
     return failures == 0 ? 0 : 1;
 }
