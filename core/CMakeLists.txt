@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-30 起产品版本为 "V1.0.13"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-30 起产品版本为 "V1.0.14"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
 #   V1.0.11 相对 V1.0.10：选靶照 yu 加量测跳变门控（拒绝坏量测，沿用上一帧）＋ continuity 免重置＋ 切靶确认窗＋ 开火期禁切靶。
@@ -26,7 +26,12 @@ cmake_minimum_required(VERSION 3.16)
 #                       · smooth_x/y（把 kp/kd 暗削 99% 的「削弱强度」）—— 折算进 kp/kd；
 #                       · kp/kd 语义改为**真实生效值**（旧 25 实际只等于 0.25）、predict 默认 3.0→1.0。
 #                       净效果：落点只剩「瞄点」一个入口；面板上「拉力/刹车」就是真实力气值。
-project(ttbox_core VERSION 1.0.13 LANGUAGES CXX)
+#   V1.0.14 相对 V1.0.13：纯死代码清理（运行时行为 / 配置向量不变）：
+#                       · 删「稳定边界层」空壳 ICoordinate/IMouse/CoreInterfaces/CoreInterface（零实现零引用）
+#                       · 删 controller/PidController + IController（生产用 aim/Pid1Controller，此封装零引用）
+#                       · 删 HumanizeConfig 死结构体（拟人化走 HumanizeShaperConfig）
+#                       测试改用 tests/test_pid_controller.hpp（生产同款 Pid1Controller + 真实参数）。
+project(ttbox_core VERSION 1.0.14 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
