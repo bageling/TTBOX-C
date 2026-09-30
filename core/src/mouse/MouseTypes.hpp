@@ -178,14 +178,6 @@ struct ContinuousLeadConfig {
     float near_disable_ratio = 0.66f;   // 目标接近时衰减比例（保留字段）
 };
 
-// 拟人化（humanize：目标输出附加抖动 + 曲线平滑，用于压枪与瞄准共用）
-struct HumanizeConfig {
-    bool enabled = true;
-    float curve_strength = 0.45f;  // 曲线混合强度
-    float jitter_px = 0.25f;       // 抖动幅度 px
-    float jitter_frequency = 8.0f; // 抖动频率 Hz
-};
-
 // 贝塞尔轨迹（BezierTrajectory）：把一次位移拆成多帧子位移点列
 enum class BezierDirection : int {
     kRight = 0,
