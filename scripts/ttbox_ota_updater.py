@@ -13,7 +13,8 @@
   ⑦ 调 T1.01 原子发布 → 健康检查 → 失败自动 rollback
 
 ★ 双因子是 `and`（③ 与 ④ 缺一不可，PRD SEC-01 验收 1）。
-★ 失败即删包（§0.2）：`finally` 清临时目录；失败分支清 staging。
+★ 更新后删包/清树（§0.2）：`finally` 清临时目录；staging 无论成败一律清
+  （2026-09-30 补：成功路径原缺，板端残留 <ver>.ota.staging 12M/版）。
 ★ 签名对象 = **旁车 `<pkg>.tgz.sign.json`**（不在 tgz 内）—— 消除 §6 陷阱 3 的自指，
   详见 `tools/ota/ttbox_ota_sign.py` 文件头的契约裁定。
 ★ 私钥永不入库；本进程**只有公钥**（发布树内 `deploy/keys/`）。
@@ -517,6 +518,11 @@ class OtaUpdater:
             return self._fail("unexpected", repr(e))
         finally:
             shutil.rmtree(work, ignore_errors=True)   # §0.2：无论成败，临时目录零残留
+            if staging:
+                # 更新后删包/清树（2026-09-30 补）：成功路径此前漏清展开树，板端实测
+                # 残留 <ver>.ota.staging 占 12M；release_install 的 list_versions 又明确
+                # 排除 *.staging ⇒ 无人清理、逐版累积。改为与失败分支同口径：成败皆清。
+                shutil.rmtree(staging, ignore_errors=True)
 
 
 # ---------------------------------------------------------------- 任务文件模式

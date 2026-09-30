@@ -22,7 +22,7 @@
 #   4. 原子发布：mv releases/<ver>.staging releases/<ver>（同分区 rename = 原子）
 #   5. --activate：原子换链 -> 断言 unit -> 过渡软链 -> daemon-reload+restart -> 30s 健康检查
 #                  （失败自动回切上一版本并重启）
-#   6. 保留策略：成功后清理第 3 旧版本（默认保留 2 版）
+#   6. 保留策略：成功后清理第 3 旧版本（默认保留 2 版）+ 循环清 *.staging / *.old.* 残留
 #
 # 可测性：所有绝对前缀参数化（TTBOX_PREFIX / TTBOX_ETC / TTBOX_RUN），
 # 便于在 WSL / 容器里用临时前缀跑通 1-4 步并验证"切换中途掉电不留半截版本"。
@@ -492,6 +492,17 @@ prune_versions() {
             rm -rf -- "${RELEASES_DIR}/${v}"
         fi
     done
+
+    # step6b：循环清残留（*.staging / *.old.* 中间态）。list_versions 明确排除这两类，
+    # 故上面的保留策略永远碰不到它们；浇筑失败/中断留下的残树会逐版累积占盘
+    # （2026-09-30 板端实测：根分区被 logs/snap/残树挤到 100%）。
+    local residue
+    while IFS= read -r residue; do
+        [[ -n "$residue" ]] || continue
+        log "step6b：清理残留 $(basename -- "$residue")"
+        rm -rf -- "$residue"
+    done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d \
+                \( -name '*.staging' -o -name '*.old.*' \) -print 2>/dev/null)
 }
 
 # ---------------------------------------------------------------------------
