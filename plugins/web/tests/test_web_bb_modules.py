@@ -1,21 +1,17 @@
-# test_web_bb_modules.py — BB 对标新模块的 Web ↔ Core 通路单测
+# test_web_bb_modules.py — 辅助功能模块的 Web ↔ Core 通路单测
 #
-# 背景（2026-09-24 批）：把 BB_927 的选靶/压枪/提前量/拟人化/扳机机制用 C++ 重写进
-# core/src/mouse/ 后，还必须让**面板能开、能调、能存**，否则就是"算法在、管线断"
-# （ContinuousLead 当年就是这么废掉的）。本文件锁死 Web 这一层：参数翻译 + 反向投影。
+# 背景：把选靶/压枪/扳机机制重写进 core/src/mouse/ 后，还必须让**面板能开、能调、能存**，
+# 否则就是"算法在、管线断"。本文件锁死 Web 这一层：参数翻译 + 反向投影。
 #
 # 覆盖：
-#   · 提前量 lead2（一代 Lead1 已于 2026-09-29 删除）
-#   · 拟人化链 humanize（含 speed_fluctuation / accuracy_sim 两个附加项）
-#   · 抗过冲 anti_overshoot / 速度自适应 Kp speed_adaptive_kp / 全局正弦 global_wave
 #   · 压枪速率引擎 recoil_*（2026-09-30 对照 yu 重做：拉力/速度/累计上限/松手渐出/门控）
-#   · 自动扳机 trigger2（2.0）—— 含键位字符串 ↔ 位掩码（v7.26 已于 2026-09-29 删除）
+#   · 自动扳机 trigger2（2.0）—— 含键位字符串 ↔ 位掩码
 #   · 选靶四项 selector_*（Core 侧是 mouse 顶层扁平键，不是子对象）
 #
 # 契约（改面板或改后端前先读这三条）：
 #   1. 面板元素 id 即提交键名，全都在 body['ai']['controller'] 这一层。
-#      老字段用 "controller_" 前缀（history 遗留）；BB 新模块用 "<模块前缀>_<字段>"，
-#      例如 lead2_gain / recoil_strength / selector_lock_hold_ms。
+#      老字段用 "controller_" 前缀（history 遗留）；模块用 "<模块前缀>_<字段>"，
+#      例如 recoil_strength / selector_lock_hold_ms。
 #      别名一律不要：同一功能的老界面 retired 后，键名也随之下线。
 #   1b. ★ 压枪的参数来自**两处**：开关/热键在 body['recoil']，算法参数在
 #       body['ai']['controller'] 的 recoil_* 扁平键里。两边必须合并进同一个
@@ -54,47 +50,6 @@ def _body(**ctrl):
 # ---------------------------------------------------------------------------
 # 1. Web body → RuntimeProfile
 # ---------------------------------------------------------------------------
-
-def test_lead2_block_maps_into_nested_object():
-    """提前量只剩二代；旧界面的 lead1_* 键必须被丢弃，不再落 mouse.lead1。"""
-    mod = _load()
-    prof = mod.web_body_to_profile(_body(
-        lead1_enabled=True, lead1_frames=12, lead1_strength=0.7,
-        lead2_enabled=True, lead2_gain=0.075,
-    ))
-    assert 'lead1' not in prof['mouse']      # 一代已下线 ⇒ 键不再搬运
-    l2 = prof['mouse']['lead2']
-    assert l2['enabled'] is True
-    assert abs(l2['gain'] - 0.075) < 1e-12
-    # 面板没渲染的字段不凭空写入（Core from_json 会保留原值/默认值）
-    assert 'decay' not in l2
-
-
-def test_humanize_and_small_modules_map():
-    mod = _load()
-    prof = mod.web_body_to_profile(_body(
-        humanize_enabled=True, humanize_smooth_factor=0.35,
-        accuracy_sim_enabled=True, accuracy_sim_direction=2,
-        speed_fluctuation_enabled=True, speed_fluctuation_intensity=0.25,
-        anti_overshoot_enabled=True, anti_overshoot_inner_frames=4,
-        speed_adaptive_kp_enabled=True, speed_adaptive_kp_move_mult=1.8,
-        global_wave_enabled=True, global_wave_freq=1.7,
-    ))
-    m = prof['mouse']
-    assert m['humanize']['enabled'] is True
-    assert abs(m['humanize']['smooth_factor'] - 0.35) < 1e-9
-    # ★ 2026-09-29：speed_fluctuation / accuracy_sim 已拆成**独立段**（键名不再带 humanize_
-    #   前缀），搬运目标也从 mouse.humanize.* 改成 mouse.speed_fluctuation.* /
-    #   mouse.accuracy_sim.*。此前那 8 个扁平键 Core 一个都不认 ⇒ 面板上「速度波动」
-    #   「精度模拟」两组控件是假开关（调了存不到 core 读的位置）。
-    assert m['accuracy_sim']['enabled'] is True
-    assert m['accuracy_sim']['direction'] == 2
-    assert m['speed_fluctuation']['enabled'] is True
-    assert abs(m['speed_fluctuation']['intensity'] - 0.25) < 1e-9
-    assert m['anti_overshoot']['inner_frames'] == 4
-    assert abs(m['speed_adaptive_kp']['move_mult'] - 1.8) < 1e-9
-    assert abs(m['global_wave']['freq'] - 1.7) < 1e-9
-
 
 
 def test_recoil_rate_engine_fields_map():
@@ -211,7 +166,7 @@ def test_recoil_params_without_switch_block_still_land():
 def test_recoil_absent_everywhere_does_not_invent_object():
     """面板没提交压枪块时，不得凭空造出 mouse.recoil（Core 会保留原值）。"""
     mod = _load()
-    prof = mod.web_body_to_profile(_body(lead2_enabled=True))
+    prof = mod.web_body_to_profile(_body(trigger2_enabled=True))
     assert 'recoil' not in prof['mouse']
 
 
@@ -224,7 +179,6 @@ def test_profile_to_web_recoil_switch_reads_recoil_enabled():
     assert on['enabled'] is True
     # 算法参数走 ai.controller 的 recoil_* 键，不该混进 body['recoil'] 块
     assert 'strength' not in on
-    assert 'humanize_' 'curve_strength' not in on
 
 
 # ---------------------------------------------------------------------------
@@ -235,12 +189,6 @@ def test_profile_to_web_fills_core_defaults():
     """空 profile ⇒ 面板键必须等于 Core 结构体默认值（首次打开显示的就是它）。"""
     mod = _load()
     c = mod.profile_to_web({})['ai']['controller']
-    assert c['lead2_enabled'] is False and c['lead2_y_suppress_enabled'] is True
-    assert abs(c['humanize_noise_sigma'] - 0.2) < 1e-9
-    assert c['humanize_enabled'] is False
-    assert c['anti_overshoot_outer_frames'] == 11 and c['anti_overshoot_inner_frames'] == 6
-    assert abs(c['speed_adaptive_kp_move_mult'] - 1.5) < 1e-9
-    assert abs(c['global_wave_freq'] - 1.0) < 1e-9
     # 压枪速率引擎：默认值必须与 MouseTypes.hpp::RecoilConfig 一致
     assert c['recoil_only_when_target_visible'] is True
     assert c['recoil_target_lost_release_ms'] == 300.0
@@ -265,15 +213,11 @@ def test_profile_to_web_fills_core_defaults():
 def test_profile_to_web_reads_existing_values():
     mod = _load()
     prof = {'mouse': {
-        'lead2': {'enabled': True, 'gain': 0.09},
-        'humanize': {'enabled': True, 'noise_sigma': 0.9},
         'recoil': {'enabled': True, 'strength': 210.0, 'roi_h': 0.0},
         'trigger2': {'enabled': True, 'key1': 1},
         'lock_hold_ms': 800.0, 'priority_scoring': True,
     }}
     c = mod.profile_to_web(prof)['ai']['controller']
-    assert c['lead2_enabled'] is True and abs(c['lead2_gain'] - 0.09) < 1e-9
-    assert abs(c['humanize_noise_sigma'] - 0.9) < 1e-9
     assert c['recoil_strength'] == 210.0
     assert c['recoil_roi_h'] == 0.0                    # 0 = 不限，不能被当成"缺字段"
     # 表里没给的字段落回 Core 结构体默认值，而不是 None
@@ -287,11 +231,6 @@ def test_web_roundtrip_is_lossless():
     """面板键 → Core → 面板键，全部原样回来（含键位字符串）。"""
     mod = _load()
     ctrl_in = {
-        'lead2_enabled': True, 'lead2_max_offset': 30.0,
-        'humanize_enabled': True, 'humanize_overshoot': 0.3, 'humanize_brake_distance': 40.0,
-        'anti_overshoot_enabled': True, 'anti_overshoot_outer_distance': 25.0,
-        'speed_adaptive_kp_enabled': True, 'speed_adaptive_kp_threshold': 4.0,
-        'global_wave_enabled': True, 'global_wave_amp_x': 0.2,
         'recoil_only_when_target_visible': False, 'recoil_strength': 140.0,
         'recoil_curve_strength': 0.35, 'recoil_roi_h': 500.0,
         'trigger2_enabled': True, 'trigger2_key1': 'forward', 'trigger2_first_err': 44.0,
@@ -313,9 +252,8 @@ def test_web_roundtrip_is_lossless():
 def test_disabled_modules_do_not_leak_cross_keys():
     """只开一个模块时，不得在别的模块对象里塞键（避免面板互串）。"""
     mod = _load()
-    prof = mod.web_body_to_profile(_body(lead2_enabled=True))
+    prof = mod.web_body_to_profile(_body(trigger2_enabled=True))
     m = prof['mouse']
-    assert 'lead2' in m
-    for other in ('humanize', 'anti_overshoot', 'speed_adaptive_kp',
-                  'global_wave', 'recoil', 'trigger2'):
+    assert 'trigger2' in m
+    for other in ('recoil',):
         assert other not in m, other

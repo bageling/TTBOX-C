@@ -264,7 +264,7 @@ TEST(runtime_profile_legacy_removed_keys_still_load) {
     CHECK(out.find("recoil_y_offset_px") == std::string::npos);
     CHECK(out.find("target_height_px") == std::string::npos);
     CHECK(out.find("trigger_recoil_offset_px") == std::string::npos);
-    // 反向：仍在用的二代（lead2 / trigger2）不能连坐被删
-    CHECK(out.find("\"lead2\"") != std::string::npos);
+    // 反向：仍在用的 trigger2 不能连坐被删（lead2 已随 BB 对标第二批删除）
+    CHECK(out.find("\"lead2\"") == std::string::npos);
     CHECK(out.find("\"trigger2\"") != std::string::npos);
 }

@@ -227,57 +227,6 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "recoil.speed 需在 [0.1,3.0]（对齐 yu）";
         return false;
     }
-    // 提前量：一代 Lead1 已于 2026-09-29 删除，校验只剩二代。
-    if (mouse.lead2.gain < 0.0f || mouse.lead2.max_offset < 0.0f ||
-        mouse.lead2.activation_distance < 0.0f || mouse.lead2.dead_zone < 0.0f ||
-        mouse.lead2.hold_ms < 0.0f || mouse.lead2.cooldown_ms < 0.0f ||
-        mouse.lead2.y_suppress_min < 0.0f || mouse.lead2.y_suppress_max < 0.0f) {
-        if (error) *error = "lead2 时长、距离不能为负";
-        return false;
-    }
-    if (mouse.lead2.decay < 0.0f || mouse.lead2.decay > 1.0f) {
-        if (error) *error = "lead2.decay 越界";
-        return false;
-    }
-    if (mouse.humanize.smooth_factor < 0.0f || mouse.humanize.smooth_factor > 0.99f ||
-        mouse.humanize.overshoot < 0.0f || mouse.humanize.brake_distance < 0.0f ||
-        mouse.humanize.noise_sigma < 0.0f || mouse.humanize.delay_ms < 0.0f ||
-        mouse.humanize.delay_random_ms < 0.0f ||
-        mouse.humanize.delay_random_ms < 0.0f) {
-        if (error) *error = "humanize 系数/时长越界";
-        return false;
-    }
-    // BB 927 原版：这两个是独立段，校验也各自独立（不挂在 humanize 名下）。
-    if (mouse.speed_fluctuation.accel_ratio < 0.0f || mouse.speed_fluctuation.accel_ratio > 1.0f ||
-        mouse.speed_fluctuation.decel_ratio < 0.0f || mouse.speed_fluctuation.decel_ratio > 1.0f ||
-        mouse.speed_fluctuation.intensity < 0.0f || mouse.speed_fluctuation.intensity > 1.0f) {
-        if (error) *error = "speed_fluctuation 比例/强度越界";
-        return false;
-    }
-    if (mouse.accuracy_sim.perfect_rate < 0.0f || mouse.accuracy_sim.perfect_rate > 100.0f ||
-        mouse.accuracy_sim.offset_strength < 0.0f) {
-        if (error) *error = "accuracy_sim 概率/强度越界";
-        return false;
-    }
-    if (mouse.anti_overshoot.outer_distance < 0.0f || mouse.anti_overshoot.inner_distance < 0.0f ||
-        mouse.anti_overshoot.outer_strength < 0.0f || mouse.anti_overshoot.outer_strength > 100.0f ||
-        mouse.anti_overshoot.inner_strength < 0.0f || mouse.anti_overshoot.inner_strength > 100.0f ||
-        mouse.anti_overshoot.outer_frames < 0 || mouse.anti_overshoot.inner_frames < 0 ||
-        mouse.anti_overshoot.reset_cooldown_ms < 0.0f) {
-        if (error) *error = "anti_overshoot 距离/强度/帧数不能为负（强度 ≤100）";
-        return false;
-    }
-    if (mouse.speed_adaptive_kp.move_mult < 0.0f || mouse.speed_adaptive_kp.static_mult < 0.0f ||
-        mouse.speed_adaptive_kp.threshold < 0.0f || mouse.speed_adaptive_kp.frames < 1) {
-        if (error) *error = "speed_adaptive_kp 乘子/阈值不能为负、窗口至少 1 帧";
-        return false;
-    }
-    if (mouse.global_wave.amp_x < 0.0f || mouse.global_wave.amp_y < 0.0f ||
-        mouse.global_wave.freq < 0.0f || mouse.global_wave.smooth < 0.0f ||
-        mouse.global_wave.smooth > 1.0f) {
-        if (error) *error = "global_wave 振幅/频率不能为负，smooth 须在 [0,1]";
-        return false;
-    }
     if (mouse.trigger2.first_err < 0.0f || mouse.trigger2.first_delay < 0.0f ||
         mouse.trigger2.fire_interval < 0.0f || mouse.trigger2.fire_random < 0.0f ||
         mouse.trigger2.press_duration < 0.0f || mouse.trigger2.precision_range < 0.0f ||
@@ -517,84 +466,6 @@ JsonValue RuntimeProfile::to_json() const {
     rc.set("curve_strength", JsonValue::number(static_cast<double>(mouse.recoil.curve_strength)));
     rc.set("roi_h", JsonValue::number(static_cast<double>(mouse.recoil.roi_h)));
     m.set("recoil", std::move(rc));
-    // ---- BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 三个小件 ----
-    // 全部默认 enabled=false ⇒ 未显式开启时 AimThread 不跑这些模块，输出链逐字节不变。
-    // （压枪三段查表 / 垂直修正 / 开火期闭环 三块 2026-09-30 已删，不再序列化）
-    {
-        // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 不再序列化 lead1 段。
-        JsonValue l2 = JsonValue::object();
-        l2.set("enabled", JsonValue::boolean(mouse.lead2.enabled));
-        l2.set("gain", JsonValue::number(static_cast<double>(mouse.lead2.gain)));
-        l2.set("max_offset", JsonValue::number(static_cast<double>(mouse.lead2.max_offset)));
-        l2.set("decay", JsonValue::number(static_cast<double>(mouse.lead2.decay)));
-        l2.set("activation_distance", JsonValue::number(static_cast<double>(mouse.lead2.activation_distance)));
-        l2.set("dead_zone", JsonValue::number(static_cast<double>(mouse.lead2.dead_zone)));
-        l2.set("hold_ms", JsonValue::number(static_cast<double>(mouse.lead2.hold_ms)));
-        l2.set("cooldown_ms", JsonValue::number(static_cast<double>(mouse.lead2.cooldown_ms)));
-        l2.set("y_suppress_enabled", JsonValue::boolean(mouse.lead2.y_suppress_enabled));
-        l2.set("y_suppress_min", JsonValue::number(static_cast<double>(mouse.lead2.y_suppress_min)));
-        l2.set("y_suppress_max", JsonValue::number(static_cast<double>(mouse.lead2.y_suppress_max)));
-        m.set("lead2", std::move(l2));
-
-        JsonValue hu = JsonValue::object();
-        hu.set("enabled", JsonValue::boolean(mouse.humanize.enabled));
-        hu.set("smooth_factor", JsonValue::number(static_cast<double>(mouse.humanize.smooth_factor)));
-        hu.set("overshoot", JsonValue::number(static_cast<double>(mouse.humanize.overshoot)));
-        hu.set("brake_distance", JsonValue::number(static_cast<double>(mouse.humanize.brake_distance)));
-        hu.set("noise_sigma", JsonValue::number(static_cast<double>(mouse.humanize.noise_sigma)));
-        hu.set("delay_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_ms)));
-        hu.set("delay_random_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_random_ms)));
-        // ★ 2026-09-28：speed_fluctuation / accuracy_sim 已从 humanize 段拆出，
-        //   按 BB 927 原版口径独立成段（原版是独立开关，不归 humanize_enabled 管）。
-        m.set("humanize", std::move(hu));
-
-        // BB 927 原版：这两个是独立开关，不归 humanize.enabled 管（照搬口径）。
-        {
-            JsonValue sf = JsonValue::object();
-            sf.set("enabled", JsonValue::boolean(mouse.speed_fluctuation.enabled));
-            sf.set("start_speed", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.start_speed)));
-            sf.set("accel_ratio", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.accel_ratio)));
-            sf.set("decel_ratio", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.decel_ratio)));
-            sf.set("intensity", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.intensity)));
-            sf.set("total_distance_px", JsonValue::number(static_cast<double>(mouse.speed_fluctuation.total_distance_px)));
-            m.set("speed_fluctuation", std::move(sf));
-        }
-        {
-            JsonValue as = JsonValue::object();
-            as.set("enabled", JsonValue::boolean(mouse.accuracy_sim.enabled));
-            as.set("perfect_rate", JsonValue::number(static_cast<double>(mouse.accuracy_sim.perfect_rate)));
-            as.set("offset_strength", JsonValue::number(static_cast<double>(mouse.accuracy_sim.offset_strength)));
-            as.set("direction", JsonValue::number(static_cast<double>(mouse.accuracy_sim.direction)));
-            m.set("accuracy_sim", std::move(as));
-        }
-
-        JsonValue ao = JsonValue::object();
-        ao.set("enabled", JsonValue::boolean(mouse.anti_overshoot.enabled));
-        ao.set("outer_distance", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_distance)));
-        ao.set("outer_strength", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_strength)));
-        ao.set("inner_distance", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_distance)));
-        ao.set("inner_strength", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_strength)));
-        ao.set("outer_frames", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_frames)));
-        ao.set("inner_frames", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_frames)));
-        ao.set("reset_cooldown_ms", JsonValue::number(static_cast<double>(mouse.anti_overshoot.reset_cooldown_ms)));
-        m.set("anti_overshoot", std::move(ao));
-
-        JsonValue sk = JsonValue::object();
-        sk.set("enabled", JsonValue::boolean(mouse.speed_adaptive_kp.enabled));
-        sk.set("move_mult", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.move_mult)));
-        sk.set("static_mult", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.static_mult)));
-        sk.set("threshold", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.threshold)));
-        sk.set("frames", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.frames)));
-        m.set("speed_adaptive_kp", std::move(sk));
-
-        JsonValue gw = JsonValue::object();
-        gw.set("enabled", JsonValue::boolean(mouse.global_wave.enabled));
-        gw.set("amp_x", JsonValue::number(static_cast<double>(mouse.global_wave.amp_x)));
-        gw.set("amp_y", JsonValue::number(static_cast<double>(mouse.global_wave.amp_y)));
-        gw.set("freq", JsonValue::number(static_cast<double>(mouse.global_wave.freq)));
-        gw.set("smooth", JsonValue::number(static_cast<double>(mouse.global_wave.smooth)));
-        m.set("global_wave", std::move(gw));
-    }
     // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 删除 ⇒ 不再序列化 trigger 段；
     // 只剩 2.0（Trigger2Config）一套。运行时状态（激活态 / 发数 / 计时器）不落盘。
     JsonValue tg2 = JsonValue::object();
@@ -623,21 +494,6 @@ JsonValue RuntimeProfile::to_json() const {
     tg2.set("stop_detect_range", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_range)));
     tg2.set("stop_detect_interval", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_interval)));
     m.set("trigger2", std::move(tg2));
-    // 贝塞尔弧线（误差域整形；2026-09-26 接线）
-    JsonValue bz = JsonValue::object();
-    bz.set("enabled", JsonValue::boolean(mouse.bezier.enabled));
-    bz.set("generation", JsonValue::number(static_cast<double>(mouse.bezier.generation)));
-    bz.set("segments", JsonValue::number(static_cast<double>(mouse.bezier.segments)));
-    bz.set("linear_threshold", JsonValue::number(static_cast<double>(mouse.bezier.linear_threshold)));
-    bz.set("curvature", JsonValue::number(static_cast<double>(mouse.bezier.curvature)));
-    bz.set("peak_min", JsonValue::number(static_cast<double>(mouse.bezier.peak_min)));
-    bz.set("peak_max", JsonValue::number(static_cast<double>(mouse.bezier.peak_max)));
-    bz.set("dir_up", JsonValue::boolean(mouse.bezier.dir_up));
-    bz.set("dir_down", JsonValue::boolean(mouse.bezier.dir_down));
-    bz.set("dir_left", JsonValue::boolean(mouse.bezier.dir_left));
-    bz.set("dir_right", JsonValue::boolean(mouse.bezier.dir_right));
-    bz.set("min_move", JsonValue::number(static_cast<double>(mouse.bezier.min_move)));
-    m.set("bezier", std::move(bz));
     // 热键保护（hotkey_guard）：按一次 toggle_hotkey 切换「热键挂起」。
     // 挂起状态本身是运行时状态（AimThread 成员），**不落盘**；这里只持久化配置。
     JsonValue hg = JsonValue::object();
@@ -907,63 +763,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.recoil.curve_strength = static_cast<float>(obj_num(*rk, "curve_strength", 0.6));
             p.mouse.recoil.roi_h = static_cast<float>(obj_num(*rk, "roi_h", 300.0));
         }
-        // ---- BB 对标第二批（2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）----
-        // 压枪三段查表（recoil_bb）/ 垂直修正（vertical_correction）/ 开火期闭环（recoil_cl）
-        // 三块 2026-09-30 已删 ⇒ 旧配置里残留的这三段直接忽略（与 lead1 同口径）。
-        // 提前量一代（Lead1）已于 2026-09-29 删除 ⇒ 旧配置里的 `lead1` 段直接忽略。
-        if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {
-            auto& c = p.mouse.lead2;
-            c.enabled = obj_bool(*l2, "enabled", false);
-            c.gain = static_cast<float>(obj_num(*l2, "gain", 0.05));
-            c.max_offset = static_cast<float>(obj_num(*l2, "max_offset", 25.0));
-            c.decay = static_cast<float>(obj_num(*l2, "decay", 0.95));
-            c.activation_distance = static_cast<float>(obj_num(*l2, "activation_distance", 100.0));
-            c.dead_zone = static_cast<float>(obj_num(*l2, "dead_zone", 1.0));
-            c.hold_ms = static_cast<float>(obj_num(*l2, "hold_ms", 10.0));
-            c.cooldown_ms = static_cast<float>(obj_num(*l2, "cooldown_ms", 250.0));
-            c.y_suppress_enabled = obj_bool(*l2, "y_suppress_enabled", true);
-            c.y_suppress_min = static_cast<float>(obj_num(*l2, "y_suppress_min", 0.5));
-            c.y_suppress_max = static_cast<float>(obj_num(*l2, "y_suppress_max", 2.0));
-        }
-        if (const JsonValue* hu = m->find("humanize"); hu && hu->is_object()) {
-            auto& c = p.mouse.humanize;
-            c.enabled = obj_bool(*hu, "enabled", false);
-            c.smooth_factor = static_cast<float>(obj_num(*hu, "smooth_factor", 0.0));
-            c.overshoot = static_cast<float>(obj_num(*hu, "overshoot", 0.0));
-            c.brake_distance = static_cast<float>(obj_num(*hu, "brake_distance", 0.0));
-            c.noise_sigma = static_cast<float>(obj_num(*hu, "noise_sigma", 0.2));
-            c.delay_ms = static_cast<float>(obj_num(*hu, "delay_ms", 0.0));
-            c.delay_random_ms = static_cast<float>(obj_num(*hu, "delay_random_ms", 0.0));
-            // ★ 2026-09-28：speed_fluctuation / accuracy_sim 已拆出 humanize 段，
-            //   改为独立段解析（见下方 mouse.speed_fluctuation / mouse.accuracy_sim）。
-        }
-        if (const JsonValue* ao = m->find("anti_overshoot"); ao && ao->is_object()) {
-            auto& c = p.mouse.anti_overshoot;
-            c.enabled = obj_bool(*ao, "enabled", false);
-            c.outer_distance = static_cast<float>(obj_num(*ao, "outer_distance", 20.0));
-            c.outer_strength = static_cast<float>(obj_num(*ao, "outer_strength", 50.0));
-            c.inner_distance = static_cast<float>(obj_num(*ao, "inner_distance", 10.0));
-            c.inner_strength = static_cast<float>(obj_num(*ao, "inner_strength", 90.0));
-            c.outer_frames = static_cast<int>(obj_int(*ao, "outer_frames", 11));
-            c.inner_frames = static_cast<int>(obj_int(*ao, "inner_frames", 6));
-            c.reset_cooldown_ms = static_cast<float>(obj_num(*ao, "reset_cooldown_ms", 500.0));
-        }
-        if (const JsonValue* sk = m->find("speed_adaptive_kp"); sk && sk->is_object()) {
-            auto& c = p.mouse.speed_adaptive_kp;
-            c.enabled = obj_bool(*sk, "enabled", false);
-            c.move_mult = static_cast<float>(obj_num(*sk, "move_mult", 1.5));
-            c.static_mult = static_cast<float>(obj_num(*sk, "static_mult", 0.8));
-            c.threshold = static_cast<float>(obj_num(*sk, "threshold", 3.0));
-            c.frames = static_cast<int>(obj_int(*sk, "frames", 5));
-        }
-        if (const JsonValue* gw = m->find("global_wave"); gw && gw->is_object()) {
-            auto& c = p.mouse.global_wave;
-            c.enabled = obj_bool(*gw, "enabled", false);
-            c.amp_x = static_cast<float>(obj_num(*gw, "amp_x", 0.10));
-            c.amp_y = static_cast<float>(obj_num(*gw, "amp_y", 0.10));
-            c.freq = static_cast<float>(obj_num(*gw, "freq", 1.0));
-            c.smooth = static_cast<float>(obj_num(*gw, "smooth", 0.50));
-        }
         // 自动扳机 v7.26（TriggerConfig）已于 2026-09-29 删除 ⇒ 旧配置里的 `trigger` 段
         // 直接忽略，只解析 2.0（`trigger2`）。键位只取低 5 位（左1 右2 中4 侧8 侧16）。
         if (const JsonValue* tg = m->find("trigger2"); tg && tg->is_object()) {
@@ -991,23 +790,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.trigger2.stop_detect_tolerance = static_cast<int>(obj_int(*tg, "stop_detect_tolerance", 60));
             p.mouse.trigger2.stop_detect_range = static_cast<int>(obj_int(*tg, "stop_detect_range", 80));
             p.mouse.trigger2.stop_detect_interval = static_cast<int>(obj_int(*tg, "stop_detect_interval", 10));
-        }
-        // 贝塞尔弧线（2026-09-26 接线）：缺字段一律取结构体默认（enabled=false ⇒ 不改误差）。
-        if (const JsonValue* bz = m->find("bezier"); bz && bz->is_object()) {
-            auto& c = p.mouse.bezier;
-            const JsonValue* en = bz->find("enabled");
-            c.enabled = (en && en->is_bool()) ? en->as_bool(false) : false;
-            c.generation = static_cast<int>(obj_int(*bz, "generation", 1));
-            c.segments = static_cast<float>(obj_num(*bz, "segments", 10.0));
-            c.linear_threshold = static_cast<float>(obj_num(*bz, "linear_threshold", 45.0));
-            c.curvature = static_cast<float>(obj_num(*bz, "curvature", 0.2));
-            c.peak_min = static_cast<float>(obj_num(*bz, "peak_min", 0.2));
-            c.peak_max = static_cast<float>(obj_num(*bz, "peak_max", 0.6));
-            c.dir_up = obj_bool(*bz, "dir_up", true);
-            c.dir_down = obj_bool(*bz, "dir_down", true);
-            c.dir_left = obj_bool(*bz, "dir_left", false);
-            c.dir_right = obj_bool(*bz, "dir_right", false);
-            c.min_move = static_cast<float>(obj_num(*bz, "min_move", 0.1));
         }
         // 热键保护（hotkey_guard）解析：缺字段一律取"保守默认"（enabled=false ⇒ 不翻转、位图原样透传），
         // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。
@@ -1078,23 +860,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
         // V3 阶段 5 前置：实测回路延迟（ms）。老配置没有这个键 ⇒ 0（未标定）。
         p.mouse.response_delay_ms = static_cast<float>(obj_num(*m, "response_delay_ms", 0.0));
-        // BB 927 原版：两个独立拟人化开关（不归 humanize.enabled 管）。老配置无键 ⇒ 默认关。
-        if (const JsonValue* sf = m->find("speed_fluctuation"); sf && sf->is_object()) {
-            auto& c = p.mouse.speed_fluctuation;
-            c.enabled = obj_bool(*sf, "enabled", false);
-            c.start_speed = static_cast<float>(obj_num(*sf, "start_speed", 0.80));
-            c.accel_ratio = static_cast<float>(obj_num(*sf, "accel_ratio", 0.20));
-            c.decel_ratio = static_cast<float>(obj_num(*sf, "decel_ratio", 0.20));
-            c.intensity = static_cast<float>(obj_num(*sf, "intensity", 0.15));
-            c.total_distance_px = static_cast<float>(obj_num(*sf, "total_distance_px", 452.5));
-        }
-        if (const JsonValue* as = m->find("accuracy_sim"); as && as->is_object()) {
-            auto& c = p.mouse.accuracy_sim;
-            c.enabled = obj_bool(*as, "enabled", false);
-            c.perfect_rate = static_cast<float>(obj_num(*as, "perfect_rate", 90.0));
-            c.offset_strength = static_cast<float>(obj_num(*as, "offset_strength", 0.50));
-            c.direction = static_cast<int>(obj_int(*as, "direction", 0));
-        }
         // V3 阶段 5：抖动前馈扣除。老配置没有这个键 ⇒ 默认关（enabled=false）。
         if (const JsonValue* jf = m->find("jitter_feedforward"); jf && jf->is_object()) {
             auto& c = p.mouse.jitter_feedforward;

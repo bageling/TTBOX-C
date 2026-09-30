@@ -9,13 +9,10 @@
 #include <cmath>
 #include <cstdio>
 
-#include "mouse/HumanizeShaper.hpp"
 #include "mouse/JitterFeedforward.hpp"
 #include "mouse/MouseTypes.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
 
-using ttbox::core::aim::HumanizeShaper;
-using ttbox::core::aim::HumanizeShaperConfig;
 using ttbox::core::aim::JitterFeedforward;
 using ttbox::core::aim::PersonalTrajectoryConfig;
 using ttbox::core::aim::PersonalTrajectoryShader;
@@ -86,54 +83,6 @@ void test_buffer_behavior() {
           "到期量 = 队列里所有样本之和");
 }
 
-// 场景 4：HumanizeShaper 只上报高斯噪声，不上报过冲/制动
-void test_humanize_reports_noise_only() {
-    HumanizeShaperConfig cfg;
-    cfg.enabled = true;
-    cfg.overshoot = 0.5f;      // 故意开过冲：它是"故意多走一段"，不该被扣
-    cfg.brake_distance = 200.0f;
-    cfg.noise_sigma = 0.0f;    // 先关噪声
-    HumanizeShaper hs;
-    hs.reset();
-    for (int i = 0; i < 3; ++i) {
-        float x = 10.0f, y = 10.0f;
-        HumanizeShaper::Context ctx;
-        ctx.dtt = 100.0f;
-        ctx.now_ms = static_cast<uint32_t>(i * 7);
-        ctx.aiming = true;
-        hs.apply(&x, &y, cfg, ctx);
-        check(hs.last_jitter_x() == 0.0f && hs.last_jitter_y() == 0.0f,
-              "noise_sigma=0 时不上报抖动（过冲/制动不算抖动）");
-    }
-    // 打开噪声 ⇒ 报出的值 = 实际叠到 x/y 上的那一份
-    cfg.noise_sigma = 0.5f;
-    HumanizeShaper hs2;
-    hs2.reset();
-    bool saw_nonzero = false;
-    for (int i = 0; i < 50; ++i) {
-        float x = 0.0f, y = 0.0f;
-        HumanizeShaper::Context ctx;
-        ctx.dtt = 100.0f;
-        ctx.now_ms = static_cast<uint32_t>(i) * 7u;
-        ctx.aiming = true;
-        hs2.apply(&x, &y, cfg, ctx);
-        if (hs2.last_jitter_x() != 0.0f) {
-            saw_nonzero = true;
-            check(std::fabs(x - hs2.last_jitter_x()) < 1e-6f,
-                  "上报量 = 本帧实际叠加的噪声（输入为 0 时输出即噪声）");
-        }
-    }
-    check(saw_nonzero, "开噪声后确实能读到非零抖动");
-
-    // 关闭 ⇒ 恒 0（哪怕上一帧有值，也不能残留）
-    cfg.enabled = false;
-    float x = 9.0f, y = 9.0f;
-    HumanizeShaper::Context ctx;
-    ctx.dtt = 100.0f;
-    hs2.apply(&x, &y, cfg, ctx);
-    check(hs2.last_jitter_x() == 0.0f && hs2.last_jitter_y() == 0.0f,
-          "未启用时抖动上报恒为 0（不残留上一帧）");
-}
 
 // 场景 5：PersonalTrajectoryShader 的垂直抖动可上报，且换目标/未激活时归零
 void test_personal_reports_perp_only() {
@@ -223,7 +172,6 @@ int main() {
     test_release_frame();
     test_framerate_drift();
     test_buffer_behavior();
-    test_humanize_reports_noise_only();
     test_personal_reports_perp_only();
     test_fused_guard();
     test_default_is_noop();

@@ -839,55 +839,10 @@ CONTROLLER_BOOLS = {
 #   面板首次回填显示的就是它，对不上会让"没存过配置"的设备显示成另一套参数。
 # ★ 本表只做搬运，不做校验；越界值由 Core 的 RuntimeProfile::validate 拦。
 CTRL_BLOCKS = [
-    ('lead2', 'lead2', [
-        ('enabled', 'b', False), ('gain', 'n', 0.05), ('max_offset', 'n', 25.0),
-        ('decay', 'n', 0.95), ('activation_distance', 'n', 100.0), ('dead_zone', 'n', 1.0),
-        ('hold_ms', 'n', 10.0), ('cooldown_ms', 'n', 250.0),
-        ('y_suppress_enabled', 'b', True), ('y_suppress_min', 'n', 0.5),
-        ('y_suppress_max', 'n', 2.0),
-    ]),
-    ('humanize', 'humanize', [
-        ('enabled', 'b', False), ('smooth_factor', 'n', 0.0), ('overshoot', 'n', 0.0),
-        ('brake_distance', 'n', 0.0), ('noise_sigma', 'n', 0.2), ('delay_ms', 'n', 0.0),
-        ('delay_random_ms', 'n', 0.0),
-    ]),
-    # ★ 2026-09-29 修正：speed_fluctuation / accuracy_sim 原本以**扁平键**挂在 humanize 段里
-    #   （'speed_fluctuation_enabled' …）⇒ 实际键名成了 humanize_speed_fluctuation_enabled，
-    #   而面板 2026-09-28 已把这两组拆成独立卡片，控件 id 是 speed_fluctuation_enabled。
-    #   两边键名对不上 ⇒ 面板上「速度波动」「精度模拟」调了存不下去（假开关）；
-    #   即便存下去也落在 mouse.humanize.* 里，而 Core 读的是 mouse.speed_fluctuation.* /
-    #   mouse.accuracy_sim.*（2026-09-28 已拆成独立段，RuntimeProfile.cpp:1300-1315）。
-    #   现在后端也拆成独立段，core / 面板表 / 后端表 三处口径才真正一致。
-    #   total_distance_px 不进表：BB 原版是几何常量（sqrt(Centre²+Centre²)），面板无控件。
-    ('speed_fluctuation', 'speed_fluctuation', [
-        ('enabled', 'b', False), ('start_speed', 'n', 0.80), ('accel_ratio', 'n', 0.20),
-        ('decel_ratio', 'n', 0.20), ('intensity', 'n', 0.15),
-    ]),
-    ('accuracy_sim', 'accuracy_sim', [
-        ('enabled', 'b', False), ('perfect_rate', 'n', 90.0),
-        ('offset_strength', 'n', 0.50), ('direction', 'i', 0),
-    ]),
-    ('anti_overshoot', 'anti_overshoot', [
-        ('enabled', 'b', False), ('outer_distance', 'n', 20.0), ('outer_strength', 'n', 50.0),
-        ('inner_distance', 'n', 10.0), ('inner_strength', 'n', 90.0),
-        ('outer_frames', 'i', 11), ('inner_frames', 'i', 6),
-        ('reset_cooldown_ms', 'n', 500.0),
-    ]),
-    ('speed_adaptive_kp', 'speed_adaptive_kp', [
-        ('enabled', 'b', False), ('move_mult', 'n', 1.5), ('static_mult', 'n', 0.8),
-        ('threshold', 'n', 3.0), ('frames', 'i', 5),
-    ]),
-    ('global_wave', 'global_wave', [
-        ('enabled', 'b', False), ('amp_x', 'n', 0.10), ('amp_y', 'n', 0.10),
-        ('freq', 'n', 1.0), ('smooth', 'n', 0.50),
-    ]),
     # 个人动作曲线：core 一直在用（AimThread 的 personal_gain），但面板**从来没有控件**
     #   （此前只有几行手写搬运，UI 缺）⇒ 只能手改 json。本轮补成表驱动 + 卡片。
     #   只暴露 PersonalMotion 真正读的两个字段（enabled / curve_blend）；
     #   speed_blend / reaction_blend / max_reaction_delay_ms core 从不读，不进表。
-    # 贝塞尔弧线（2026-09-26 接线）：只暴露 warp 用法真正读到的字段。
-    #   generation / segments 是 path1/path2 拆点列那套用的，主链走 warp_error 不读它们
-    #   ⇒ 刻意不进表（不补默认值，由 Core 结构体默认兜住），免得面板摆一堆无效开关。
     # 压枪速率引擎（2026-09-30 对照 yu 重做后）：只剩「速率 + 门控」两组参数。
     #   拉速 = 3 x strength x speed（px/s），与帧率无关；roi_h 是累计下压上限。
     #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilConfig 一字不差。
@@ -900,12 +855,6 @@ CTRL_BLOCKS = [
         ('speed', 'n', 1.0),
         ('curve_strength', 'n', 0.6),
         ('roi_h', 'n', 300.0),
-    ]),
-    ('bezier', 'bezier', [
-        ('enabled', 'b', False), ('curvature', 'n', 0.20),
-        ('linear_threshold', 'n', 45.0), ('peak_min', 'n', 0.20), ('peak_max', 'n', 0.60),
-        ('dir_up', 'b', True), ('dir_down', 'b', True),
-        ('dir_left', 'b', False), ('dir_right', 'b', False), ('min_move', 'n', 0.10),
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
@@ -1583,7 +1532,6 @@ def profile_to_web(prof: dict) -> dict:
     }
     pc = mouse.get('pull_curve') or {}
     lead = mouse.get('continuous_lead') or {}
-    hz = mouse.get('humanize') or {}
     fov_p = prof.get('fov') or {}
     prev_p = prof.get('preview') or {}
     inf = prof.get('inference') or {}

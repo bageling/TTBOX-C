@@ -1639,7 +1639,7 @@ html[data-theme="light"] #control-section-pid .range-control-field .field-hint {
   /* 2026-09-24 分区重排：每张卡都是完整功能块。
      2026-09-29 响应式解冻后：视口 ≥1696px 主内容区仍是 1348px（宽屏不变）；
      ≤1400px 起由断点接管，≤1024px 直接单列。宽屏下 1348/320=4.2 ⇒ 恒 4 条轨道：
-     4 张卡的分区（压枪/拟人化）一行排满；3 张卡的分区 auto-fit 收掉空轨道，
+     4 张卡的分区一行排满；3 张卡的分区 auto-fit 收掉空轨道，
      实际 3 列（每列 449px）照样占满一行。改这个值前先跑
      Temp/ttbox_layout_probe2.py 对比各区高度，400px 时压枪区 2144px 高且
      「垂直修正」孤行占 2/3 空白，320px 降到 1437px。 */
@@ -2471,9 +2471,6 @@ html[data-theme="light"] .danger-button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-#assist-page .assist-section .assist-humanize-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
 
 /* 2026-09-29 重排：长卡按内容量跨轨，宽卡内部自动多列，把卡片高度从纵向堆叠里救出来。
    定尺布局下 .assist-grid 恒 4 轨（主内容区 1348px，每轨约 328px）：
@@ -4745,8 +4742,7 @@ html[data-theme="light"] .toast {
   }
 
   #assist-page .assist-section .field-grid.compact,
-  #assist-page .assist-section .assist-field-pair,
-  #assist-page .assist-section .assist-humanize-grid {
+  #assist-page .assist-section .assist-field-pair {
     grid-template-columns: 1fr;
   }
 
@@ -5539,13 +5535,10 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <span>02</span>自动开火
             </button>
             <button id="assistSectionTabLead" class="control-section-tab" type="button" data-assist-section-target="assist-section-lead" aria-selected="false">
-              <span>03</span>提前量
-            </button>
-            <button id="assistSectionTabHumanize" class="control-section-tab" type="button" data-assist-section-target="assist-section-humanize" aria-selected="false">
-              <span>04</span>拟人化
+              <span>03</span>拉枪曲线
             </button>
             <button id="assistSectionTabSelector" class="control-section-tab" type="button" data-assist-section-target="assist-section-selector" aria-selected="false">
-              <span>05</span>选靶
+              <span>04</span>选靶
             </button>
           </nav>
 
@@ -5650,36 +5643,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 
             <section id="assist-section-lead" class="assist-section" data-assist-section hidden>
               <div class="assist-grid control-group-grid">
-                <article class="module-tile is-three">
-                  <div class="module-title">
-                    <strong>提前量</strong>
-                    <label class="switch"><input id="lead2_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">把横向误差按帧积分累积成偏移（误差越大攒得越快），死区内自动衰减。纵向输出越大，横向提前量越小，防斜拉。</div>
-                    <div class="tile-subtitle">攒与放</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">攒得多快<input id="lead2_gain" data-config type="number" min="0" step="0.005"><span class="field-hint">每帧把「差多少」按比例攒进提前量里。攒得越快提前量涨得越快。</span></label>
-                      <label class="field">最多提前多少 px<input id="lead2_max_offset" data-config type="number" min="0" step="1"><span class="field-hint">提前量最多攒到这个像素数就封顶，防止瞄到天上去。</span></label>
-                      <label class="field">放掉的速度<input id="lead2_decay" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">准星已经很接近目标时，每帧把攒的提前量乘上这个数慢慢放掉。0.95 = 慢慢放，越小放得越快。</span></label>
-                    </div>
-                    <div class="tile-subtitle">瞄准门限</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">多远才开始 px<input id="lead2_activation_distance" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标超过这个距离才启用提前量；贴脸时不启用。</span></label>
-                      <label class="field">多近算瞄到了 px<input id="lead2_dead_zone" data-config type="number" min="0" step="0.5"><span class="field-hint">误差小于这个像素就算「已经瞄到」，开始放掉提前量。</span></label>
-                      <label class="field">保持时长 ms<input id="lead2_hold_ms" data-config type="number" min="0" step="5"><span class="field-hint">算出来之后至少保持这么久再变，防止一帧一变抖来抖去。</span></label>
-                      <label class="field">冷却 ms<input id="lead2_cooldown_ms" data-config type="number" min="0" step="10"><span class="field-hint">放掉之后隔这么久才重新开始攒。</span></label>
-                    </div>
-                    <div class="tile-subtitle">Y 轴抑制</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">Y 抑制下限 px/帧<input id="lead2_y_suppress_min" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出小于它不抑制。</span></label>
-                      <label class="field">Y 抑制上限 px/帧<input id="lead2_y_suppress_max" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出大于它则完全抑制横向提前量。</span></label>
-                    </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="lead2_y_suppress_enabled" data-config type="checkbox"> 开启 Y 轴抑制</label>
-                    </div>
-                  </div>
-                </article>
                 <article class="module-tile">
                   <div class="module-title">
                     <strong>拉枪曲线</strong>
@@ -5689,127 +5652,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">曲线强度<input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭。</span></label>
                       <label class="field">启用距离 px<input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过它才启用；锁定后自动停止。</span></label>
-                    </div>
-                  </div>
-                </article>
-              </div>
-            </section>
-
-            <section id="assist-section-humanize" class="assist-section" data-assist-section hidden>
-              <div class="assist-grid control-group-grid">
-                <article class="module-tile is-three">
-                  <div class="module-title">
-                    <strong>移动整形链</strong>
-                    <label class="switch"><input id="humanize_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">按固定顺序处理每一步：低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。全关时输出与不开完全一致。</div>
-                    <div class="tile-subtitle">整形链</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">低通系数<input id="humanize_smooth_factor" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">把本帧输出向上一帧靠；0 为关闭。开了会更柔但更迟钝。</span></label>
-                      <label class="field">过冲强度<input id="humanize_overshoot" data-config type="number" min="0" step="0.05"><span class="field-hint">离目标越远越容易冲过头一点；0 为关闭。</span></label>
-                      <label class="field">制动距离 px<input id="humanize_brake_distance" data-config type="number" min="0" step="5"><span class="field-hint">进入这个距离后主动减速；0 为关闭。</span></label>
-                      <label class="field">手抖幅度 px<input id="humanize_noise_sigma" data-config type="number" min="0" step="0.05"><span class="field-hint">给每一步移动加一点随机抖动，像手不是绝对稳。0.2 很轻，超过 1 就明显飘了。</span></label>
-                      <label class="field">反应慢半拍 ms<input id="humanize_delay_ms" data-config type="number" min="0" step="5"><span class="field-hint">看到目标后先愣这么久才开始动（1000 毫秒 = 1 秒）。调大更像人，但跟枪会变慢。</span></label>
-                      <label class="field">反应时间随机 ±ms<input id="humanize_delay_random_ms" data-config type="number" min="0" step="5"><span class="field-hint">每次的反应时间在上下这个范围内浮动，不至于每次都一模一样。</span></label>
-                    </div>
-                    <div class="tile-subtitle">
-                      <span>速度波动</span>
-                      <label class="check-line"><input id="speed_fluctuation_enabled" data-config type="checkbox"> 开启</label>
-                    </div>
-                    <div class="field-hint">整段移动的速度曲线做轻微起伏，看起来更像手在动。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">起步速度<input id="speed_fluctuation_start_speed" data-config type="number" min="0" step="0.05"><span class="field-hint">刚开始动的时候有多快（1 = 全速）。设小一点就是「先慢慢起手」。</span></label>
-                      <label class="field">加速段占多少<input id="speed_fluctuation_accel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的前面多少比例用来加速（0.2 = 前 20%）。</span></label>
-                      <label class="field">减速段占多少<input id="speed_fluctuation_decel_ratio" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">整段移动的最后多少比例用来减速收尾（0.2 = 后 20%）。</span></label>
-                      <label class="field">起伏有多大<input id="speed_fluctuation_intensity" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">速度忽快忽慢的程度。0 就是匀速，0.15 是轻微起伏，再大就明显一顿一顿了。</span></label>
-                    </div>
-                    <div class="tile-subtitle">
-                      <span>精度模拟</span>
-                      <label class="check-line"><input id="accuracy_sim_enabled" data-config type="checkbox"> 开启</label>
-                    </div>
-                    <div class="field-hint">不是每次都钉在正中，按概率把落点推到框边或四角。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">完美命中概率 %<input id="accuracy_sim_perfect_rate" data-config type="number" min="0" max="100" step="1"><span class="field-hint">有多少比例的次数是正正好好瞄在中间的。90 = 十次里有九次准、一次故意偏一点。想更像人就往下调。</span></label>
-                      <label class="field">偏移强度<input id="accuracy_sim_offset_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">占框半径的比例。</span></label>
-                      <label class="field">落点方式
-                        <select id="accuracy_sim_direction" data-config>
-                          <option value="0">四角优先</option>
-                          <option value="1">边缘随机</option>
-                          <option value="2">随机</option>
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>抗过冲</strong>
-                    <label class="switch"><input id="anti_overshoot_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">接近目标时按内/外圈分段衰减位移，每圈最多衰减若干帧，跑满就停手（防止在目标上反复拉锯）。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">外圈半径 px<input id="anti_overshoot_outer_distance" data-config type="number" min="0" step="1"><span class="field-hint">准星进到离目标这么近，开始减速（外圈）。</span></label>
-                      <label class="field">外圈减速 %<input id="anti_overshoot_outer_strength" data-config type="number" min="0" max="100" step="1"><span class="field-hint">在外圈里把移动量砍掉百分之多少。50 = 只走一半速度。</span></label>
-                      <label class="field">内圈半径 px<input id="anti_overshoot_inner_distance" data-config type="number" min="0" step="1"><span class="field-hint">比外圈更近的一圈，进来了就减速更狠。</span></label>
-                      <label class="field">内圈减速 %<input id="anti_overshoot_inner_strength" data-config type="number" min="0" max="100" step="1"><span class="field-hint">内圈里砍掉百分之多少，一般比外圈高（比如 90）。</span></label>
-                      <label class="field">外圈最多几帧<input id="anti_overshoot_outer_frames" data-config type="number" min="0" step="1"><span class="field-hint">在外圈里最多减速这么多帧，超了就干脆停手（防止贴着目标一直拉锯）。</span></label>
-                      <label class="field">内圈最多几帧<input id="anti_overshoot_inner_frames" data-config type="number" min="0" step="1"><span class="field-hint">内圈里最多减速这么多帧，超了停手。</span></label>
-                      <label class="field">复位冷却 ms<input id="anti_overshoot_reset_cooldown_ms" data-config type="number" min="0" step="10"><span class="field-hint">持续越界多久后重新计数。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>速度自适应 Kp</strong>
-                    <label class="switch"><input id="speed_adaptive_kp_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">按最近几帧的平均位移判断目标在动还是静止：动的目标加大 Kp 跟紧，静止的减小 Kp 防抖。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">人动的时候倍率<input id="speed_adaptive_kp_move_mult" data-config type="number" min="0" step="0.05"><span class="field-hint">判断目标在跑动时，把「拉力」乘上这个数（1.5 = 加一半力，跟得更紧）。</span></label>
-                      <label class="field">人不动时倍率<input id="speed_adaptive_kp_static_mult" data-config type="number" min="0" step="0.05"><span class="field-hint">目标站住不动时把「拉力」乘上这个数（0.8 = 收力，避免一直在原地抖）。</span></label>
-                      <label class="field">多大动静算在动 px/帧<input id="speed_adaptive_kp_threshold" data-config type="number" min="0" step="0.5"><span class="field-hint">最近几帧平均移动超过这个像素就算「目标在动」。</span></label>
-                      <label class="field">看最近几帧<input id="speed_adaptive_kp_frames" data-config type="number" min="1" step="1"><span class="field-hint">用多少帧的平均移动来判断动没动。调大更稳但反应慢。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>全局正弦扰动</strong>
-                    <label class="switch"><input id="global_wave_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">给最终输出叠一层很轻的正弦抖动，避免输出过于整齐。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">左右摆幅 px<input id="global_wave_amp_x" data-config type="number" min="0" step="0.01"><span class="field-hint">左右方向叠加的摆动幅度（像素）。0.1 是非常轻的一点点。</span></label>
-                      <label class="field">上下摆幅 px<input id="global_wave_amp_y" data-config type="number" min="0" step="0.01"><span class="field-hint">上下方向叠加的摆动幅度（像素）。</span></label>
-                      <label class="field">每秒摆几次<input id="global_wave_freq" data-config type="number" min="0" step="0.1"><span class="field-hint">摆动频率，1 = 每秒来回一次。</span></label>
-                      <label class="field">平滑<input id="global_wave_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">0 为不平滑。</span></label>
-                    </div>
-                  </div>
-                </article>
-                <article class="module-tile is-wide">
-                  <div class="module-title">
-                    <strong>弧线拉枪</strong>
-                    <label class="switch"><input id="bezier_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">准星直线飞过去看着像机器。开这个之后，准星会绕一条带点弯的弧线过去，更像手甩过去的。它只改「路上怎么走」，不改最终停在哪 —— 快到目标时弧度自动收成 0，不会把准星带偏。</div>
-                    <div class="field-grid compact assist-field-pair">
-                      <label class="field">弯多少<input id="bezier_curvature" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">挪得越远，弧线鼓得越高（弓高 = 距离 × 这个值 × 0.5）。0.2 左右是轻微弯；调到 0.5 以上会比较夸张。</span></label>
-                      <label class="field">多近就直走 px<input id="bezier_linear_threshold" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标小于这个距离就直接走直线，不绕弯（近距离绕弯反而别扭）。默认 45。</span></label>
-                      <label class="field">幅度下限<input id="bezier_peak_min" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">每次拉枪的弧度在这个范围里随机抽一个。下限 0.2 = 最平的时候也有点弯。</span></label>
-                      <label class="field">幅度上限<input id="bezier_peak_max" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">抽到的弧度最高到这儿。下限和上限拉得越开，每次的弯法越不一样（更随机）；设成一样就是每次都同一个弯。</span></label>
-                      <label class="field">最小单步 px<input id="bezier_min_move" data-config type="number" min="0" max="5" step="0.05"><span class="field-hint">一次要挪的距离小于它就跳过这一步（省掉没意义的小碎步），挪的量会合到下一步里，不会走丢。</span></label>
-                    </div>
-                    <div class="field-hint">往哪边弯（多选 = 每次随机挑一个方向；一个都不选 = 退化成直线）：</div>
-                    <div class="check-row">
-                      <label class="check-line"><input id="bezier_dir_up" data-config type="checkbox"> 向上鼓</label>
-                      <label class="check-line"><input id="bezier_dir_down" data-config type="checkbox"> 向下鼓</label>
-                      <label class="check-line"><input id="bezier_dir_left" data-config type="checkbox"> 向左鼓</label>
-                      <label class="check-line"><input id="bezier_dir_right" data-config type="checkbox"> 向右鼓</label>
                     </div>
                   </div>
                 </article>
@@ -6488,8 +6330,8 @@ const CONTROLLER_DEFAULTS = {
 };
 // ---------------------------------------------------------------------------
 // BB 对标模块表（2026-09-24 面板收敛）
-// ★ 与 plugins/web/bin/ttbox-web.py 的 CTRL_BLOCKS / CTRL_RECOIL_BB_FIELDS /
-//   CTRL_SELECTOR_FIELDS **同源**：下面这张表由后端表机械生成（脚本 ttbox_bb_panel.py），
+// ★ 与 plugins/web/bin/ttbox-web.py 的 CTRL_BLOCKS /
+//   CTRL_SELECTOR_FIELDS **同源**：下面这张表由后端表机械生成
 //   字段名 / 类型 / Core 默认值逐项一致。改后端表必须同步重生成，
 //   否则「面板回填显示的值」会与「Core 实际值」对不上（首次打开的设备尤其明显）。
 // 每项 = [模块前缀, [[字段名, 类型, Core 默认值], ...]]
@@ -6497,84 +6339,8 @@ const CONTROLLER_DEFAULTS = {
 //   类型：b = 勾选框，n = 小数，i = 整数，key = 按键字符串。
 // ★ 表内**禁止写行注释**：tests/test_web_panel_bb_sync.py 会把这段当 JSON 解析来核对
 //   前后端同源，注释会让解析直接炸（2026-09-26 实测）。要注释就写在本注释块里。
-//   bezier（2026-09-26 接线）只列 warp_error 真正读到的字段：generation / segments
-//   属于 path1/path2 拆点列那套，主链不用，刻意不进表（不进面板）。
-//   注：speed_fluctuation / accuracy_sim 按 BB 927 原版是**独立开关**，不归 humanize.enabled
-//   管（原版 main.lua:5943 / :6445 各自独立判断）⇒ 拆成独立段，面板也不再挂在拟人化卡片下。
-//   这两行说明原本写在表体里，2026-09-29 移出 —— 表内注释会让上面的同步用例直接炸。
 // ---------------------------------------------------------------------------
 const BB_CTRL_MODULES = [
-  ["lead2", [
-    ["enabled", "b", false],
-    ["gain", "n", 0.05],
-    ["max_offset", "n", 25.0],
-    ["decay", "n", 0.95],
-    ["activation_distance", "n", 100.0],
-    ["dead_zone", "n", 1.0],
-    ["hold_ms", "n", 10.0],
-    ["cooldown_ms", "n", 250.0],
-    ["y_suppress_enabled", "b", true],
-    ["y_suppress_min", "n", 0.5],
-    ["y_suppress_max", "n", 2.0],
-  ]],
-  ["humanize", [
-    ["enabled", "b", false],
-    ["smooth_factor", "n", 0.0],
-    ["overshoot", "n", 0.0],
-    ["brake_distance", "n", 0.0],
-    ["noise_sigma", "n", 0.2],
-    ["delay_ms", "n", 0.0],
-    ["delay_random_ms", "n", 0.0],
-  ]],
-  ["speed_fluctuation", [
-    ["enabled", "b", false],
-    ["start_speed", "n", 0.8],
-    ["accel_ratio", "n", 0.2],
-    ["decel_ratio", "n", 0.2],
-    ["intensity", "n", 0.15],
-  ]],
-  ["accuracy_sim", [
-    ["enabled", "b", false],
-    ["perfect_rate", "n", 90.0],
-    ["offset_strength", "n", 0.5],
-    ["direction", "i", 0],
-  ]],
-  ["anti_overshoot", [
-    ["enabled", "b", false],
-    ["outer_distance", "n", 20.0],
-    ["outer_strength", "n", 50.0],
-    ["inner_distance", "n", 10.0],
-    ["inner_strength", "n", 90.0],
-    ["outer_frames", "i", 11],
-    ["inner_frames", "i", 6],
-    ["reset_cooldown_ms", "n", 500.0],
-  ]],
-  ["speed_adaptive_kp", [
-    ["enabled", "b", false],
-    ["move_mult", "n", 1.5],
-    ["static_mult", "n", 0.8],
-    ["threshold", "n", 3.0],
-    ["frames", "i", 5],
-  ]],
-  ["global_wave", [
-    ["enabled", "b", false],
-    ["amp_x", "n", 0.1],
-    ["amp_y", "n", 0.1],
-    ["freq", "n", 1.0],
-    ["smooth", "n", 0.5],
-  ]],
-  ["bezier", [
-    ["enabled", "b", false],
-    ["curvature", "n", 0.2],
-    ["linear_threshold", "n", 45.0],
-    ["peak_min", "n", 0.2],
-    ["peak_max", "n", 0.6],
-    ["dir_up", "b", true],
-    ["dir_down", "b", true],
-    ["dir_left", "b", false],
-    ["dir_right", "b", false],
-    ["min_move", "n", 0.1],
-  ]],
   ["trigger2", [
     ["enabled", "b", false],
     ["key1", "key", 16],
@@ -6631,8 +6397,6 @@ const BB_CTRL_MODULES = [
 const BB_SECTION_MODULES = {
   "assist-section-recoil": ["recoil"],
   "assist-section-trigger": ["trigger2"],
-  "assist-section-lead": ["lead2"],
-  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "bezier"],
   "assist-section-selector": ["selector"],
 };
 
@@ -9390,8 +9154,7 @@ function assistSectionLabel(sectionId) {
   const labels = {
     "assist-section-recoil": "压枪",
     "assist-section-trigger": "自动开火",
-    "assist-section-lead": "提前量",
-    "assist-section-humanize": "拟人化",
+    "assist-section-lead": "拉枪曲线",
     "assist-section-selector": "选靶",
   };
   return labels[sectionId] || "当前页";
@@ -13380,7 +13143,7 @@ function bindEvents() {
         ];
         savedSummary.innerHTML = rows.map(([k, v]) => `<div class="runtime-stat"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join("");
       } else {
-        // 「未标定」≠「增益未知」：运行配置里的 gain 照样在生效（压枪/拟人化都在用它），
+        // 「未标定」≠「增益未知」：运行配置里的 gain 照样在生效（压枪都在用它），
         // 如实报出来，免得用户以为"没标定就等于没有增益"。
         const eff = saved.effective || {};
         const lines = ["尚未保存标定结果（未跑过自动标定，或已清除）。"];

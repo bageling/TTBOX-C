@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-30 起产品版本为 "V1.0.14"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-30 起产品版本为 "V1.0.15"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
 #   V1.0.11 相对 V1.0.10：选靶照 yu 加量测跳变门控（拒绝坏量测，沿用上一帧）＋ continuity 免重置＋ 切靶确认窗＋ 开火期禁切靶。
@@ -29,9 +29,17 @@ cmake_minimum_required(VERSION 3.16)
 #   V1.0.14 相对 V1.0.13：纯死代码清理（运行时行为 / 配置向量不变）：
 #                       · 删「稳定边界层」空壳 ICoordinate/IMouse/CoreInterfaces/CoreInterface（零实现零引用）
 #                       · 删 controller/PidController + IController（生产用 aim/Pid1Controller，此封装零引用）
-#                       · 删 HumanizeConfig 死结构体（拟人化走 HumanizeShaperConfig）
+#                       · 删 HumanizeConfig 死结构体
 #                       测试改用 tests/test_pid_controller.hpp（生产同款 Pid1Controller + 真实参数）。
-project(ttbox_core VERSION 1.0.14 LANGUAGES CXX)
+#   V1.0.15 相对 V1.0.14：业主令「去掉所有 BB/BK 的东西」—— 删 BB 对标第二批 8 模块：
+#                       · 删 LeadPredictor/HumanizeShaper/SpeedFluctuation/AccuracySim/
+#                         AntiOvershoot/SpeedAdaptiveKp/GlobalWave/BezierTrajectory（默认全关、零行为）
+#                       · MouseTypes.hpp 删对应 8 配置结构体 + bezier enum + 7 成员
+#                       · AimThread 删 21 处接线（continuous_lead 互斥简化为无条件）
+#                       · RuntimeProfile 删序列化段；CMake 删 2 个测试目标
+#                       · web 层删 BB 面板 8 段 + 拟人化分区（面板 5 分区 → 4 分区）
+#                       保留：trigger2 自动扳机 / 切靶防抖 / 选靶四项（生产功能）。
+project(ttbox_core VERSION 1.0.15 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -693,12 +701,6 @@ if(TTBOX_CORE_BUILD_TESTS)
                         target_link_libraries(test_recoil PRIVATE ttbox_core)
                         add_test(NAME test_recoil COMMAND test_recoil)
 
-  # BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 /
-  # 速度自适应 Kp / 全局正弦扰动 + 新配置键往返 —— 每模块含"默认关=行为零变化"用例
-  # （压枪三段查表 / 垂直修正 / 开火期闭环 三块 2026-09-30 已删，测试随之摘除）
-  add_executable(test_bb_second_batch tests/test_bb_second_batch.cpp)
-  target_link_libraries(test_bb_second_batch PRIVATE ttbox_core)
-  add_test(NAME test_bb_second_batch COMMAND test_bb_second_batch)
 
     # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
   add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
@@ -712,9 +714,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_test(NAME test_aim_profiles COMMAND test_aim_profiles)
 
   # 贝塞尔移动轨迹（一代分段自适应/二代随机弧线/抽签时机/弓高上限）单元测试
-  add_executable(test_bezier_trajectory tests/test_bezier_trajectory.cpp)
-  target_link_libraries(test_bezier_trajectory PRIVATE ttbox_core)
-  add_test(NAME test_bezier_trajectory COMMAND test_bezier_trajectory)
 
   # 准星找色（CrosshairProbe：RGB/BGR/RGBA/NV12 取色 + 容差 + 半径 + 红色环绕 + fail-closed）
   add_executable(test_crosshair_probe tests/test_crosshair_probe.cpp)

@@ -24,16 +24,7 @@
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
 #include "mouse/TriggerController.hpp"
-#include "mouse/BezierTrajectory.hpp"
-// BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
-#include "mouse/LeadPredictor.hpp"
-#include "mouse/HumanizeShaper.hpp"
 #include "mouse/JitterFeedforward.hpp"
-#include "mouse/SpeedFluctuation.hpp"   // BB 移动速度波动（独立开关，拟人化之前）
-#include "mouse/AccuracySim.hpp"        // BB 命中率随机（独立开关，作用在瞄准点）
-#include "mouse/AntiOvershoot.hpp"
-#include "mouse/SpeedAdaptiveKp.hpp"
-#include "mouse/GlobalWave.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -171,7 +162,6 @@ private:
     // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
     // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
     TriggerController trigger_;
-    BezierTrajectory bezier_;  // 贝塞尔弧线（误差域整形；默认关 ⇒ 与接线前逐字节一致）
     uint8_t trigger_release_btn_ = 0;      // 待抬起的键位掩码（0 = 无）
     uint32_t trigger_release_at_ms_ = 0;   // 抬起时刻（now_ms 时基）
     uint64_t trigger_fire_count_ = 0;
@@ -180,14 +170,6 @@ private:
     //   位移退回 remainder（不丢量），用于压掉开火瞬间的抖动。
     //   ★ 2026-09-29：另一件「压枪联动偏移（trigger.y_offset）」已随 v7.26 一并删除。
     int trigger_throttle_frames_ = 0;
-    // ---- BB 对标第二批（2026-09-24）----
-    // 全部构件默认 enabled=false ⇒ 不跑即零输出，输出链与本批加入前逐字节一致。
-    LeadPredictor lead_pred_;       // 两代提前量：X 轴偏移叠加进控制误差 control_x
-    HumanizeShaper humanize_shaper_; // BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）
-    AntiOvershoot anti_overshoot_;  // 抗过冲：recoil 后、deadzone 前对位移分段衰减
-    SpeedAdaptiveKp speed_kp_;      // 速度自适应 Kp：每帧 PID 前临时乘 kp
-    GlobalWave global_wave_;        // 全局正弦扰动：deadzone 前叠加
-    float lead_last_move_y_ = 0.0f; // 上一帧纵向输出（PID 域），供二代提前量的 Y 轴抑制
     // 热键边沿（对齐 BB「按下 shuwuResetPid、松开完全重置」）。
     // 下降沿 = 本帧未放行（含 mouse.enabled=false / 热键松开 / 挂起）。
     bool last_injection_allowed_ = false;
@@ -216,12 +198,6 @@ private:
     // ★ 挂在"抖动分量"上（两条链各自上报），**不挂整条整形量**：速度包络/制动是
     //   故意要走的一段位移，扣掉会让 PID 以为还没到 ⇒ 过冲。
     JitterFeedforward jitter_ff_;
-    // BB 927 原版的两个独立拟人化模块（照搬，2026-09-28）：
-    //   原版 main.lua:5943 / :6445，各自独立开关、都不归 humanize_enabled 管。
-    SpeedFluctuation speed_fluct_;
-    AccuracySim accuracy_sim_;
-    // 原版口径：速度波动只在**刚锁定目标的第一帧**生效一次（一次性标志）。
-    bool speed_fluct_first_lock_ = false;
     // 本帧实际加回的像素量（诊断用，供后续观测字段）
     float jitter_ff_x_px_ = 0.0f;
     float jitter_ff_y_px_ = 0.0f;

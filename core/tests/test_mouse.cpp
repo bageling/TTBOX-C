@@ -638,7 +638,7 @@ TEST(mouse_continuous_lead_needs_accumulated_distance) {
 
 // 2026-09-29：Humanize（固定正弦 X 微动）整模块已删除 —— 它属于 TTBOX 自研的 4 套
 // 固定正弦抖动之一，非 BB 来源。对应用例 `mouse_humanize_adds_jitter_only_when_enabled`
-// 一并移除；HumanizeConfig 死结构体 2026-09-30 也已删除（拟人化走 HumanizeShaperConfig）。
+// 一并移除；HumanizeConfig 死结构体 2026-09-30 也已删除。
 
 // ---------------------------------------------------------------------------
 // RuntimeProfile mouse 段序列化（对齐参数/自适应死区/拉枪插件）

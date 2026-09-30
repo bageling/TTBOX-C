@@ -178,31 +178,7 @@ struct ContinuousLeadConfig {
     float near_disable_ratio = 0.66f;   // 目标接近时衰减比例（保留字段）
 };
 
-// 贝塞尔轨迹（BezierTrajectory）：把一次位移拆成多帧子位移点列
-enum class BezierDirection : int {
-    kRight = 0,
-    kLeft = 1,
-    kUp = 2,
-    kDown = 3,
-};
 
-struct BezierTrajectoryConfig {
-    bool enabled = false;          // 总开关（默认关，保持现有行为）
-    int generation = 1;            // 1=一代固定控制点；2=二代随机弧线
-    // -- 一代（path1）
-    float segments = 10.0f;        // 分段基数：seg = max(5, floor(segments × min(1.5, dist/100)))
-    // -- 二代（path2）
-    float linear_threshold = 45.0f;  // 距离 ≤ 它就直走（省开销）
-    float curvature = 0.2f;          // 曲率：弓高 = min(60, dist × curvature × 0.5)
-    float peak_min = 0.2f;           // 弓高比例抽签下界
-    float peak_max = 0.6f;           // 弓高比例抽签上界
-    bool dir_up = true;              // 允许的弧线方向（BB 默认 up/down 开、left/right 关）
-    bool dir_down = true;
-    bool dir_left = false;
-    bool dir_right = false;
-    // -- 公共
-    float min_move = 0.1f;         // 单段最小位移，小于它的段被丢弃（位移被下一段吸收）
-};
 
 // 拟人化整形引擎（personal_trajectory_shader：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫）
 // TTBOX 拟人化整形：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫。
@@ -348,151 +324,7 @@ struct Trigger2Config {
     int stop_detect_interval = 10;   // 检测周期（帧）
 };
 
-// ===========================================================================
-// BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 三个小件
-//  （原第 1 项「压枪升级」及垂直修正、开火期闭环 2026-09-30 已删，见上方 RecoilConfig 注释）
-//   提取来源：bb-port/02-压枪与小件.md、03-提前量与拟人化.md（只取结构与标定值，
-//   实现全部 C++ 自写）。
-//   ★ 统一约定：全部 enabled 默认 false。不开时 AimThread 不跑该模块，
-//     输出链与本批加入前**逐字节一致**（照 ContinuousLeadConfig 的先例）。
-// ===========================================================================
 
-// ---------------------------------------------------------------------------
-
-// 2026-09-30：开火期闭环纠偏（RecoilClConfig，压枪 v1/v2）已整段删除 ——
-//   对照 yu 后业主裁定「压枪太臃肿、参数太多、算法逻辑不对」⇒ 只留一套 yu 式速率引擎。
-//   删除理由（留档，防回潮）：
-//     · yu 没有任何闭环纠偏；它的"稳"来自量测门控（框无效 ⇒ 拒绝量测 + 保持上一帧）
-//       ⇒ 压枪输入端永远拿不到坏框，不需要自己闭环；
-//     · 闭环与瞄准 PID 抢同一个执行器（P 项叠加），v1 实机「乱晃」的病根就在这；
-//     · 旧配置残留的 `mouse.recoil_cl` 段会被 RuntimeProfile 忽略。
-// ---------------------------------------------------------------------------
-
-// 2026-09-29：提前量一代（Lead1Config，帧窗口投票法）已整段删除 —— 业主裁定
-//   「提前量只留 2.0」。一代与二代原本是**相加**关系（不是替代），删掉之后二代自己
-//   照常工作，只是不再有"投票法"那一份额外偏移。旧配置残留的 `mouse.lead1` 段会被忽略。
-
-// ---------------------------------------------------------------------------
-// 提前量二代：积分累积法（BB `lead2_*`，见 03 号 §2）
-// integral += errorX × gain × yScale²（注意是平方）；死区内乘 decay 衰减；
-// Y 轴抑制由「上一帧纵向输出」驱动（纵向输出越大，横向提前量越小 → 防斜拉抛物线）。
-// ---------------------------------------------------------------------------
-struct Lead2Config {
-    bool enabled = false;            // 总开关
-    float gain = 0.05f;              // 积分增益（1/帧）
-    float max_offset = 25.0f;        // 偏移上限（±px）
-    float decay = 0.95f;             // 死区内积分衰减系数（每帧 ×该值）
-    float activation_distance = 100.0f; // 激活距离（px）
-    float dead_zone = 1.0f;          // 误差死区（px）
-    float hold_ms = 10.0f;           // 保持窗（ms）
-    float cooldown_ms = 250.0f;      // 进入距离后的冷却（ms）
-    bool y_suppress_enabled = true;  // Y 轴抑制开关
-    float y_suppress_min = 0.5f;     // 纵向输出小于它不抑制（px/帧）
-    float y_suppress_max = 2.0f;     // 纵向输出大于它完全抑制（px/帧）
-};
-
-// ---------------------------------------------------------------------------
-// BB 拟人化整形链（BB `applyHumanize`，见 03 号 §3）
-// 顺序固定：一阶低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。
-// ★ smooth_factor 在 BB 里「无开关、>0 即生效」，本实现把默认改成 0.0f
-//   （=关闭），保证"默认零变化"这条底线；要用再把值调上去。
-// ★ human_rest_* 是 BB 的死功能（无人读取），按文档要求**不实现**。
-// ---------------------------------------------------------------------------
-struct HumanizeShaperConfig {
-    bool enabled = false;            // 总开关（低通/延迟/过冲/制动/噪声全部受它控）
-    float smooth_factor = 0.0f;      // 一阶低通系数（0~0.99，0 = 关闭）
-    float overshoot = 0.0f;          // 过冲强度（factor = 1 + overshoot×min(1, dtt/200)）
-    float brake_distance = 0.0f;     // 制动触发距离（px，0 = 关闭）
-    float noise_sigma = 0.2f;        // 高斯噪声标准差（count）—— BB 原版加在位移 mx/my 上，量纲是 count
-    float delay_ms = 0.0f;           // 反应延迟基准（ms）
-    float delay_random_ms = 0.0f;    // 反应延迟随机幅度（±ms）
-    // ★ 2026-09-28 照搬 BB 927 原版：speed_fluctuation / accuracy_sim 在 BB 里是
-    //   **独立于 humanize_enabled 的开关**（main.lua:5943 / :6445 各自独立判断），
-    //   不属于本结构。此前塞在这里且未接线 ⇒ 面板勾了没反应（假开关）。
-    //   现已拆成 MouseProfile.speed_fluctuation / .accuracy_sim，按原版口径独立生效。
-};
-
-// ---------------------------------------------------------------------------
-// BB 移动速度波动（BB `applySpeedFluctuation`，main.lua:5265 / 调用点 :5943）
-// 照搬 BB 927 原版：让一次"拉过去"的动作先慢、再快、最后减速 —— 速度倍率乘在
-// 位移上。progress = 1 - dtt/total_distance；起步段 / 收尾段各占一个比例。
-//
-// ★ 原版口径（照抄，不自己发挥）：
-//   1. 它是**独立开关**，不受 humanize_enabled 管（原版 :5266 只看 speed_fluctuation_enabled）。
-//   2. 只在**刚锁定目标的第一帧**生效一次（原版 :5943 传 st.speed_fluctuation_first_lock，
-//      用完立刻置 false）。之后同一目标上不再作用。
-//   3. 全程参考距离 td 用的是 `sqrt(Centre²+Centre²)`（瞄准范围对角线，原版 :5943）。
-//
-// ★ 默认 enabled=false ⇒ 与本模块加入前逐字节一致。
-// ---------------------------------------------------------------------------
-struct SpeedFluctuationConfig {
-    bool enabled = false;                 // 独立开关（不归 humanize_enabled 管）
-    float start_speed = 0.80f;            // 起步速度倍率（0.1~1.0）
-    float accel_ratio = 0.20f;            // 起步段占总距离比例（0.1~0.5）
-    float decel_ratio = 0.20f;            // 收尾段占总距离比例（0.1~0.5）
-    float intensity = 0.15f;              // 随机波动幅度（0~0.5）
-    float total_distance_px = 452.5f;     // 全程参考距离（px）= sqrt(Centre²+Centre²)，Centre=320
-};
-
-// ---------------------------------------------------------------------------
-// BB 命中率随机（BB `applyAccuracySim`，main.lua:5274 / 调用点 :6445）
-// 照搬 BB 927 原版：按概率把**瞄准点**推到目标框四角/边缘，复现"打不中"的手感。
-//
-// ★ 原版口径（照抄）：
-//   1. 它是**独立开关**，不受 humanize_enabled 管。
-//   2. 作用在**瞄准点**（选靶之后、进 PID 之前），不是在输出位移上加抖动
-//      —— 原版 :6445 `at = applyAccuracySim(at, lp)`，改的是 locked_target。
-//   3. 命中"完美"概率内不动；不完美时按方向策略取角度，偏移量 = 框半径 × 强度。
-//
-// ★ 默认 enabled=false ⇒ 与本模块加入前逐字节一致。
-// ---------------------------------------------------------------------------
-struct AccuracySimConfig {
-    bool enabled = false;                 // 独立开关（不归 humanize_enabled 管）
-    float perfect_rate = 90.0f;           // 完美命中概率（%，50~100）
-    float offset_strength = 0.50f;        // 偏移强度（占框半径比例，0.1~1.0）
-    int direction = 0;                    // 0=四角优先 1=边缘随机 2=全随机（BB 字符串同义）
-};
-
-// ---------------------------------------------------------------------------
-// 抗过冲（BB `applyAntiOvershoot`，见 02 号 §5）
-// 靠近中心时按百分比衰减位移；内/外圈各自"最多衰减 N 帧"，跑满即本轮不再干预；
-// 准星飘到外圈以外并持续超 reset_cooldown 则整轮复位（可再来一次）。
-// ---------------------------------------------------------------------------
-struct AntiOvershootConfig {
-    bool enabled = false;            // 总开关
-    float outer_distance = 20.0f;    // 外圈半径（px）
-    float outer_strength = 50.0f;    // 外圈每帧衰减强度（%）
-    float inner_distance = 10.0f;    // 内圈半径（px）
-    float inner_strength = 90.0f;    // 内圈每帧衰减强度（%）
-    int outer_frames = 11;           // 外圈最多衰减帧数
-    int inner_frames = 6;            // 内圈最多衰减帧数
-    float reset_cooldown_ms = 500.0f; // 持续越界复位冷却（ms）
-};
-
-// ---------------------------------------------------------------------------
-// 速度自适应 Kp（BB `getSpeedAdaptiveKpMultiplier`，见 02 号 §6）
-// 滑动窗口估平均帧间位移：动目标加大 Kp（跟得紧），静目标减小 Kp（防抖）。
-// ★ 输出是**乘子**，由 AimThread 在每帧 PID 计算前临时乘到 kp 上、算完还原。
-// ---------------------------------------------------------------------------
-struct SpeedAdaptiveKpConfig {
-    bool enabled = false;            // 总开关
-    float move_mult = 1.5f;          // 移动时 Kp 乘子
-    float static_mult = 0.8f;        // 静止时 Kp 乘子
-    float threshold = 3.0f;          // 平均速度阈值（px/帧）
-    int frames = 5;                  // 滑动窗口帧数
-};
-
-// ---------------------------------------------------------------------------
-// 全局正弦扰动（BB `applyGlobalWave`，见 02 号 §4）
-// 同一相位驱动 X/Y，各自乘振幅并做一阶平滑，叠加到每帧最终位移上。
-// ---------------------------------------------------------------------------
-struct GlobalWaveConfig {
-    bool enabled = false;            // 总开关
-    float amp_x = 0.10f;             // X 振幅（px）
-    float amp_y = 0.10f;             // Y 振幅（px）
-    float freq = 1.0f;               // 频率（Hz）
-    float smooth = 0.50f;            // 一阶平滑系数（0 = 不平滑）
-};
 
 // 热键保护（hotkey_guard）：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。
 //
@@ -616,27 +448,11 @@ struct MouseProfile {
         // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
         ContinuousLeadConfig continuous_lead;
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
-    // ---- BB 对标第二批（2026-09-24；压枪升级三件 2026-09-30 已删）----
-    // 全部默认 false ⇒ 不开时 AimThread 不跑这些模块，输出链与本批加入前逐字节一致。
-    Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）；一代 2026-09-29 已删
-    HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
-    // BB 927 原版里这两个是**独立开关**，不归 humanize.enabled 管（照搬，2026-09-28）。
-    SpeedFluctuationConfig speed_fluctuation;  // 移动速度波动（作用在位移上，拟人化之前）
-    AccuracySimConfig accuracy_sim;            // 命中率随机（作用在瞄准点上，选靶阶段）
-    AntiOvershootConfig anti_overshoot;     // 抗过冲状态机
-    SpeedAdaptiveKpConfig speed_adaptive_kp; // 速度自适应 Kp（临时乘子）
-    GlobalWaveConfig global_wave;           // 全局正弦扰动
     // ---- 自动扳机（BB 对标，2026-09-24 移植）----
     // 两套状态机互相独立，可分别开启；都只产出"要开火"的决策（TriggerCmd），
     // 真正的点击由 AimThread 拿到决策后调 output->mouse_click 注入 —— 决策与注入分离。
     // 默认 enabled=false ⇒ 不开时 AimThread 不跑扳机，输出链与加入前逐字节一致。
     Trigger2Config trigger2;                // BB 扳机 2.0（v7.26 已删，2026-09-29）
-    // ---- 贝塞尔弧线（2026-09-26 接线）----
-    // 此前 `BezierTrajectory` 与它的配置**三层全死**：无人 include、MouseProfile 无成员、
-    // 配置不解析。接线走 HEX(`safety.lua`) 验证过的 **warp 用法**：在**误差域**加一个
-    // 垂直于误差方向的弧线偏移（逐帧生效、不跨帧拆队列）⇒ 不破坏 PID 闭环。
-    // （模块里 path1/path2 的"拆点列逐帧发"是 BB 原版用法，留给开环拉枪场景，本次不接。）
-    BezierTrajectoryConfig bezier;
     HotkeyGuardConfig hotkey_guard;         // 热键保护（按 toggle_hotkey 切换「热键挂起」）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期
