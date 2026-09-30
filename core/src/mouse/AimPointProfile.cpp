@@ -117,4 +117,46 @@ bool constrain_aim_point_to_head(const DetectionBox& box, const AimPointProfile&
     return (*tx != x0) || (*ty != y0);
 }
 
+bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& dets,
+                      DetectionBox* head) {
+    if (!head) return false;
+    const float rw = ref.x2 - ref.x1;
+    const float rh = ref.y2 - ref.y1;
+    if (rw <= 0.0f || rh <= 0.0f) return false;
+    const float r_area = rw * rh;
+    // 头部小框面积上限（相对身体）：头远小于身体，取 0.5 已很宽松。
+    constexpr float kAreaMaxRatio = 0.5f;
+    // 头框中心必须落在身体框上半部（头在身体上端，不是腿/躯干下部）。
+    constexpr float kHeadUpperFraction = 0.5f;
+    // 越出身体框的部分占自身宽/高的比例上限（容忍检测框抖动/边缘越界）。
+    constexpr float kContainSlack = 0.4f;
+
+    DetectionBox best;
+    float best_area = 0.0f;
+    bool found = false;
+    for (const auto& d : dets) {
+        const float dw = d.x2 - d.x1;
+        const float dh = d.y2 - d.y1;
+        if (dw <= 0.0f || dh <= 0.0f) continue;
+        // 跳过 ref 本身（坐标完全一致；detections 里 ref 也在）
+        if (d.x1 == ref.x1 && d.y1 == ref.y1 && d.x2 == ref.x2 && d.y2 == ref.y2) continue;
+        const float d_area = dw * dh;
+        if (d_area >= r_area * kAreaMaxRatio) continue;  // 不是"明显更小"
+        const float dcx = (d.x1 + d.x2) * 0.5f;
+        const float dcy = (d.y1 + d.y2) * 0.5f;
+        if (dcx < ref.x1 || dcx > ref.x2) continue;      // 头框中心在身体框水平范围外
+        if (dcy < ref.y1 || dcy > ref.y1 + rh * kHeadUpperFraction) continue;  // 不在上半部
+        const float ox = std::max(0.0f, ref.x1 - d.x1) + std::max(0.0f, d.x2 - ref.x2);
+        const float oy = std::max(0.0f, ref.y1 - d.y1) + std::max(0.0f, d.y2 - ref.y2);
+        if (ox > dw * kContainSlack || oy > dh * kContainSlack) continue;  // 没被包住
+        if (!found || d_area < best_area) {
+            best = d;
+            best_area = d_area;
+            found = true;
+        }
+    }
+    if (found) *head = best;
+    return found;
+}
+
 }  // namespace ttbox::core::aim

@@ -355,16 +355,29 @@ void AimThread::loop() {
                 // （冻结框本身在裁剪区内部，不该再被外推改写）。
                 // 没有冻结框 ⇒ 走 V1.0.09 外推（行为不变，留 A/B 通路）。
                 const DetectionBox& aim_box = have_frozen ? frozen_box : selected.box;
-                if (!aim_point_at(aim_box, selected.box.class_id, aim_point, &tx, &ty,
-                                  have_frozen ? -1.0f : crop_bottom_px_,
-                                  have_frozen ? 0.0f : clipped_h_over_w)) {
-                    tx = (aim_box.x1 + aim_box.x2) * 0.5f;
-                    ty = aim_box.y1 + (aim_box.y2 - aim_box.y1) * 0.15f;
-                }
-                // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
-                // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
-                if (aim_point.head_aim.enabled) {
-                    constrain_aim_point_to_head(aim_box, aim_point, &tx, &ty);
+                // ★ 几何配对识头（不依赖类别号）：模型同一目标给出「大框(身体)+小框(头)」
+                //   两个框时，落点直接取小框正中心（resolve_head_box，见 AimPointProfile）。
+                //   只动**控制链的落点**（tx/ty → 平滑 → PID）；显示框、measurement_valid、
+                //   冻结判定仍用 selected.box（身体框）——「逻辑/视频两条线」不混。
+                //   配对失败（模型没单独出头框）/ 冻结中 ⇒ 走原身体框 × offset 落点。
+                DetectionBox head_box;
+                const bool aim_at_head = aim_point.aim_at_head_box && !have_frozen &&
+                                         resolve_head_box(aim_box, task.detections, &head_box);
+                if (aim_at_head) {
+                    tx = (head_box.x1 + head_box.x2) * 0.5f;
+                    ty = (head_box.y1 + head_box.y2) * 0.5f;
+                } else {
+                    if (!aim_point_at(aim_box, selected.box.class_id, aim_point, &tx, &ty,
+                                      have_frozen ? -1.0f : crop_bottom_px_,
+                                      have_frozen ? 0.0f : clipped_h_over_w)) {
+                        tx = (aim_box.x1 + aim_box.x2) * 0.5f;
+                        ty = aim_box.y1 + (aim_box.y2 - aim_box.y1) * 0.15f;
+                    }
+                    // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
+                    // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
+                    if (aim_point.head_aim.enabled) {
+                        constrain_aim_point_to_head(aim_box, aim_point, &tx, &ty);
+                    }
                 }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
                 // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。

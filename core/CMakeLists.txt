@@ -740,6 +740,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_point_clip PRIVATE ttbox_core)
   add_test(NAME test_aim_point_clip COMMAND test_aim_point_clip)
 
+  # 几何配对识头：落点取「头部小框」正中心（不依赖类别号，训练场单人双框场景）
+  add_executable(test_aim_head_box tests/test_aim_head_box.cpp)
+  target_link_libraries(test_aim_head_box PRIVATE ttbox_core)
+  add_test(NAME test_aim_head_box COMMAND test_aim_head_box)
+
   # C10/C11/C14：生命周期压力 + RuntimeConfig 并发读写压测
   add_executable(test_lifecycle_stress tests/test_lifecycle_stress.cpp)
   target_link_libraries(test_lifecycle_stress PRIVATE ttbox_core)
