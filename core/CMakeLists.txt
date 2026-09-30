@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-30 起产品版本为 "V1.0.15"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-30 起产品版本为 "V1.0.16"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
 #   V1.0.11 相对 V1.0.10：选靶照 yu 加量测跳变门控（拒绝坏量测，沿用上一帧）＋ continuity 免重置＋ 切靶确认窗＋ 开火期禁切靶。
@@ -39,7 +39,12 @@ cmake_minimum_required(VERSION 3.16)
 #                       · RuntimeProfile 删序列化段；CMake 删 2 个测试目标
 #                       · web 层删 BB 面板 8 段 + 拟人化分区（面板 5 分区 → 4 分区）
 #                       保留：trigger2 自动扳机 / 切靶防抖 / 选靶四项（生产功能）。
-project(ttbox_core VERSION 1.0.15 LANGUAGES CXX)
+#   V1.0.16 相对 V1.0.15：标定/落点三项改进（业主指令）——
+#                       · 落点可改瞄「头部小框正中心」：mouse.aim_point.aim_at_head_box（默认关），
+#                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
+#                       · 标定参数面板热更新（web 层，core 无感）；
+#                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+project(ttbox_core VERSION 1.0.16 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
