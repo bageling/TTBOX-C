@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "controller/PidController.hpp"
+#include "test_pid_controller.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "rknn/DecodeNMS.hpp"
@@ -120,7 +120,7 @@ void pack_e2e_output(const std::vector<float>& raw, RknnModelInfo& info,
 }
 
 // PID 收敛模拟：连续帧同方向误差 → 输出符号恒定
-MouseCommand pid_frame(aim::PidController& pid, float ex, float ey, uint32_t ms) {
+MouseCommand pid_frame(aim::TestPidController& pid, float ex, float ey, uint32_t ms) {
     aim::TargetPoint tp;
     tp.valid = true;
     tp.x = ex;
@@ -262,11 +262,10 @@ TEST(real_coord_direction_semantics) {
 
 // ============ 层B2：PID 方向确定性（连续帧，纯 P 主导）============
 TEST(real_pid_direction_semantics) {
-    aim::PidController pid;
-    aim::PidControllerParams pp;
-    // kp 用生产默认量级 17：小 kp 会被 smoothTerm 软限幅压到死区以下
-    // （实测 kp=0.05/err=100 → pidx≈0.047 < deadzone 0.5 → dx=0）
-    pp.kp_x = 17.0f; pp.kp_y = 10.0f;
+    aim::TestPidController pid;
+    aim::TestPidParams pp;
+    // kp 用生产真实值 0.25（V1.0.13 后 smooth 已折叠进 kp，直通，不再有软限幅）
+    pp.kp_x = 0.25f; pp.kp_y = 0.25f;
     pp.kd_x = 0.0f; pp.kd_y = 0.0f;
     pp.predict_x = 0.0f; pp.predict_y = 0.0f;  // 关掉预测干扰，方向由 P 主导
     pp.sensitivity = 1.0f;
@@ -399,7 +398,7 @@ TEST(real_target_selector_semantics) {
 // 无 ONNX 时层B 依然可跑（纯算法验证）。
 //
 // ★ P0-2 口径（team-lead item 10 裁决）：禁止"空体 / 零断言记 PASS"。
-//   CoordinateTransform / PidController / TargetSelector 均为**纯算法**——不依赖 ONNX/RKNN/硬件，
+//   CoordinateTransform / TestPidController / TargetSelector 均为**纯算法**——不依赖 ONNX/RKNN/硬件，
 //   在本分支**完全可断言** ⇒ 一律写**真断言**，不得以 `(void)x;` 烟雾或 `{}` 空体蒙混。
 //   （原先 real_pid_direction_semantics 仅 `(void)c;`、real_target_selector_semantics 为 `{}` 空体，
 //    二者零断言 ⇒ 被 run_all() 记入 passed —— 已消除。）
@@ -440,9 +439,9 @@ TEST(real_coord_direction_semantics) {
 // B2：PID 方向确定性（纯 P 主导）。渐进进入避开"目标切换 reset"（|Δerr|>30），
 //     稳态 20 帧统计输出符号：右→dx>0、左→dx<0、下→dy>0、上→dy<0；并验证死区归零。
 TEST(real_pid_direction_semantics) {
-    aim::PidController pid;
-    aim::PidControllerParams pp;
-    pp.kp_x = 17.0f; pp.kp_y = 10.0f;          // 生产默认量级（小 kp 会被软限幅压到死区下 → dx=0）
+    aim::TestPidController pid;
+    aim::TestPidParams pp;
+    pp.kp_x = 0.25f; pp.kp_y = 0.25f;          // 生产真实值（V1.0.13 后 smooth 已折叠进 kp，直通）
     pp.kd_x = 0.0f;  pp.kd_y = 0.0f;
     pp.predict_x = 0.0f; pp.predict_y = 0.0f;  // 关预测，方向由 P 主导
     pp.sensitivity = 1.0f; pp.output_scale = 1.0f; pp.output_deadzone = 0.5f;

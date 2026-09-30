@@ -141,8 +141,6 @@ set(CORE_SOURCES
   src/mouse/MouseRouter.cpp
   src/mouse/AimStateMachine.cpp
   src/mouse/PersonalMotion.cpp
-  # 第13阶段：控制器（IController 实现：封装 Pid1Controller + 输出链）
-  src/controller/PidController.cpp
   # T1.09：授权持久化（原子写 + 自愈 + 防降级）。纯 C++/POSIX 文件 I-O + 仓库内置 Json，
   #        **无 OpenSSL / 无网络** ⇒ 无条件列入：AUTH=ON/OFF 两种构建都要编
   #        （规格 §2.8.1；M2 起 DisabledAuth 桩已删，本注释为历史沿革）。

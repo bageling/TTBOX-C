@@ -20,10 +20,8 @@
 #include <limits>
 #include <vector>
 
-#include "aim/Pid1Controller.hpp"
 #include "common/CoreContracts.hpp"
-#include "controller/IController.hpp"
-#include "controller/PidController.hpp"
+#include "test_pid_controller.hpp"
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/TargetSelector.hpp"
@@ -65,10 +63,8 @@ static void test_no_detection() {
     CHECK(!t.valid);
 
     // Controller：invalid 目标点 → 安全命令
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     controller.configure(p);
@@ -133,10 +129,8 @@ static void test_out_of_bounds() {
     CHECK(!sel.valid || sel.box.class_id >= 0);
 
     // Controller 对越界目标点：必须安全
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     controller.configure(p);
@@ -153,10 +147,8 @@ static void test_out_of_bounds() {
 
 // 测试5：NaN/Inf → 必须拒绝（Controller 输出安全命令）
 static void test_nan_inf() {
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     controller.configure(p);
@@ -220,10 +212,8 @@ static void test_coordinate() {
 // 测试8：Controller — 已知 TargetPoint，输出 MouseCommand 必须符合预期。
 // 目标点=参考点 → 误差=0 → 输出应接近 0（死区后为 0）
 static void test_controller() {
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     p.output_deadzone = 1.0f;
@@ -247,10 +237,8 @@ static void test_controller() {
 
 // 测试9：连续帧 — 目标位置变化，PID 状态正确连续（误差收敛，输出有限）
 static void test_continuous_frames() {
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     p.output_deadzone = 0.0f;  // 关死区，观察真实输出
@@ -285,10 +273,8 @@ static void test_continuous_frames() {
 
 // 测试10：目标消失 → Target invalid，Controller 输出安全命令
 static void test_target_lost() {
-    PidController controller;
-    PidControllerParams p;
-    p.kp_x = 17.0f;
-    p.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams p;
     p.reference_x = 1280.0f;
     p.reference_y = 720.0f;
     controller.configure(p);

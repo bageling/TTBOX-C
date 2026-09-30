@@ -7,7 +7,7 @@
 //     → DecodeNMS(DFL-dist 9 输出解码 + classwise NMS)
 //     → TargetSelector(真实目标选择)
 //     → CoordinateTransform(瞄准点误差)
-//     → PidController(真实 PID → dx/dy)
+//     → TestPidController(真实 PID → dx/dy)
 //
 // 通过标准：
 //   1. ONNX 模型加载成功
@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "controller/PidController.hpp"
+#include "test_pid_controller.hpp"
 #include "model/backend/ModelBackend.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/TargetSelector.hpp"
@@ -177,9 +177,8 @@ TEST(win_e2e_full_pipeline) {
     tsc.roi_h = 256;
     tsc.confidence = 0.25f;
     aim::AimPointProfile app;  // 默认中心瞄准
-    aim::PidController pid;
-    aim::PidControllerParams pp;
-    pp.kp_x = 17.0f; pp.kp_y = 10.0f;
+    aim::TestPidController pid;
+    aim::TestPidParams pp;
     pp.sensitivity = 1.0f;
     pp.output_deadzone = 1.0f;
     pid.configure(pp);

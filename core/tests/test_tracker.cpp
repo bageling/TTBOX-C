@@ -1,4 +1,4 @@
-// test_tracker.cpp — 第15阶段：AimTracker + PidController 运动场景自动测试
+// test_tracker.cpp — 第15阶段：AimTracker + TestPidController 运动场景自动测试
 //
 // 覆盖 9 种场景（真实仿真轨迹）：
 //   1. 静止      2. 匀速      3. 加速      4. 减速
@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "common/CoreContracts.hpp"
-#include "controller/PidController.hpp"
+#include "test_pid_controller.hpp"
 #include "mouse/AimTracker.hpp"
 #include "pipeline/Target.hpp"
 
@@ -35,7 +35,7 @@ static constexpr uint64_t kRefX = 1280;
 static constexpr uint64_t kRefY = 720;
 
 // 运行单帧：更新 tracker + 预测 + controller，返回 MouseCommand
-static MouseCommand run_frame(AimTracker& tr, PidController& ctl,
+static MouseCommand run_frame(AimTracker& tr, TestPidController& ctl,
                               float tx, float ty, int tid, uint64_t now_us,
                               float pred_s, float* pred_err_x = nullptr,
                               float* pred_err_y = nullptr) {
@@ -54,9 +54,8 @@ static MouseCommand run_frame(AimTracker& tr, PidController& ctl,
 // 场景1：静止目标 — 预测误差≈0，输出收敛 0，无饱和
 static void test_static() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float max_abs_out = 0.0f, max_pred_err = 0.0f;
@@ -77,9 +76,8 @@ static void test_static() {
 // 真正要验证的是"预测是否命中未来位置"（线性外推对匀速目标应精确）。
 static void test_constant_velocity() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     const float pred_s = 0.05f;       // 预测 50ms
@@ -114,9 +112,8 @@ static void test_constant_velocity() {
 // 场景3：加速目标（a=50px/s²）— 输出有限，预测误差有界
 static void test_acceleration() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float max_out = 0.0f, max_pred_err = 0.0f;
@@ -139,9 +136,8 @@ static void test_acceleration() {
 // 场景4：减速目标（先加速后减速）— 输出有限，无发散
 static void test_deceleration() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float max_out = 0.0f, max_pred_err = 0.0f;
@@ -167,9 +163,8 @@ static void test_deceleration() {
 // 场景5：急停（匀速后瞬间停止）— 速度估计应迅速回落，输出有限
 static void test_sudden_stop() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float x = kRefX;
@@ -196,9 +191,8 @@ static void test_sudden_stop() {
 // 场景6：方向反转（向右 60 帧后向左 80 帧）— 速度符号翻转，目标穿越参考点后输出转负
 static void test_direction_reversal() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float x = kRefX;
@@ -222,9 +216,8 @@ static void test_direction_reversal() {
 // 场景7：目标切换（id 1→2）— tracker 应 Reset 速度，输出有限
 static void test_target_switch() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     // 目标1 向右运动 60 帧
@@ -252,9 +245,8 @@ static void test_target_switch() {
 // 场景8：短暂丢失（10 帧无目标）— tracker 保持原状态，恢复后速度有效
 static void test_brief_loss() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     float x = kRefX;
@@ -282,9 +274,8 @@ static void test_brief_loss() {
 // 场景9：完全丢失（reset）— tracker 状态清空，再出现时重新建立
 static void test_complete_loss() {
     AimTracker tr;
-    PidController ctl;
-    PidControllerParams p;
-    p.kp_x = 17.0f; p.kp_y = 10.0f;
+    TestPidController ctl;
+    TestPidParams p;
     p.reference_x = kRefX; p.reference_y = kRefY;
     ctl.configure(p);
     for (int i = 0; i < 60; ++i) {

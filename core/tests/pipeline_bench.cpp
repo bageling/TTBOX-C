@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "controller/PidController.hpp"
+#include "test_pid_controller.hpp"
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/TargetSelector.hpp"
@@ -33,10 +33,8 @@ int main() {
     AimPointProfile ap;
     ap.offset_x = 0.5f;
     ap.offset_y = 0.15f;
-    PidController controller;
-    PidControllerParams pp;
-    pp.kp_x = 17.0f;
-    pp.kp_y = 10.0f;
+    TestPidController controller;
+    TestPidParams pp;
     pp.reference_x = 1280.0f;
     pp.reference_y = 720.0f;
     controller.configure(pp);
