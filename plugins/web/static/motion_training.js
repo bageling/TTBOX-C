@@ -697,25 +697,6 @@
     }
   }
 
-  async function saveMix() {
-    if (!state.enabled) return;
-    try {
-      await api("/api/config", {
-        method: "PUT",
-        body: JSON.stringify({
-          ai: { controller: {
-            personal_motion_curve_blend: Number(ui.curve.value) / 100,
-            personal_motion_speed_blend: Number(ui.speed.value) / 100,
-            personal_motion_reaction_blend: Number(ui.reaction.value) / 100,
-            personal_motion_max_reaction_delay_ms: Number(ui.delay.value),
-          } },
-        }),
-      });
-    } catch (error) {
-      setMessage(`保存混合参数失败：${error.message}`, true);
-    }
-  }
-
   ui.start.addEventListener("click", () => void startSession());
   ui.stop.addEventListener("click", () => void endSession());
   ui.retry.addEventListener("click", () => void retryUpload());
@@ -758,7 +739,6 @@
 
   for (const input of [ui.curve, ui.speed, ui.reaction, ui.delay]) {
     input.addEventListener("input", updateMixLabels);
-    input.addEventListener("change", () => void saveMix());
   }
 
   document.addEventListener("pointerlockchange", () => {

@@ -2,7 +2,7 @@
 #
 # 本目录混有两种测试风格：
 #   ① pytest 风格（test_* 函数 + 断言），由 `python -m pytest plugins/web/tests` 收集执行：
-#        test_web_brand / test_web_cloud_client / test_web_continuous_lead /
+#        test_web_brand / test_web_cloud_client /
 #        test_web_freeauth_gate / test_web_license_caps / test_web_model_input
 #   ② 独立脚本风格（模块级顺序执行、末尾 sys.exit()），设计为 `python <file>` 直跑：
 #        test_web_calibration_apply / test_web_recoil_translation

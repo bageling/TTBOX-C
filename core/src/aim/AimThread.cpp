@@ -9,8 +9,6 @@
 #include "mouse/FovAngle.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/AimPointProfile.hpp"
-#include "mouse/PersonalMotion.hpp"
-#include "mouse/PersonalTrajectoryShader.hpp"
 #include "common/CpuAffinity.hpp"
 #include "common/Logger.hpp"
 #include "output/OutputBackend.hpp"   // kActDown/kActUp（自动扳机注入动作）
@@ -33,13 +31,9 @@ void AimThread::reset_runtime_state() {
     tracker_.reset();
     pid_x_.reset();
     pid_y_.reset();
-    pull_curve_.reset();
-    continuous_lead_.reset();  // 持续提前量累计/方向/渐入电平清零（destroy→init 重建一致）
-    personal_shader_.reset();
     recoil_.reset();
     clip_ratio_tracker_.reset();  // V1.0.10：身高反推比随世代清零（禁止跨世代继承旧目标比例）
     frozen_rect_.reset();        // V1.0.10：冻结框随世代清零（换模型后旧框位置已不可信）
-    jitter_ff_.reset();      // V3 阶段 5：跨世代的抖动欠账不能留给新模型去扣
     // 自动扳机：换世代必须清状态，且**先把按住的键抬起**（否则换模型时鼠标键卡在按下态）。
     trigger_.reset();
     trigger_release_btn_ = 0;
@@ -52,7 +46,6 @@ void AimThread::reset_runtime_state() {
     display_smooth_y2_.reset();
     last_display_target_id_ = -1;
     last_display_ts_us_ = 0;
-    target_age_ms_ = 0.0f;
     last_timestamp_us_ = 0;
     remainder_x_ = 0.0f;
     remainder_y_ = 0.0f;
@@ -94,10 +87,6 @@ void AimThread::loop() {
             float out_sensitivity = 1.0f, out_scale = 1.0f;
             float out_deadzone = 1.0f;
             float recoil_px_per_count = 0.65f;  // 压枪 px→count 换算（默认 0.65 px/count，标定可覆盖）
-            PersonalMotionConfig personal_motion;
-            PullCurveConfig pull_curve_cfg;  // 拉枪曲线配置（默认 enabled=true, min_distance=80, strength=0.8）
-            ContinuousLeadConfig lead_cfg;  // 持续提前量配置（默认 enabled=false ⇒ 不动输出）
-            PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
@@ -159,7 +148,6 @@ void AimThread::loop() {
                 pid_y_.reset();
                 remainder_x_ = 0.0f;
                 remainder_y_ = 0.0f;
-                jitter_ff_.reset();  // V3 阶段 5：热键松开那一帧的抖动欠账一并作废
             }
             last_injection_allowed_ = injection_allowed;
             if (frame_profile) {
@@ -254,10 +242,6 @@ void AimThread::loop() {
                 out_deadzone = frame_profile->mouse.output_deadzone;
                 recoil_px_per_count = frame_profile->mouse.gain_y_px_per_count > 0.05f
                                           ? frame_profile->mouse.gain_y_px_per_count : 0.65f;
-                personal_motion = frame_profile->mouse.personal_motion;
-                pull_curve_cfg = frame_profile->mouse.pull_curve;
-                lead_cfg = frame_profile->mouse.continuous_lead;
-                personal_traj_cfg = frame_profile->mouse.personal_trajectory;
                 lock_confirm_cfg = frame_profile->mouse.lock_confirm;
                 recoil_cfg = frame_profile->mouse.recoil;
                 // V1.0.13：smooth 已从参数面删除（折叠进 kp/kd）⇒ 第 5 参恒 0（直通）。
@@ -413,11 +397,7 @@ void AimThread::loop() {
                     !selected.continuity) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     pid_x_.reset(); pid_y_.reset(); remainder_x_ = remainder_y_ = 0.0f;
-                    pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
-                    continuous_lead_.reset();  // 持续提前量累计清零（新目标重新累计"同向距离"）
-                    personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                     recoil_.reset();  // 压枪：换目标 ⇒ 计时/累计量/残差作废（yu 同口径）
-                    jitter_ff_.reset();       // V3 阶段 5：换目标 ⇒ 旧目标的抖动欠账作废
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -452,42 +432,6 @@ void AimThread::loop() {
                     }
                 }
                 // 2026-09-29：扳机压枪联动偏移（trigger.y_offset）已随 v7.26 一并删除。
-                // ---- V3 阶段 5：拟人化抖动前馈扣除（默认关 ⇒ 与本机制加入前逐字节一致）----
-                // 把"到期的抖动 count"换算成像素、加回控制误差 ⇒ PID 看不见自己发的抖动。
-                // 量纲：jitter(count) × px_per_count = 画面像素位移。
-                // 顺序：先 advance（取到期量），再走 PID；本帧新注入的抖动在帧尾才 push，
-                //       ⇒ 本帧注入的样本下一帧才开始计时，不会"提前一帧扣"。
-                jitter_ff_x_px_ = 0.0f;
-                jitter_ff_y_px_ = 0.0f;
-                if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
-                    const auto& ff = frame_profile->mouse.jitter_feedforward;
-                    float delay_ms = ff.delay_ms;
-                    if (!(delay_ms > 0.0f)) delay_ms = frame_profile->mouse.response_delay_ms;
-                    float g = ff.gain_px_per_count;
-                    if (!(g > 0.0f)) g = frame_profile->mouse.gain_y_px_per_count;
-                    if (delay_ms > 0.0f && g > 0.0f) {
-                        float jx = 0.0f, jy = 0.0f;
-                        jitter_ff_.advance(dt_ms, delay_ms, &jx, &jy);
-                        const float sc = (ff.scale > 0.0f) ? ff.scale : 0.0f;
-                        float ax = jx * g * sc;
-                        float ay = jy * g * sc;
-                        // 单帧上限：防异常配置把误差顶飞（默认 40px）
-                        const float lim = (ff.max_px > 0.0f) ? ff.max_px : 0.0f;
-                        if (lim > 0.0f) {
-                            ax = std::clamp(ax, -lim, lim);
-                            ay = std::clamp(ay, -lim, lim);
-                        }
-                        control_x += ax;
-                        control_y += ay;
-                        jitter_ff_x_px_ = ax;
-                        jitter_ff_y_px_ = ay;
-                    } else {
-                        // 没标过延迟 / 没标过 gain ⇒ 前馈无从换算，清空缓冲防止陈旧样本积压
-                        jitter_ff_.reset();
-                    }
-                } else if (jitter_ff_.pending() > 0) {
-                    jitter_ff_.reset();  // 开关刚关：别留一队过期样本等下次开启时集中释放
-                }
                 // pid1.cpp P_PID 直接消费控制域误差（像素域）。
                 // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
@@ -507,31 +451,6 @@ void AimThread::loop() {
                 const float out_gain = out_sensitivity * out_scale;
                 scaled_x = aibox_x * out_gain;
                 scaled_y = aibox_y * out_gain;
-                // 个人曲线只改变输出倍率，不绕过 PID、死区和热键安全门。
-                const float personal_distance = std::hypot(control_x, control_y);
-                const float personal_gain = PersonalMotion::scale(personal_distance, personal_motion);
-                scaled_x *= personal_gain;
-                scaled_y *= personal_gain;
-                // 拉枪曲线：目标误差 ≥ min_distance 时，在拉枪方向附加弧线/抖动（Y 轴附加量）。
-                // 位置在 personal_gain 之后、deadzone 之前（PullCurve.hpp 设计输出链顺序）。
-                // err 用控制域误差（control_x/y），out 用当前缩放输出（scaled_x/y）。
-                scaled_y += pull_curve_.apply(control_x, control_y, scaled_x, scaled_y,
-                                             pull_curve_cfg, dt_ms);
-                // 持续提前量（continuous_lead）：AI 输出**持续同向**累计超过 enter 阈值后，
-                // 在 X 轴附加偏置（渐入渐出），用于跟住横向持续移动的目标。
-                // 位置在 pull_curve 之后、recoil 之前（同为输出链附加项）；
-                // 依然受 deadzone → remainder → int16 → 拟人化整形 → 热键安全门约束，
-                // 热键放开时最终输出照样被归零（不绕过任何安全门）。
-                //
-                // ★ 量纲（关键）：喂入的是 PID 输出 aibox_x/aibox_y（count 域的"AI 输出"），
-                //   **不是** scaled_x/scaled_y。原因：enter 阈值必须与用户灵敏度解耦 ——
-                //   若喂 scaled_*（= aibox × sens × output_scale × personal_gain），
-                //   用户一调高灵敏度就会让提前量**静默地更早触发**，行为不可预期。
-                //   截断成 int32 只丢 <1 count 的残差，对"累计同向距离"判定无实质影响。
-                //
-                scaled_x += continuous_lead_.apply(static_cast<int32_t>(aibox_x),
-                                                   static_cast<int32_t>(aibox_y),
-                                                   dt_ms, lead_cfg);
             }  // ← 结束 target_ok 块（以下压枪与输出尾链在无目标时也要跑）
 
             // ---- 自动扳机（BB 两套状态机 v7.26 / 2.0）----
@@ -650,50 +569,6 @@ void AimThread::loop() {
                 //     ③ 拟人化挪到了整数截断**之后** ⇒ 噪声不足 1 count 就被吃掉，
                 //        原版是在浮点位移域做的。
                 //   ★ 默认这几个模块全关 ⇒ 老配置行为零变化；只有开了的人才有差别。
-
-
-                // ---- 深度融合（2026-09-28）：两条拟人化链合成一条 ----
-                // 职责分工（不再二选一，互补叠加）：
-                //   ① 自研 personal_trajectory = **这一段路怎么走**
-                //      （Fitts 时长、起步→加速→收尾的速度包络、垂直于移动方向的手抖曲线、
-                //        大误差/快目标/老目标自动停手的抑制）
-                //   ② BB humanize = **人的生理特征**
-                //      （低通、反应延迟、冲过头、快到了收力、手不稳的噪声）
-                // 顺序：先定轨迹、再叠人的特征 —— BB 的过冲/噪声才有"超出轨迹"的自由。
-                // ★ 两者都开时不会互相打架：包络管"沿路快慢"，噪声/过冲管"末端手感"；
-                //   BB 的速度波动只在锁定首帧作用一次，与自研全程包络天然错开。
-                float fused_raw_x = scaled_x, fused_raw_y = scaled_y;
-                if (personal_traj_cfg.enabled && injection_allowed) {
-                    if (!personal_shader_.active()) {
-                        personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);
-                        target_age_ms_ = 0.0f;
-                    }
-                    const auto& ts = tracker_.state();
-                    personal_shader_.set_error_speed_px_s(ts.valid ? std::hypot(ts.vx, ts.vy) : 0.0f);
-                    personal_shader_.set_target_age_ms(target_age_ms_);
-                    target_age_ms_ += dt_ms;
-                    personal_shader_.set_target_radius_px(
-                        (selected.box.y2 - selected.box.y1) * 0.5f);
-                    personal_shader_.shape_f(&scaled_x, &scaled_y, control_x, control_y, dt_ms,
-                                             personal_traj_cfg);
-                    // V3 阶段 5：只登记**垂直随机抖动**。transport 增益是故意要走的一段。
-                    if (frame_profile && frame_profile->mouse.jitter_feedforward.enabled) {
-                        jitter_ff_.push(personal_shader_.last_jitter_x(),
-                                        personal_shader_.last_jitter_y());
-                    }
-                }
-
-
-                // ---- 融合链末端守卫 ----
-                // 自研那套安全约束（幅度上限 / 与误差同向 / 不许反向 / 能量不增）
-                // 罩住**整条**拟人化输出 —— 深度融合后 BB 的过冲和噪声同样不许
-                // 把准星推反、不许凭空加力。自研链没开时这条守卫不生效（保持 BB 原味）。
-                if (personal_traj_cfg.enabled && injection_allowed) {
-                    personal_shader_.guard_fused(&scaled_x, &scaled_y,
-                                                 fused_raw_x, fused_raw_y,
-                                                 control_x, control_y, personal_traj_cfg);
-                }
-
                 scaled_y += recoil_add_y;
                 scaled_x += recoil_add_x;
                 // ---- V3 阶段 3b：输出门限挪到余数累加**之后**（2026-09-28）----
@@ -707,7 +582,7 @@ void AimThread::loop() {
                 //   **余数始终保留**，下一帧继续攒。死区从此只决定"多久发一次"，
                 //   不再决定稳态误差。
                 //
-                // 闭环 replay 实测（core/tools/pid_sim/aim_replay.py，Gain=0.686 / 延迟 51ms / 144fps）：
+                // 闭环 replay 实测（历史离线仿真，Gain=0.686 / 延迟 51ms / 144fps）：
                 //   腰射 移动 60px/s：稳态 7.05px → 5.15px（-27%）
                 //   腰射 框跳 ±18px：稳态 0.47px → 0.21px（-55%）
                 //   腰射 静止靶：    稳态 0.21px → 0.21px（静止时旧链路靠"冻结"亦可，收益在动态）
@@ -733,13 +608,6 @@ void AimThread::loop() {
                     remainder_x_ = 0.0f; remainder_y_ = 0.0f;
                     pid_x_.reset(); pid_y_.reset();
                 }
-                // ---- 拟人化整形引擎（第 1 项落地）：对 move_x/move_y 做 Fitts 时长+速度包络+垂直抖动 ----
-                // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。
-                // 输入：已量化 count(dx,dy) + 控制误差 px(ex,ey)；按需激活（新目标首次有效帧）。
-                // ---- BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）----
-                // ★ 2026-09-28 深度融合：两条拟人化链都已**上移**到浮点位移域
-                //   （自研整形 → BB 拟人化 → 融合守卫 → 抗过冲，见上面尾链段），
-                //   这里不再有第二次整形。两条链不再互斥，互补叠加。
             }
             // ---- Hotkey Gate 兜底（安全边界最后一行）----
             // 无论前面算出什么，热键未按下时最终动作强制归零。

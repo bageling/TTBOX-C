@@ -1,5 +1,5 @@
 # test_web_calibration_apply.py — ttbox-web.py 标定结果写回逻辑单测（本地，不启动 Web）
-# 验证：标定 gain 写回 mouse.gain_x/y_px_per_count + 拟人化联动，
+# 验证：标定 gain 写回 mouse.gain_x/y_px_per_count，
 #      且不再用旧体系 K_LOOP 改写 kp（pid1 体系 kp 保持不动）。
 import sys
 import threading
@@ -44,7 +44,6 @@ profile = {
         'rate_x': 0.3, 'rate_y': 0.3,
         'sensitivity': 1.0, 'output_scale': 1.0,
     },
-    'personal_trajectory': {'enabled': True},
 }
 calib = {'mouse_gain_x_px_per_count': 0.62, 'mouse_gain_y_px_per_count': 0.48}
 ns, ipc = _make_ns(profile)
@@ -53,7 +52,6 @@ ok, detail = ns['_calib_apply_gain'](calib)
 check(ok, '写回成功')
 check(profile['mouse']['gain_x_px_per_count'] == 0.62, 'gain_x_px_per_count 落盘 0.62')
 check(profile['mouse']['gain_y_px_per_count'] == 0.48, 'gain_y_px_per_count 落盘 0.48')
-check(profile['mouse']['personal_trajectory']['response_px_per_count'] == 0.48, 'response_px_per_count 联动 gain_y（mouse 子对象）')
 check(profile['mouse'].get('kp_x') == 25.0, 'kp_x 保持 25（不再被 K_LOOP 改写）')
 check(profile['mouse'].get('kp_y') == 25.0, 'kp_y 保持 25（不再被 K_LOOP 改写）')
 check(len(ipc.sent) == 1 and ipc.sent[0][0] == 'SET_CONFIG', '提交一次 SET_CONFIG')

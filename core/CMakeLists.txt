@@ -35,7 +35,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · 删 LeadPredictor/HumanizeShaper/SpeedFluctuation/AccuracySim/
 #                         AntiOvershoot/SpeedAdaptiveKp/GlobalWave/BezierTrajectory（默认全关、零行为）
 #                       · MouseTypes.hpp 删对应 8 配置结构体 + bezier enum + 7 成员
-#                       · AimThread 删 21 处接线（continuous_lead 互斥简化为无条件）
+#                       · AimThread 删 21 处接线（原互斥简化为无条件）
 #                       · RuntimeProfile 删序列化段；CMake 删 2 个测试目标
 #                       · web 层删 BB 面板 8 段 + 拟人化分区（面板 5 分区 → 4 分区）
 #                       保留：trigger2 自动扳机 / 切靶防抖 / 选靶四项（生产功能）。
@@ -158,7 +158,6 @@ set(CORE_SOURCES
   src/mouse/CoordinateTransform.cpp
   src/mouse/MouseRouter.cpp
   src/mouse/AimStateMachine.cpp
-  src/mouse/PersonalMotion.cpp
   # T1.09：授权持久化（原子写 + 自愈 + 防降级）。纯 C++/POSIX 文件 I-O + 仓库内置 Json，
   #        **无 OpenSSL / 无网络** ⇒ 无条件列入：AUTH=ON/OFF 两种构建都要编
   #        （规格 §2.8.1；M2 起 DisabledAuth 桩已删，本注释为历史沿革）。
@@ -661,11 +660,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_pid1 PRIVATE ttbox_core)
   add_test(NAME test_pid1 COMMAND test_pid1)
 
-  # V3 阶段 5：拟人化抖动前馈扣除（延迟对齐环形缓冲 + 两条链抖动上报）
-  add_executable(test_jitter_feedforward tests/test_jitter_feedforward.cpp)
-  target_link_libraries(test_jitter_feedforward PRIVATE ttbox_core)
-  add_test(NAME test_jitter_feedforward COMMAND test_jitter_feedforward)
-
   # Hotkey Gate 最终输出安全边界测试（7 个验收场景）
   add_executable(test_hotkey_gate tests/test_hotkey_gate.cpp)
   target_link_libraries(test_hotkey_gate PRIVATE ttbox_core)
@@ -675,16 +669,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_hotkey_guard tests/test_hotkey_guard.cpp)
   target_link_libraries(test_hotkey_guard PRIVATE ttbox_core)
   add_test(NAME test_hotkey_guard COMMAND test_hotkey_guard)
-
-  # 拉枪曲线注入 AimThread 输出链测试（4 个验收场景）
-    add_executable(test_pull_curve_aimthread tests/test_pull_curve_aimthread.cpp)
-    target_link_libraries(test_pull_curve_aimthread PRIVATE ttbox_core)
-    add_test(NAME test_pull_curve_aimthread COMMAND test_pull_curve_aimthread)
-
-    # 拟人化整形引擎（第 1 项）单元测试
-      add_executable(test_personal_trajectory_shader tests/test_personal_trajectory_shader.cpp)
-      target_link_libraries(test_personal_trajectory_shader PRIVATE ttbox_core)
-      add_test(NAME test_personal_trajectory_shader COMMAND test_personal_trajectory_shader)
 
       # 目标锁定确认（第 2 项：ENTER/HOLD/instant-enter）单元测试
             add_executable(test_lock_confirm tests/test_lock_confirm.cpp)
@@ -800,10 +784,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_mouse_control_client tests/test_mouse_control_client.cpp)
   target_link_libraries(test_mouse_control_client PRIVATE ttbox_core)
   add_test(NAME test_mouse_control_client COMMAND test_mouse_control_client)
-
-  add_executable(test_personal_motion tests/test_personal_motion.cpp)
-  target_link_libraries(test_personal_motion PRIVATE ttbox_core)
-  add_test(NAME test_personal_motion COMMAND test_personal_motion)
 
   add_executable(test_preprocess tests/test_preprocess.cpp)
   target_link_libraries(test_preprocess PRIVATE ttbox_core)

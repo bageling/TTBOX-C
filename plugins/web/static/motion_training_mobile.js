@@ -197,25 +197,6 @@
 
   for (const input of [ui.curve, ui.speed, ui.reaction, ui.delay]) {
     input.addEventListener("input", updateMixLabels);
-    input.addEventListener("change", async () => {
-      if (!state.enabled) return;
-      try {
-        const mix = mixPayload();
-        await api("/api/config", {
-          method: "PUT",
-          body: JSON.stringify({
-            ai: { controller: {
-              personal_motion_curve_blend: mix.curve_blend,
-              personal_motion_speed_blend: mix.speed_blend,
-              personal_motion_reaction_blend: mix.reaction_blend,
-              personal_motion_max_reaction_delay_ms: mix.max_reaction_delay_ms,
-            } },
-          }),
-        });
-      } catch (error) {
-        setMessage(`保存混合参数失败：${error.message}`, true);
-      }
-    });
   }
 
   document.addEventListener("click", (event) => {

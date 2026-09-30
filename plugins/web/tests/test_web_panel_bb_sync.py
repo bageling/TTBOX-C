@@ -1,6 +1,6 @@
 # test_web_panel_bb_sync.py — 面板（index.html）与后端（ttbox-web.py）的「一套口径」守卫
 #
-# 背景：辅助功能页收敛成 4 个分区（压枪 / 自动开火 / 拉枪曲线 / 选靶），
+# 背景：辅助功能页收敛成 3 个分区（压枪 / 自动开火 / 选靶），
 # 分区里的字段（2026-09-30 重数；删 lead1/trigger/三段查表/垂直修正/闭环后）
 # 由 index.html 的 BB_CTRL_MODULES **表驱动**读写，而这张表是从
 # ttbox-web.py 的后端表机械生成的。两处一旦不同步，症状是"面板能调但存不下去"或者
@@ -113,12 +113,12 @@ def test_retired_panel_surfaces_are_gone():
         assert token not in src, '老界面残留：%s' % token
 
 
-def test_panel_has_exactly_four_assist_sections():
+def test_panel_has_exactly_three_assist_sections():
     src = _panel_source()
     sections = re.findall(r'<section id="(assist-section-[a-z0-9-]+)"', src)
     assert sections == ['assist-section-recoil', 'assist-section-trigger',
-                        'assist-section-lead', 'assist-section-selector'], sections
+                        'assist-section-selector'], sections
     tabs = re.findall(r'data-assist-section-target="(assist-section-[a-z0-9-]+)"', src)
     assert tabs == sections
-    # 四个页签都不该是 disabled（内核已实现，功能可进入）
+    # 三个页签都不该是 disabled（内核已实现，功能可进入）
     assert not re.search(r'data-assist-section-target="[^"]+"[^>]*\bdisabled\b', src)

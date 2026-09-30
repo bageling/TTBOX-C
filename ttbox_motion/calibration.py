@@ -236,9 +236,9 @@ def derive_pid_params(
     kd_ratio = KD_RATIO_BASE + delay / KD_RATIO_DELAY_DIV
     kd = max(KD_MIN, min(KD_MAX, kp * kd_ratio))
     # predict（Ki 通道）：延迟越大越保守；上限 0.35（噪声下 Ki 正反馈
-    # 是振荡主因，见 core/tools/pid_sim 仿真结论），60ms 延迟降为 0.15。
+    # 是振荡主因，见历史离线仿真结论），60ms 延迟降为 0.15。
     # ★ 这个上限仍是保守档，与 core 的 predict 默认 1.0 不同源 —— 见 V1.0.13 交付记录
-    #   「待办」一条：要用 pid_sim 在真实 gain 域重新扫一遍再统一。
+    #   「待办」一条：要在真实 gain 域重新扫一遍再统一。
     predict = max(0.1, min(0.35, 0.35 - delay / 300.0))
     return {
         'kp': round(kp, 4),

@@ -819,8 +819,6 @@ CONTROLLER_NUMS = {
 }
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {
-    'pull_curve_enabled': '_pc_enabled',
-    'personal_trajectory_enabled': '_pt_enabled',
     'lock_confirm_instant_enter_enabled': '_lc_inst_enter_enabled',
     'head_aim_enabled': '_ha_enabled',
 }
@@ -829,7 +827,7 @@ CONTROLLER_BOOLS = {
 # ---------------------------------------------------------------------------
 # BB 对标新模块（2026-09-24）：面板扁平键 ↔ Core mouse 子对象
 #
-# 命名约定（与既有 pull_curve_* / continuous_lead_* 完全一致，别另立一套）：
+# 命名约定（与既有 head_aim / lock_confirm 完全一致，别另立一套）：
 #   面板元素 id = "controller_" + <数据键>；数据键放在 body['ai']['controller'] 这一层。
 #   于是前端 collectConfig / populate 只跟扁平键打交道，后端负责折叠成 Core 的嵌套对象。
 #
@@ -839,10 +837,6 @@ CONTROLLER_BOOLS = {
 #   面板首次回填显示的就是它，对不上会让"没存过配置"的设备显示成另一套参数。
 # ★ 本表只做搬运，不做校验；越界值由 Core 的 RuntimeProfile::validate 拦。
 CTRL_BLOCKS = [
-    # 个人动作曲线：core 一直在用（AimThread 的 personal_gain），但面板**从来没有控件**
-    #   （此前只有几行手写搬运，UI 缺）⇒ 只能手改 json。本轮补成表驱动 + 卡片。
-    #   只暴露 PersonalMotion 真正读的两个字段（enabled / curve_blend）；
-    #   speed_blend / reaction_blend / max_reaction_delay_ms core 从不读，不进表。
     # 压枪速率引擎（2026-09-30 对照 yu 重做后）：只剩「速率 + 门控」两组参数。
     #   拉速 = 3 x strength x speed（px/s），与帧率无关；roi_h 是累计下压上限。
     #   ★ 默认值必须与 core/src/mouse/MouseTypes.hpp::RecoilConfig 一字不差。
@@ -1170,53 +1164,7 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
                 continue  # 嵌套结构开关，下面统一处理
             mouse[tk] = bool(ctrl[yk])
 
-    # 2) 插件结构（pull_curve / personal_trajectory / lock_confirm / head_aim / personal_motion）
-    pull_curve: dict = {}
-    if ctrl.get('pull_curve_enabled') is not None:
-        pull_curve['enabled'] = bool(ctrl['pull_curve_enabled'])
-    for yk, tk in [('pull_curve_strength', 'strength'),
-                   ('pull_curve_min_distance', 'min_distance')]:
-        if ctrl.get(yk) is not None:
-            pull_curve[tk] = ctrl[yk]
-    if pull_curve:
-        mouse['pull_curve'] = pull_curve
-
-    # 持续提前量（continuous_lead）—— mouse.continuous_lead.*
-    # 字段名与 yu config.json 的 controller.continuous_lead_* 一一对应，便于对标迁移。
-    # ★ 有效性说明（勿在面板上误导用户）：core/src/mouse/ContinuousLead.hpp 的
-    #   apply() 当前只消费 enabled / enter_distance / scale 三个字段；
-    #   fade_in_ms / fade_out_ms / near_disable_ratio 在 Core 侧结构体里标"保留字段"、
-    #   算法尚未使用（渐入用的是固定一阶系数、空闲复位用的是固定 300ms）。
-    #   所以这 3 个字段**照常存取**（保证与 yu 配置的往返一致、留给后续实现），
-    #   但面板上必须显示为"预留"，不能让用户以为调了就有用。
-    continuous_lead: dict = {}
-    if ctrl.get('continuous_lead_enabled') is not None:
-        continuous_lead['enabled'] = bool(ctrl['continuous_lead_enabled'])
-    for yk, tk in [('continuous_lead_enter_distance', 'enter_distance'),
-                   ('continuous_lead_scale', 'scale'),
-                   ('continuous_lead_fade_in_ms', 'fade_in_ms'),
-                   ('continuous_lead_fade_out_ms', 'fade_out_ms'),
-                   ('continuous_lead_near_disable_ratio', 'near_disable_ratio')]:
-        if ctrl.get(yk) is not None:
-            continuous_lead[tk] = ctrl[yk]
-    if continuous_lead:
-        mouse['continuous_lead'] = continuous_lead
-
-    # 拟人化整形（第1项）—— mouse.personal_trajectory.*
-    personal_traj = {}
-    if ctrl.get('personal_trajectory_enabled') is not None:
-        personal_traj['enabled'] = bool(ctrl['personal_trajectory_enabled'])
-    for yk, tk in [('personal_trajectory_speed_scale', 'speed_scale'),
-                   ('personal_trajectory_stability_scale', 'stability_scale'),
-                   ('personal_trajectory_variation_scale', 'variation_scale'),
-                   ('personal_trajectory_jitter_amp_px', 'jitter_amp_px'),
-                   ('personal_trajectory_fitts_intercept_ms', 'fitts_intercept_ms'),
-                   ('personal_trajectory_fitts_slope_ms_per_bit', 'fitts_slope_ms_per_bit')]:
-        if ctrl.get(yk) is not None:
-            personal_traj[tk] = ctrl[yk]
-    if personal_traj:
-        mouse['personal_trajectory'] = personal_traj
-
+    # 2) 插件结构（lock_confirm / head_aim）
     # 目标锁定确认（第2项）—— mouse.lock_confirm.*
     lock_confirm = {}
     if ctrl.get('lock_confirm_instant_enter_enabled') is not None:
@@ -1294,28 +1242,11 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     if head_aim:
         mouse['head_aim'] = head_aim
 
-    # 3) 个人移动曲线：TTBOX 自己的 RuntimeProfile 结构
-    personal_motion = {}
-    for key in ('personal_motion_enabled', 'personal_motion_curve_blend',
-                'personal_motion_speed_blend', 'personal_motion_reaction_blend',
-                'personal_motion_max_reaction_delay_ms'):
-        if ctrl.get(key) is not None:
-            target = {
-                'personal_motion_enabled': 'enabled',
-                'personal_motion_curve_blend': 'curve_blend',
-                'personal_motion_speed_blend': 'speed_blend',
-                'personal_motion_reaction_blend': 'reaction_blend',
-                'personal_motion_max_reaction_delay_ms': 'max_reaction_delay_ms',
-            }[key]
-            personal_motion[target] = ctrl[key]
-    if personal_motion:
-        mouse['personal_motion'] = personal_motion
-
-    # 4) 目标选择
+    # 3) 目标选择
     if ctrl.get('selector_lost_grace_ms') is not None:
         mouse['lost_grace_ms'] = ctrl['selector_lost_grace_ms']
 
-    # 5) 瞄准档位 aim_profiles[]：热键 / 瞄准点 / 移动倍率 / FOV 倍率 / 目标类别
+    # 4) 瞄准档位 aim_profiles[]：热键 / 瞄准点 / 移动倍率 / FOV 倍率 / 目标类别
     #    ★ 必须整表遍历。旧实现只取 [0]，面板「新增热键」加出来的第 2 张卡起，
     #      所有字段在保存时静默丢弃、刷新后连卡本身都消失 —— 那不是"少读一行"，
     #      是面板长了个 core 没有的功能（面板多卡 UI 来自 e874b2c 照抄上游 YU 面板）。
@@ -1534,8 +1465,6 @@ def profile_to_web(prof: dict) -> dict:
         'offset_x': mouse.get('offset_x', 0.5),
         'offset_y': mouse.get('offset_y', 0.5),
     }
-    pc = mouse.get('pull_curve') or {}
-    lead = mouse.get('continuous_lead') or {}
     fov_p = prof.get('fov') or {}
     prev_p = prof.get('preview') or {}
     inf = prof.get('inference') or {}
@@ -1544,8 +1473,6 @@ def profile_to_web(prof: dict) -> dict:
     # （= 2× 内接圆，圆已超出截取区、无实际意义），夹回 1.0。
     fov_factor_web = _fov_radius_to_factor(fov_p.get('radius', 0.5), fov_p.get('enabled'))
 
-    personal_motion = mouse.get('personal_motion') or {}
-    personal_traj = mouse.get('personal_trajectory') or {}
     lock_confirm = mouse.get('lock_confirm') or {}
     head_aim = mouse.get('head_aim') or {}
     recoil = mouse.get('recoil') or {}
@@ -1556,23 +1483,6 @@ def profile_to_web(prof: dict) -> dict:
         'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
         'output_deadzone': mouse.get('output_deadzone'),
         'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
-        'pull_curve_enabled': pc.get('enabled', True),
-        'pull_curve_strength': pc.get('strength', 0.8),
-        'pull_curve_min_distance': pc.get('min_distance', 80),
-        # 持续提前量：默认一律"关"与 Core 侧安全默认一致（未显式开启 ⇒ 输出链不变）。
-        'continuous_lead_enabled': lead.get('enabled', False),
-        'continuous_lead_enter_distance': lead.get('enter_distance', 150),
-        'continuous_lead_scale': lead.get('scale', 0.5),
-        'continuous_lead_fade_in_ms': lead.get('fade_in_ms', 300),
-        'continuous_lead_fade_out_ms': lead.get('fade_out_ms', 300),
-        'continuous_lead_near_disable_ratio': lead.get('near_disable_ratio', 0.66),
-        'personal_trajectory_enabled': personal_traj.get('enabled', False),
-        'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
-        'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),
-        'personal_trajectory_variation_scale': personal_traj.get('variation_scale', 1.0),
-        'personal_trajectory_jitter_amp_px': personal_traj.get('jitter_amp_px', 0.20),
-        'personal_trajectory_fitts_intercept_ms': personal_traj.get('fitts_intercept_ms', 120),
-        'personal_trajectory_fitts_slope_ms_per_bit': personal_traj.get('fitts_slope_ms_per_bit', 85),
         'lock_confirm_confirmation_frames': lock_confirm.get('confirmation_frames', 1),
         'lock_confirm_enter_conf': lock_confirm.get('enter_conf', 0.0),
         'lock_confirm_hold_conf': lock_confirm.get('hold_conf', 0.0),
@@ -1585,8 +1495,6 @@ def profile_to_web(prof: dict) -> dict:
         'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
         'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
         'aim_at_head_box': mouse.get('aim_at_head_box', False),
-        # personal_motion 改由 CTRL_BLOCKS 表驱动搬运（键名规则一致：前缀_字段），
-        # 这里不再手写（手写与表并存会互相覆盖，且容易漏同步）。
     }
     # ---- BB 对标新模块（2026-09-24）：Core 子对象 → 面板扁平键 ----
     # 缺字段补 Core 结构体默认值（表里的第三列），保证面板首次打开显示的就是 Core 的实际值。
@@ -4070,9 +3978,8 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
     """标定结果写回 RuntimeProfile。
 
     修复：标定测的是“每 count 对应多少 px”（gain），这是物理量：
-      - gain_x/gain_y_px_per_count 写回 mouse（压枪 recoil_px_per_count、
-        拟人化 response_px_per_count 都依赖它，之前未序列化导致标定结果白测）；
-      - personal_trajectory.response_px_per_count 联动 gain_y（同语义：px/count）；
+      - gain_x/gain_y_px_per_count 写回 mouse（压枪 recoil_px_per_count
+        依赖它，之前未序列化导致标定结果白测）；
       - 不再改写 kp_x/kp_y。旧实现用旧后端 K_LOOP=1/7 反推 kp（25 → ≈0.26），
         在 pid1 体系下（当时 kp/kd 还被 smooth 削掉 99%）输出被缩到 deadzone 以下，
         自瞄直接瘫痪。pid1 的自适应 kp_gain 已处理灵敏度差异，标定不应动 kp。
@@ -4090,13 +3997,8 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
             mo = prof.setdefault('mouse', {})
             mo['gain_x_px_per_count'] = round(gain_x, 4)
             mo['gain_y_px_per_count'] = round(gain_y, 4)
-            # 拟人化抖动预算与压枪换算共用同一物理量：px/count 联动。
-            # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
-            pt = mo.setdefault('personal_trajectory', {})
-            pt['response_px_per_count'] = round(gain_y, 4)
             # V3 阶段 5 前置：实测回路延迟（ms）一并落盘。
-            # 此前只存在标定记录里，core 运行时读不到 ⇒ 拟人化抖动前馈没法做延迟对齐
-            # （按"下一帧"扣会把前馈自己变成高频扰动）。板端实测 51ms。
+            # 此前只存在标定记录里，core 运行时读不到。板端实测 51ms。
             delay_ms = float(calib.get('mouse_response_delay_ms') or 0)
             if delay_ms > 0:
                 mo['response_delay_ms'] = round(delay_ms, 2)
@@ -4444,13 +4346,13 @@ def _calib_worker() -> None:
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
             # 摆动闭环产物：两轴各自「最快可追幅度」+ 整体瓶颈（两轴较小者）。
-            # 后续 rate（跟随速度）推导的数据源，当前先落盘留痕（推导待 pid_sim 验证）。
+            # 后续 rate（跟随速度）推导的数据源，当前先落盘留痕（推导待验证）。
             'max_tracked_amp_x': round(max_tracked_amps[0], 2),
             'max_tracked_amp_y': round(max_tracked_amps[1], 2),
             'max_tracked_amp': round(min(max_tracked_amps), 2),
         }
         # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
-        # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
+        # ttbox_motion/calibration.derive_pid_params）
         try:
             calib['pid_params'] = _calib_derive_pid(gain_x, gain_y, delay_ms)
         except Exception:
@@ -5798,34 +5700,6 @@ def _motion_error(exc: Exception):
     return jsonify({'ok': False, 'error': message}), status
 
 
-def _apply_personal_motion_to_core(enabled: bool, profile_id: str = '', mix: dict | None = None):
-    """把 TTBOX 个人模型的启用状态写入 Core RuntimeProfile，Core 是最终运行真源。"""
-    # ★ 读-改-写持配置锁（防止与用户保存/标定恢复互相整份覆盖）。
-    with _CFG_WRITE_LOCK:
-        prof = _get_runtime_profile()
-        if not prof:
-            raise MotionTrainingError('读取 TTBOX Core RuntimeProfile 失败')
-        personal = prof.setdefault('mouse', {}).setdefault('personal_motion', {})
-        personal['enabled'] = bool(enabled)
-        if enabled:
-            profile = MOTION_STORE.list_profile(profile_id)
-            model = profile.get('model') or {}
-            if not model.get('ready'):
-                raise MotionTrainingError('model is not ready')
-            values = mix or MOTION_STORE._mix()
-            personal.update({
-                'curve_blend': values.get('curve', 1.0),
-                'speed_blend': values.get('speed', 1.0),
-                'reaction_blend': values.get('reaction', 0.7),
-                'max_reaction_delay_ms': values.get('max_reaction_delay_ms', 250),
-                'knots': model.get('knots', []),
-            })
-        result = ipc_request('SET_CONFIG', {'profile': prof})
-    if result.get('status') != 0:
-        raise MotionTrainingError(result.get('error', 'Core 配置更新失败'))
-    return prof
-
-
 @app.get('/api/motion-profiles')
 def list_motion_profiles():
     try:
@@ -5920,7 +5794,6 @@ def activate_motion_profile(profile_id: str):
     body = request.get_json(silent=True) or {}
     try:
         result = MOTION_STORE.activate(profile_id, **body)
-        _apply_personal_motion_to_core(True, profile_id, result['mix'])
         return jsonify({'ok': True, 'data': result})
     except (MotionTrainingError, OSError) as exc:
         return _motion_error(exc)
@@ -5930,7 +5803,6 @@ def activate_motion_profile(profile_id: str):
 def deactivate_motion_profile():
     try:
         result = MOTION_STORE.deactivate()
-        _apply_personal_motion_to_core(False)
         return jsonify({'ok': True, 'data': result})
     except (MotionTrainingError, OSError) as exc:
         return _motion_error(exc)

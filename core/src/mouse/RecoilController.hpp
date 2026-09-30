@@ -26,8 +26,8 @@
 // ——跟踪器量测门控（框突变/贴边/尺寸非法 → 拒绝量测 + 保持上一帧）先跑，
 // 压枪只吃有效量测。所以本引擎的第二个入参是 `measurement_valid`，不是裸的 target_visible。
 //
-// 本引擎只算量，不发命令：算出的 y（count 域）由 AimThread 在 pull_curve 之后、
-// deadzone 之前注入，统一走 deadzone → remainder → int16 → 拟人化 → 热键安全门。
+// 本引擎只算量，不发命令：算出的 y（count 域）由 AimThread 在
+// deadzone 之前注入，统一走 deadzone → remainder → int16 → 热键安全门。
 #pragma once
 
 #include <cmath>
