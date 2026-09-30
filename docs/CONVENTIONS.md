@@ -61,7 +61,7 @@ flowchart TD
 |---|---|---|
 | 目录名（代码包） | 小写、`snake_case`、单数；包必有 `__init__.py` | ✅ `framework/`、`ttbox_motion/` |
 | 目录名（文档） | 小写英文 `kebab-case` 主题名（`architecture/`、`ops/`、`protocols/`、`performance/`…） | ✅ 本轮已建；旧 `架构/` 已迁移 |
-| C++ 文件 | 类名同 `PascalCase.hpp/.cpp`；实现类与接口分离（`Xxx.hpp` / `Xxx_stub.cpp`） | ✅ `CoreInterface.hpp`、`PreviewModule_stub.cpp` |
+| C++ 文件 | 类名同 `PascalCase.hpp/.cpp`；实现类与接口分离（`Xxx.hpp` / `Xxx_stub.cpp`） | ✅ `ICapture.hpp` / `V4L2Capture.hpp`、`PreviewModule_stub.cpp` |
 | 插件 | `plugins/<name>/{bin/{ttbox-<name>, ttbox-<name>.py},config/,…}`；`bin/ttbox-<name>` 为 **bash launcher** | ✅ `plugins/web/bin/ttbox-web` |
 | pytest 文件 | `test_*.py`，就近包内 `tests/` | ✅ `framework/tests/` |
 | C++ 测试 | `test_*.cpp`（CTest 注册名 = 去掉 `test_`） | ✅ `core/tests/test_pipeline.cpp` |
