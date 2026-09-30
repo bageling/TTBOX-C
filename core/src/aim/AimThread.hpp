@@ -19,8 +19,12 @@
 #include "aim/PidTrace.hpp"
 #include "mouse/AimTracker.hpp"
 #include "mouse/OneEuroFilter.hpp"
+#include "mouse/PullCurve.hpp"
+#include "mouse/ContinuousLead.hpp"
+#include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
 #include "mouse/TriggerController.hpp"
+#include "mouse/JitterFeedforward.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -151,6 +155,9 @@ private:
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）
     AimTracker tracker_;            // 第15阶段：目标跟踪器（速度估计+预测）
+    PullCurve pull_curve_;          // 拉枪曲线：远距离拉枪时附加弧线/抖动（deadzone 前生效）
+    ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
+    PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
     RecoilController recoil_;       // 压枪引擎（2026-09-30 对照 yu 重做：单套速率模型）
     // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
     // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
@@ -183,6 +190,17 @@ private:
     // 旧版这里有一条 kClObsHoldUs=150ms 的"沿用上次有效观测"补丁，是为已删除的闭环引擎
     // 续积分用的。对照 yu 后不需要了：yu 的做法是**开火门控 + target_lost_release_ms
     // 渐出**（压枪在释放窗内自己继续跑，不依赖"沿用旧误差"）。同一个坑换了个正确解法。
+    // ---- V3 阶段 5：拟人化抖动前馈扣除（2026-09-28）----
+    // 两条拟人化链（humanize / personal_trajectory）都只往输出里"加"抖动，
+    // 但抖动会在 response_delay_ms（实测 51ms）之后出现在采集画面里，被 PID 当成
+    // "目标动了"反向追 ⇒ 抖动被自己抵消，闭环还多一串多余修正。
+    // 这里按延迟把注入量**加回**控制误差 ⇒ PID 看不见自己发的抖动。
+    // ★ 挂在"抖动分量"上（两条链各自上报），**不挂整条整形量**：速度包络/制动是
+    //   故意要走的一段位移，扣掉会让 PID 以为还没到 ⇒ 过冲。
+    JitterFeedforward jitter_ff_;
+    // 本帧实际加回的像素量（诊断用，供后续观测字段）
+    float jitter_ff_x_px_ = 0.0f;
+    float jitter_ff_y_px_ = 0.0f;
     // 热键保护：toggle_hotkey 的**上升沿**翻转挂起状态。用上一周期的原始位图判边沿，
     // 与瞄准热键的"按住才生效"语义区分开（这里是按一下切换一次，按住不会连续翻转）。
     uint16_t last_raw_buttons_ = 0;         // 上一周期采样到的原始物理按键位图
@@ -195,6 +213,7 @@ private:
     OneEuroFilter display_smooth_y2_{0.8f, 0.10f, 1.0f};
     int last_display_target_id_ = -1;
     uint64_t last_display_ts_us_ = 0;  // 显示框平滑用的上一帧时间戳（display 块独立于控制 dt）
+    float target_age_ms_ = 0.0f;                    // 当前选中目标年龄（ms，拟人化整形用）
     float prediction_time_s_ = 0.0f;  // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;

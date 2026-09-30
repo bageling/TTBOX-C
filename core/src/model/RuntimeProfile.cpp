@@ -112,6 +112,7 @@ bool RuntimeProfile::validate(std::string* error) const {
         mouse.deadzone_x, mouse.deadzone_y, mouse.output_deadzone,
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
         mouse.aim_point.offset_x, mouse.aim_point.offset_y,
+        mouse.personal_motion.curve_blend,
         inference.confidence, inference.iou,
         fov.center_x, fov.center_y, fov.radius,
     };
@@ -238,6 +239,20 @@ bool RuntimeProfile::validate(std::string* error) const {
     }
     if (mouse.trigger2.confidence < 0.0f || mouse.trigger2.confidence > 1.0f) {
         if (error) *error = "trigger2.confidence 超出 [0,1]";
+        return false;
+    }
+    if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f) {
+        if (error) *error = "personal_motion 混合参数超出范围";
+        return false;
+    }
+    for (const float knot : mouse.personal_motion.knots) {
+        if (!std::isfinite(knot) || knot < 0.0f || knot > 1.0f) {
+            if (error) *error = "personal_motion knots 必须在 [0,1]";
+            return false;
+        }
+    }
+    if (mouse.personal_motion.knots.size() > 32) {
+        if (error) *error = "personal_motion knots 最多 32 个";
         return false;
     }
     // capture ROI 退化值防线（fail-closed）：0=全帧合法；非零则必须落在
@@ -378,6 +393,56 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
     m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
+    // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
+    JsonValue pc = JsonValue::object();
+    pc.set("enabled", JsonValue::boolean(mouse.pull_curve.enabled));
+    pc.set("strength", JsonValue::number(static_cast<double>(mouse.pull_curve.strength)));
+    pc.set("jitter_px", JsonValue::number(static_cast<double>(mouse.pull_curve.jitter_px)));
+    pc.set("min_distance", JsonValue::number(static_cast<double>(mouse.pull_curve.min_distance)));
+    m.set("pull_curve", std::move(pc));
+    // 持续提前量（continuous_lead）：字段名逐一对齐 yu 的 controller.continuous_lead_*，
+    // 使「对标 yu」的配置可直搬、可逐字段比对（yu 默认 enabled=false 且这 6 个字段齐全）。
+    JsonValue lc = JsonValue::object();
+    lc.set("enabled", JsonValue::boolean(mouse.continuous_lead.enabled));
+    lc.set("enter_distance", JsonValue::number(static_cast<double>(mouse.continuous_lead.enter_distance)));
+    lc.set("scale", JsonValue::number(static_cast<double>(mouse.continuous_lead.scale)));
+    lc.set("fade_in_ms", JsonValue::number(static_cast<double>(mouse.continuous_lead.fade_in_ms)));
+    lc.set("fade_out_ms", JsonValue::number(static_cast<double>(mouse.continuous_lead.fade_out_ms)));
+    lc.set("near_disable_ratio", JsonValue::number(static_cast<double>(mouse.continuous_lead.near_disable_ratio)));
+    m.set("continuous_lead", std::move(lc));
+    JsonValue pm = JsonValue::object();
+    pm.set("enabled", JsonValue::boolean(mouse.personal_motion.enabled));
+    pm.set("curve_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.curve_blend)));
+    // ★ speed_blend / reaction_blend / max_reaction_delay_ms 已从配置里删掉（2026-09-26）：
+    //   PersonalMotion 只读 enabled / curve_blend，那三个从头到尾没人读，属死参数。
+    JsonValue knots = JsonValue::array();
+    for (const float knot : mouse.personal_motion.knots) {
+        knots.push_back(JsonValue::number(static_cast<double>(knot)));
+    }
+    pm.set("knots", std::move(knots));
+    m.set("personal_motion", std::move(pm));
+    JsonValue pt = JsonValue::object();
+    pt.set("enabled", JsonValue::boolean(mouse.personal_trajectory.enabled));
+    pt.set("fitts_intercept_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.fitts_intercept_ms)));
+    pt.set("fitts_slope_ms_per_bit", JsonValue::number(static_cast<double>(mouse.personal_trajectory.fitts_slope_ms_per_bit)));
+    pt.set("speed_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.speed_scale)));
+    pt.set("stability_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.stability_scale)));
+    pt.set("variation_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.variation_scale)));
+    pt.set("max_extra_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_extra_px)));
+    pt.set("max_visual_variation_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_visual_variation_px)));
+    pt.set("curve_time_constant_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.curve_time_constant_ms)));
+    pt.set("curve_rms_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.curve_rms_px)));
+    pt.set("jitter_amp_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.jitter_amp_px)));
+    pt.set("adaptive_enabled", JsonValue::boolean(mouse.personal_trajectory.adaptive_enabled));
+    pt.set("min_error_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.min_error_px)));
+    pt.set("urgent_error_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.urgent_error_px)));
+    pt.set("urgent_speed_px_s", JsonValue::number(static_cast<double>(mouse.personal_trajectory.urgent_speed_px_s)));
+    pt.set("max_target_age_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_target_age_ms)));
+    pt.set("capture_priority_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.capture_priority_ms)));
+    pt.set("transport_gain", JsonValue::number(static_cast<double>(mouse.personal_trajectory.transport_gain)));
+    pt.set("direction_change_cosine", JsonValue::number(static_cast<double>(mouse.personal_trajectory.direction_change_cosine)));
+    pt.set("response_px_per_count", JsonValue::number(static_cast<double>(mouse.personal_trajectory.response_px_per_count)));
+    m.set("personal_trajectory", std::move(pt));
     JsonValue lk = JsonValue::object();
     lk.set("confirmation_frames", JsonValue::number(static_cast<double>(mouse.lock_confirm.confirmation_frames)));
     lk.set("enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.enter_conf)));
@@ -491,6 +556,17 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("gain_y_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_y_px_per_count)));
     // V3 阶段 5 前置：实测回路延迟（ms）。0 = 未标定。
     m.set("response_delay_ms", JsonValue::number(static_cast<double>(mouse.response_delay_ms)));
+    // V3 阶段 5：拟人化抖动前馈扣除（默认关 ⇒ 序列化出来也是关的，老配置行为不变）。
+    {
+        JsonValue jf = JsonValue::object();
+        jf.set("enabled", JsonValue::boolean(mouse.jitter_feedforward.enabled));
+        jf.set("delay_ms", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.delay_ms)));
+        jf.set("gain_px_per_count",
+               JsonValue::number(static_cast<double>(mouse.jitter_feedforward.gain_px_per_count)));
+        jf.set("scale", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.scale)));
+        jf.set("max_px", JsonValue::number(static_cast<double>(mouse.jitter_feedforward.max_px)));
+        m.set("jitter_feedforward", std::move(jf));
+    }
     JsonValue cos = JsonValue::array();
     for (const auto& c : mouse.aim_point.class_offsets) {
         JsonValue o = JsonValue::object();
@@ -571,7 +647,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         //   判据用"键是否存在"而不是值 —— 新配置压根不写 smooth，用值判会把默认 9900
         //   当成"要削 99%"再削一次。
         //   为什么这么折是等价的：pid1 的 smoothTerm 对小量就是 (v/10000)*(10000-smooth)，
-        //   即纯乘法；历史离线闭环实测移动靶偏差 ≤0.23%、
+        //   即纯乘法；离线闭环（core/tools/pid_sim/aim_replay.py）实测移动靶偏差 ≤0.23%、
         //   静止靶绝对差 0.26px（< 半个 count 量化级）。
         {
             const JsonValue* smx = m->find("smooth_x");
@@ -613,7 +689,58 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
         // V1.0.13：smooth_x/smooth_y 已删（上面折算进 kp/kd）。旧键不再读取、也不回写。
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
-        // 插件配置（recoil / lock_confirm）
+    // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
+        if (const JsonValue* pc = m->find("pull_curve"); pc && pc->is_object()) {
+            p.mouse.pull_curve.enabled = obj_bool(*pc, "enabled", true);
+            p.mouse.pull_curve.strength = static_cast<float>(obj_num(*pc, "strength", 0.8));
+            p.mouse.pull_curve.jitter_px = static_cast<float>(obj_num(*pc, "jitter_px", 3.0));
+            p.mouse.pull_curve.min_distance = static_cast<float>(obj_num(*pc, "min_distance", 80.0));
+        }
+        // 持续提前量：缺字段一律取"保守默认"（enabled=false ⇒ 不动输出），
+        // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。
+        if (const JsonValue* lc = m->find("continuous_lead"); lc && lc->is_object()) {
+            p.mouse.continuous_lead.enabled = obj_bool(*lc, "enabled", false);
+            p.mouse.continuous_lead.enter_distance = static_cast<float>(obj_num(*lc, "enter_distance", 150.0));
+            p.mouse.continuous_lead.scale = static_cast<float>(obj_num(*lc, "scale", 0.5));
+            p.mouse.continuous_lead.fade_in_ms = static_cast<float>(obj_num(*lc, "fade_in_ms", 300.0));
+            p.mouse.continuous_lead.fade_out_ms = static_cast<float>(obj_num(*lc, "fade_out_ms", 300.0));
+            p.mouse.continuous_lead.near_disable_ratio = static_cast<float>(obj_num(*lc, "near_disable_ratio", 0.66));
+        }
+        if (const JsonValue* pm = m->find("personal_motion"); pm && pm->is_object()) {
+            p.mouse.personal_motion.enabled = obj_bool(*pm, "enabled", false);
+            p.mouse.personal_motion.curve_blend = static_cast<float>(obj_num(*pm, "curve_blend", 1.0));
+            // speed_blend / reaction_blend / max_reaction_delay_ms 已删（core 从不读）；
+            // 老配置里带着这几个键也无妨 —— 反序列化只认在用的键，多余的被忽略。
+            if (const JsonValue* knots = pm->find("knots"); knots && knots->is_array()) {
+                for (const auto& item : knots->as_array()) {
+                    if (item.is_number() && p.mouse.personal_motion.knots.size() < 32) {
+                        p.mouse.personal_motion.knots.push_back(static_cast<float>(item.as_number()));
+                    }
+                }
+            }
+        }
+        if (const JsonValue* pt = m->find("personal_trajectory"); pt && pt->is_object()) {
+            p.mouse.personal_trajectory.enabled = obj_bool(*pt, "enabled", false);
+            p.mouse.personal_trajectory.fitts_intercept_ms = static_cast<float>(obj_num(*pt, "fitts_intercept_ms", 120.0));
+            p.mouse.personal_trajectory.fitts_slope_ms_per_bit = static_cast<float>(obj_num(*pt, "fitts_slope_ms_per_bit", 85.0));
+            p.mouse.personal_trajectory.speed_scale = static_cast<float>(obj_num(*pt, "speed_scale", 1.0));
+            p.mouse.personal_trajectory.stability_scale = static_cast<float>(obj_num(*pt, "stability_scale", 1.0));
+            p.mouse.personal_trajectory.variation_scale = static_cast<float>(obj_num(*pt, "variation_scale", 1.0));
+            p.mouse.personal_trajectory.max_extra_px = static_cast<float>(obj_num(*pt, "max_extra_px", 2.0));
+            p.mouse.personal_trajectory.max_visual_variation_px = static_cast<float>(obj_num(*pt, "max_visual_variation_px", 1.5));
+            p.mouse.personal_trajectory.curve_time_constant_ms = static_cast<float>(obj_num(*pt, "curve_time_constant_ms", 32.0));
+            p.mouse.personal_trajectory.curve_rms_px = static_cast<float>(obj_num(*pt, "curve_rms_px", 0.8));
+            p.mouse.personal_trajectory.jitter_amp_px = static_cast<float>(obj_num(*pt, "jitter_amp_px", 0.20));
+            p.mouse.personal_trajectory.adaptive_enabled = obj_bool(*pt, "adaptive_enabled", true);
+            p.mouse.personal_trajectory.min_error_px = static_cast<float>(obj_num(*pt, "min_error_px", 18.0));
+            p.mouse.personal_trajectory.urgent_error_px = static_cast<float>(obj_num(*pt, "urgent_error_px", 72.0));
+            p.mouse.personal_trajectory.urgent_speed_px_s = static_cast<float>(obj_num(*pt, "urgent_speed_px_s", 520.0));
+            p.mouse.personal_trajectory.max_target_age_ms = static_cast<float>(obj_num(*pt, "max_target_age_ms", 18.0));
+            p.mouse.personal_trajectory.capture_priority_ms = static_cast<float>(obj_num(*pt, "capture_priority_ms", 5.0));
+            p.mouse.personal_trajectory.transport_gain = static_cast<float>(obj_num(*pt, "transport_gain", 0.16));
+            p.mouse.personal_trajectory.direction_change_cosine = static_cast<float>(obj_num(*pt, "direction_change_cosine", 0.15));
+            p.mouse.personal_trajectory.response_px_per_count = static_cast<float>(obj_num(*pt, "response_px_per_count", 0.65));
+        }
         if (const JsonValue* lk = m->find("lock_confirm"); lk && lk->is_object()) {
             p.mouse.lock_confirm.confirmation_frames = static_cast<int>(obj_int(*lk, "confirmation_frames", 1));
             p.mouse.lock_confirm.enter_conf = static_cast<float>(obj_num(*lk, "enter_conf", 0.0));
@@ -735,6 +862,15 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
         // V3 阶段 5 前置：实测回路延迟（ms）。老配置没有这个键 ⇒ 0（未标定）。
         p.mouse.response_delay_ms = static_cast<float>(obj_num(*m, "response_delay_ms", 0.0));
+        // V3 阶段 5：抖动前馈扣除。老配置没有这个键 ⇒ 默认关（enabled=false）。
+        if (const JsonValue* jf = m->find("jitter_feedforward"); jf && jf->is_object()) {
+            auto& c = p.mouse.jitter_feedforward;
+            c.enabled = obj_bool(*jf, "enabled", false);
+            c.delay_ms = static_cast<float>(obj_num(*jf, "delay_ms", 0.0));
+            c.gain_px_per_count = static_cast<float>(obj_num(*jf, "gain_px_per_count", 0.0));
+            c.scale = static_cast<float>(obj_num(*jf, "scale", 1.0));
+            c.max_px = static_cast<float>(obj_num(*jf, "max_px", 40.0));
+        }
         if (const JsonValue* co = m->find("class_offsets"); co && co->is_array()) {
             for (const auto& e : co->as_array()) {
                 if (!e.is_object()) continue;

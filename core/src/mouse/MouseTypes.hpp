@@ -165,10 +165,91 @@ inline bool aim_profiles_overlap(const AimHotkeyProfile& a, const AimHotkeyProfi
     return (ma & mb) != 0;
 }
 
+// 拉枪曲线（pull_curve：目标距离 ≥ min_distance 时在拉枪方向附加弧线/抖动）
+struct PullCurveConfig {
+    bool enabled = true;
+    float strength = 0.8f;       // 弧线强度（0.8）
+    float jitter_px = 3.0f;      // 抖动幅度 px
+    float min_distance = 80.0f;  // 激活距离（crop 系 px）
+};
+
+// 持续提前量（continuous_lead：AI 输出同向累计超 enter 后附加 X 偏置，渐入渐出）
+struct ContinuousLeadConfig {
+    bool enabled = false;
+    float enter_distance = 150.0f;      // 触发累计距离
+    float scale = 0.5f;                 // 偏置比例
+    float fade_in_ms = 300.0f;
+    float fade_out_ms = 300.0f;
+    float near_disable_ratio = 0.66f;   // 目标接近时衰减比例（保留字段）
+};
+
+
+
+// 拟人化整形引擎（personal_trajectory_shader：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫）
+// TTBOX 拟人化整形：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫。
+// 作用在 AimThread 输出链 move_x/move_y（int16 HID count）上、热键 Gate 之前：
+//   把"恒定 PID 输出"整形为"接近真人手部动作"的移动包络（加速→减速 + 垂直随机抖动 + 安全钳制）。
+// 不绕过 PID / 死区 / 热键安全门（整形后仍被 Gate 归零）。
+// 区分于 personal_motion（倍率曲线，只改输出倍率）：本引擎是"完整移动轨迹整形"。
+struct PersonalTrajectoryConfig {
+    bool enabled = false;          // 总开关（默认关，保持现有行为）
+    // -- Fitts 时长模型：目标距离 → 一次移动的期望时长（接近真人）
+    float fitts_intercept_ms = 120.0f;      // 拦截常数（ms）
+    float fitts_slope_ms_per_bit = 85.0f;   // 每位斜率（ms）、Fitts law 对数距离
+    // -- 速度包络（transport 阶段加速/减速）
+    float speed_scale = 1.0f;               // 整体速度系数（0.75~1.25，>1 更快 = 时长更短）
+    float stability_scale = 1.0f;           // 稳定性系数（0.70~1.35，>1 更稳 = 时长更长）
+    // -- 抖动 / 曲线（垂直向随机游走，模拟人手曲线）
+    float variation_scale = 1.0f;           // 抖动幅度系数（0.40~1.80）
+    float max_extra_px = 2.0f;              // 单轴最大附加量（count）
+    float max_visual_variation_px = 1.5f;   // 视觉抖动上限（px）
+    float curve_time_constant_ms = 32.0f;   // 抖动自相关时间常数（ms）
+    float curve_rms_px = 0.8f;              // 抖动 RMS 基准（px）
+    float jitter_amp_px = 0.20f;            // 抖动幅度（px）
+    // -- 自适应抑制（大误差/目标快/目标老/方向突变 → 自动降强度或停用，防乱晃）
+    bool adaptive_enabled = true;           // 是否启用自适应抑制
+    float min_error_px = 18.0f;             // 小于此误差不抖动（close to target）
+    float urgent_error_px = 72.0f;          // 超过此误差视为大误差 → 停用整形（直出）
+    float urgent_speed_px_s = 520.0f;       // 目标移动速度超过此 → 停用整形
+    float max_target_age_ms = 18.0f;        // 目标年龄超过此 → 停用整形
+    float capture_priority_ms = 5.0f;       // 捕获前几 ms 停用整形（等镜头稳定）
+    float transport_gain = 0.16f;           // 中间段增益（加速峰，0~0.2）
+    float direction_change_cosine = 0.15f;  // 方向突变检测余弦阈值
+    // -- 响应参数（视觉抖动预算换算：target_radius / response_px_per_count）
+    float response_px_per_count = 0.65f;    // 每 count 对应 px（来自 gain_x/y_px_per_count 标定）
+};
+
+// ---------------------------------------------------------------------------
+// V3 阶段 5（2026-09-28）：拟人化抖动**前馈扣除**。
+//
+// 问题：拟人化注入的抖动是"自己发的扰动"，它会在 response_delay_ms 之后真的
+//       出现在采集画面里 ⇒ PID 把它当成"目标动了"，于是反向去追 ⇒ 抖动被自己
+//       抵消掉（拟人化消失），且闭环里多出一串本不该有的修正。
+//
+// 做法：拟人化链每帧报出"这帧注入了多少抖动（count）"，存进环形缓冲；
+//       按逐帧 dt 累计到 response_delay_ms 之后，才把它乘 px/count 换算回像素、
+//       **加回**控制误差（control_x/y）。PID 因此看不到自己发的抖动。
+//
+// ★ 为什么只扣抖动、不扣整条整形量：速度包络/制动是"故意要走的那一段位移"，
+//   扣掉会让 PID 以为还没到、继续加力 ⇒ 过冲。只有随机抖动该被扣。
+//
+// ★ 为什么按 dt 累计而不是"固定 N 帧"：帧率会抖（板端 144fps 实测在 130~150 之间
+//   漂），按帧数对齐会累积错位，前馈本身就变成高频扰动。
+//
+// ★ 默认 enabled=false ⇒ 与本参数加入前逐字节一致。
+// ---------------------------------------------------------------------------
+struct JitterFeedforwardConfig {
+    bool enabled = false;           // 总开关
+    float delay_ms = 0.0f;          // 落帧延迟；0 = 用 mouse.response_delay_ms（实测 51ms）
+    float gain_px_per_count = 0.0f; // 鼠标 1 count = 画面多少 px；0 = 用 mouse.gain_y_px_per_count
+    float scale = 1.0f;             // 扣除比例（1.0=全额；0.5=只扣一半，留一点人味残差）
+    float max_px = 40.0f;           // 单帧加回量的绝对值上限（px），防异常值把误差顶飞
+};
+
 // 压枪（recoil：按住开火键期间持续下压，补偿后坐力）
 // 压枪模块行为设计（12 参数语义），输出链完全基于 TTBOX 自身：
-//   压枪量在 AimThread 输出链 deadzone 之前注入 scaled_y，
-//   与 PID 输出融合后统一走 deadzone → remainder → int16 → 热键 Gate。
+//   压枪量在 AimThread 输出链 pull_curve 之后、deadzone 之前注入 scaled_y，
+//   与 PID 输出融合后统一走 deadzone → remainder → int16 → 拟人化整形 → 热键 Gate。
 // 不照搬独立 recoil 链路；默认全关，保持旧行为。
 // ---------------------------------------------------------------------------
 // 压枪（recoil assist）—— 2026-09-30 按 yu（yuai v2）重做后的**唯一**配置面
@@ -258,7 +339,7 @@ struct Trigger2Config {
 // 物理鼠标自身的透传不受影响 —— 那条路不经过这个位图（见 usbproxy 的透传分支）。
 //
 // ★ 默认 enabled=false ⇒ 未显式开启时 AimThread 不做任何翻转、位图原样透传，
-//   输出链与本参数加入前逐字节一致（照本文件其它默认关闭参数的先例）。
+//   输出链与本参数加入前逐字节一致（照 ContinuousLeadConfig 的先例）。
 struct HotkeyGuardConfig {
     bool enabled = false;          // 总开关（关掉即恢复"未挂起"，不保留幽灵挂起）
     uint8_t toggle_hotkey = 0x04;  // 切换键位掩码：1=left 2=right 4=middle 8=back 16=forward
@@ -274,6 +355,17 @@ struct LockConfirmConfig {
     bool instant_enter_enabled = true; // 近距离高置信目标跳过确认窗
     float instant_enter_dist = 105.0f; // instant-enter 距离阈值（px）
     float instant_enter_conf = 0.50f;  // instant-enter 置信度阈值
+};
+
+// TTBOX 个人移动曲线模型：只保存已训练模型的安全运行参数。
+// 原始训练样本留在 Gateway 的独立 profile.json，Core 热路径只读 knots。
+struct PersonalMotionConfig {
+    bool enabled = false;
+    float curve_blend = 1.0f;
+    // ★ speed_blend / reaction_blend / max_reaction_delay_ms 已删（2026-09-26）：
+    //   PersonalMotion::scale 从头到尾只读 enabled / curve_blend / knots，
+    //   那三个参数既不显示也不参与计算，留着只会让人以为调了有用。
+    std::vector<float> knots;  // 空 ⇒ 用 PersonalMotion::default_knots() 的内置曲线
 };
 
 // V3 阶段 3a（2026-09-28）：滤波强度按目标框高自适应。
@@ -350,7 +442,17 @@ struct MouseProfile {
         float predict_y = 0.0f;                   // pid1 Y 不带前馈（仅位置纠正）
     // ★ V1.0.13：smooth_x/smooth_y 已删（折叠进 kp/kd，见上面的说明）。
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
-    RecoilConfig recoil;                    // 压枪（输出链 deadzone 前注入 scaled_y）
+    // 插件配置（pull_curve / continuous_lead / recoil / personal_motion / personal_trajectory）
+        PullCurveConfig pull_curve;
+        PersonalMotionConfig personal_motion;
+        PersonalTrajectoryConfig personal_trajectory;  // 拟人化整形引擎（Fitts 时长+包络+垂直抖动+自适应抑制+安全守卫）
+        JitterFeedforwardConfig jitter_feedforward;  // V3 阶段 5：拟人化抖动前馈扣除（默认关）
+        // 持续提前量：AI 输出持续同向累计超 enter 后附加 X 偏置（渐入渐出）。
+        // ★ 默认 enabled=false ⇒ 未显式开启时输出链与本参数加入前逐字节一致（行为零变化）。
+        // 此前 ContinuousLeadConfig 与 ContinuousLead.hpp 早已存在且有单测，但
+        // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
+        ContinuousLeadConfig continuous_lead;
+    RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
     // ---- 自动扳机（BB 对标，2026-09-24 移植）----
     // 两套状态机互相独立，可分别开启；都只产出"要开火"的决策（TriggerCmd），
     // 真正的点击由 AimThread 拿到决策后调 output->mouse_click 注入 —— 决策与注入分离。

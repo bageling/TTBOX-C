@@ -11,6 +11,14 @@ note '════════ Phase 4: Assist ════════'
 TT_STATE=$(curl -s "$TT/api/state" 2>/dev/null)
 TT_CFG=$(echo "$TT_STATE" | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}).get('config',{}); print(json.dumps(d))" 2>/dev/null)
 
+# AS-001: 辅助控制字段存在
+TT_AS=$(echo "$TT_CFG" | python3 -c "import json,sys; d=json.load(sys.stdin).get('ai',{}).get('controller',{}); print('pull_curve_enabled' in d)")
+[ "$TT_AS" = "True" ] && ok "AS-001 pull_curve_enabled" || bad "AS-001 TT=$TT_AS"
+
+# AS-002: continuous_lead
+TT_CL=$(echo "$TT_CFG" | python3 -c "import json,sys; d=json.load(sys.stdin).get('ai',{}).get('controller',{}); print('continuous_lead_enabled' in d)")
+[ "$TT_CL" = "True" ] && ok "AS-002 continuous_lead_enabled" || bad "AS-002 TT=$TT_CL"
+
 # AS-003: humanize
 TT_HZ=$(echo "$TT_CFG" | python3 -c "import json,sys; d=json.load(sys.stdin).get('ai',{}).get('controller',{}); print('humanize_enabled' in d)")
 [ "$TT_HZ" = "True" ] && ok "AS-003 humanize_enabled" || bad "AS-003 TT=$TT_HZ"

@@ -5543,8 +5543,11 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false">
               <span>02</span>自动开火
             </button>
+            <button id="assistSectionTabLead" class="control-section-tab" type="button" data-assist-section-target="assist-section-lead" aria-selected="false">
+              <span>03</span>拉枪曲线
+            </button>
             <button id="assistSectionTabSelector" class="control-section-tab" type="button" data-assist-section-target="assist-section-selector" aria-selected="false">
-              <span>03</span>选靶
+              <span>04</span>选靶
             </button>
           </nav>
 
@@ -5641,6 +5644,23 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">颜色容差<input id="trigger2_stop_detect_tolerance" data-config type="number" min="0" step="1"><span class="field-hint">颜色差多少以内都算同一个色。准星有半透明、发光边就调大（比如 80~120）；老是误判就调小。</span></label>
                       <label class="field">检测半径 px<input id="trigger2_stop_detect_range" data-config type="number" min="0" step="1"><span class="field-hint">以画面中心为圆心看多大的方块。准星细就别调太小，默认 80 够用。</span></label>
                       <label class="field">检测周期（帧）<input id="trigger2_stop_detect_interval" data-config type="number" min="1" step="1"><span class="field-hint">隔多少帧看一次颜色。调大省性能但反应慢，1 = 每帧都看。</span></label>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="assist-section-lead" class="assist-section" data-assist-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>拉枪曲线</strong>
+                    <label class="switch"><input id="controller_pull_curve_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">曲线强度<input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭。</span></label>
+                      <label class="field">启用距离 px<input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过它才启用；锁定后自动停止。</span></label>
                     </div>
                   </div>
                 </article>
@@ -6269,7 +6289,7 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
   // ★ V1.0.13：kp/kd 改为**真实有效值**（旧的 15/25 是被「削弱强度」砍掉 99% 的名义值）。
-  //   上限按历史离线扫频收敛：51ms 回路 + 144fps 下 kp_eff > 0.3 必自激。
+  //   上限按离线扫频收敛（core/tools/pid_sim）：51ms 回路 + 144fps 下 kp_eff > 0.3 必自激。
   //   留到 1.0 是为了容纳低灵敏度玩家的 gain；一旦超过 0.3 就该往下调，不是往上。
   controller_kp: [0, 1],
   controller_kd: [0, 2],
@@ -6277,6 +6297,8 @@ const NUMERIC_RANGE_LIMITS = {
   controller_predict_y: [0, 1],
   controller_rate: [0, 1],
   controller_output_deadzone: [0, 20],
+  controller_pull_curve_strength: [0, 2],
+  controller_pull_curve_min_distance: [0, 1280],
   controller_selector_lost_grace_ms: [0, 2000],
   hailo_pipeline_depth: [1, 4],
 };
@@ -6310,6 +6332,9 @@ const CONTROLLER_DEFAULTS = {
   predict_y: 0,
   rate: 0.3,
   output_deadzone: 1,
+  pull_curve_enabled: true,
+  pull_curve_strength: 0.8,
+  pull_curve_min_distance: 80,
   selector_lost_grace_ms: 78,
   aim_at_head_box: false,
 };
@@ -8980,6 +9005,9 @@ function populateForm(config) {
   setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
   setValue("controller_rate", controller.rate_x ?? CONTROLLER_DEFAULTS.rate);
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
+  setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
+  setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
+  setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
   setCheckbox("controller_aim_at_head_box", controller.aim_at_head_box ?? CONTROLLER_DEFAULTS.aim_at_head_box);
 
@@ -9010,6 +9038,9 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_predict_y", controller.predict_y);
   setValue("controller_rate", controller.rate);
   setValue("controller_output_deadzone", controller.output_deadzone);
+  setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
+  setValue("controller_pull_curve_strength", controller.pull_curve_strength);
+  setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
 }
 
@@ -9105,13 +9136,18 @@ function resetCurrentMovementSectionDefaults() {
   showToast("当前移动控制子页面已恢复默认值");
 }
 
-// 分区里不属于 BB_CTRL_MODULES 的字段（压枪触发键）单独列。
+// 分区里不属于 BB_CTRL_MODULES 的字段（压枪触发键、拉枪曲线）单独列。
 const ASSIST_SECTION_EXTRA_DEFAULTS = {
   "assist-section-recoil": () => ({
     recoil_enabled: RECOIL_DEFAULTS.enabled,
     recoil_hotkey: RECOIL_DEFAULTS.hotkey,
     recoil_hotkey2: RECOIL_DEFAULTS.hotkey2,
     recoil_hotkey_mode: RECOIL_DEFAULTS.hotkey_mode,
+  }),
+  "assist-section-lead": () => ({
+    controller_pull_curve_enabled: CONTROLLER_DEFAULTS.pull_curve_enabled,
+    controller_pull_curve_strength: CONTROLLER_DEFAULTS.pull_curve_strength,
+    controller_pull_curve_min_distance: CONTROLLER_DEFAULTS.pull_curve_min_distance,
   }),
 };
 
@@ -9130,6 +9166,7 @@ function assistSectionLabel(sectionId) {
   const labels = {
     "assist-section-recoil": "压枪",
     "assist-section-trigger": "自动开火",
+    "assist-section-lead": "拉枪曲线",
     "assist-section-selector": "选靶",
   };
   return labels[sectionId] || "当前页";
@@ -9200,6 +9237,9 @@ function collectConfig() {
         rate_x: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
         rate_y: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
+        pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
+        pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
+        pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
         aim_at_head_box: getCheckbox("controller_aim_at_head_box"),
         // BB 对标模块（表驱动，见 BB_CTRL_MODULES）

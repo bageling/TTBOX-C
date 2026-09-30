@@ -13,12 +13,14 @@
 #include "mouse/AimStateMachine.hpp"
 #include "mouse/AimTracker.hpp"
 #include "mouse/CoordinateTransform.hpp"
+#include "mouse/ContinuousLead.hpp"
 #include "mouse/Deadzone.hpp"
 #include "mouse/FovAngle.hpp"
 #include "mouse/MotionMerge.hpp"
 #include "mouse/MouseRouter.hpp"
 #include "mouse/MouseTypes.hpp"
 #include "mouse/OutputScale.hpp"
+#include "mouse/PullCurve.hpp"
 #include "mouse/RateLimit.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
@@ -458,6 +460,12 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.gain_x_px_per_count = 0.42f;   // 自动标定产物（px/count）必须落盘生效
     p.mouse.gain_y_px_per_count = 0.71f;
     p.mouse.response_delay_ms = 51.0f;   // V3 阶段5 前置：实测回路延迟（板端 51ms）
+    // V3 阶段5：抖动前馈扣除（默认关，这里显式打开验证往返）
+    p.mouse.jitter_feedforward.enabled = true;
+    p.mouse.jitter_feedforward.delay_ms = 0.0f;          // 0 = 用 response_delay_ms
+    p.mouse.jitter_feedforward.gain_px_per_count = 0.0f; // V1.0.12 起 0 = 用 mouse.gain_y（热键档 gain 已删）
+    p.mouse.jitter_feedforward.scale = 0.8f;
+    p.mouse.jitter_feedforward.max_px = 25.0f;
     p.mouse.fov_mode = true;
     p.mouse.hfov = 90.0f;
     p.mouse.vfov = 60.0f;
@@ -480,7 +488,12 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.lost_grace_ms == 78.0f);
     CHECK(q.mouse.gain_x_px_per_count == 0.42f);
     CHECK(q.mouse.gain_y_px_per_count == 0.71f);
-    CHECK(q.mouse.response_delay_ms == 51.0f);   // ★ 延迟必须落盘
+    CHECK(q.mouse.response_delay_ms == 51.0f);   // ★ 延迟必须落盘，否则前馈没得对齐
+    CHECK(q.mouse.jitter_feedforward.enabled);            // ★ 前馈开关必须落盘
+    CHECK(q.mouse.jitter_feedforward.delay_ms == 0.0f);
+    CHECK(q.mouse.jitter_feedforward.gain_px_per_count == 0.0f);
+    CHECK(q.mouse.jitter_feedforward.scale == 0.8f);
+    CHECK(q.mouse.jitter_feedforward.max_px == 25.0f);
     CHECK(q.mouse.fov_mode);
     CHECK(q.mouse.hfov == 90.0f);
     CHECK(q.mouse.vfov == 60.0f);
@@ -588,7 +601,47 @@ TEST(mouse_router_parse_logitech_layout) {
 }
 
 // ---------------------------------------------------------------------------
-// RuntimeProfile mouse 段序列化（对齐参数/自适应死区）
+// 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）
+// 注：Humanize（拟人微动）已于 2026-09-29 删除，见本文件下方说明。
+// ---------------------------------------------------------------------------
+TEST(mouse_pull_curve_activates_only_beyond_min_distance) {
+    aim::PullCurveConfig cfg;  // enabled=true min_distance=80 strength=0.8
+    aim::PullCurve pc;
+    // 距离 50 < 80：不激活 → 附加 0
+    CHECK_EQ(pc.apply(-30.0f, 40.0f, 10.0f, 5.0f, cfg, 4.0f), 0.0f);
+    // 距离 100 > 80：激活（|附加| > 0）
+    const float v = pc.apply(60.0f, 80.0f, 20.0f, 0.0f, cfg, 4.0f);
+    CHECK(std::fabs(v) > 0.0f);
+    // 方向：out_x >= 0 → 弧线方向为正
+    CHECK(v > 0.0f);
+    pc.reset();
+}
+
+TEST(mouse_continuous_lead_needs_accumulated_distance) {
+    aim::ContinuousLeadConfig cfg;  // enabled=false 默认
+    aim::ContinuousLead cl;
+    // 未启用：返回 0
+    CHECK_EQ(cl.apply(50, 0, 4.0f, cfg), 0.0f);
+    // 启用 + 单次未达 enter_distance → 0
+    cfg.enabled = true;
+    cfg.enter_distance = 150.0f;
+    cfg.scale = 0.5f;
+    CHECK_EQ(cl.apply(50, 0, 4.0f, cfg), 0.0f);   // accum=50
+    CHECK_EQ(cl.apply(50, 0, 4.0f, cfg), 0.0f);   // accum=100
+    // 累计 50×3=150 ≥ 150 → 开始输出偏置
+    CHECK(std::fabs(cl.apply(50, 0, 4.0f, cfg)) > 0.0f);  // accum=150
+    cl.reset();
+    // 复位后需重新累计
+    CHECK_EQ(cl.apply(50, 0, 4.0f, cfg), 0.0f);   // accum=50
+    cl.reset();
+}
+
+// 2026-09-29：Humanize（固定正弦 X 微动）整模块已删除 —— 它属于 TTBOX 自研的 4 套
+// 固定正弦抖动之一，非 BB 来源。对应用例 `mouse_humanize_adds_jitter_only_when_enabled`
+// 一并移除；HumanizeConfig 死结构体 2026-09-30 也已删除。
+
+// ---------------------------------------------------------------------------
+// RuntimeProfile mouse 段序列化（对齐参数/自适应死区/拉枪插件）
 // ---------------------------------------------------------------------------
 TEST(mouse_profile_fields_roundtrip) {
     RuntimeProfile p;
@@ -598,6 +651,10 @@ TEST(mouse_profile_fields_roundtrip) {
     p.mouse.kp_x = 0.42f;
     p.mouse.kd_y = 0.19f;
     p.mouse.output_deadzone = 1.5f;
+    p.mouse.pull_curve.enabled = true;
+    p.mouse.pull_curve.strength = 0.9f;
+    p.mouse.pull_curve.jitter_px = 2.5f;
+    p.mouse.pull_curve.min_distance = 100.0f;
 
     const JsonValue j = p.to_json();
     const RuntimeProfile q = RuntimeProfile::from_json(j);
@@ -606,6 +663,9 @@ TEST(mouse_profile_fields_roundtrip) {
     CHECK(q.mouse.kp_x == 0.42f);
     CHECK(q.mouse.kd_y == 0.19f);
     CHECK(q.mouse.output_deadzone == 1.5f);
+    CHECK(q.mouse.pull_curve.enabled);
+    CHECK(q.mouse.pull_curve.strength == 0.9f);
+    CHECK(q.mouse.pull_curve.min_distance == 100.0f);
 }
 
 
@@ -689,4 +749,51 @@ TEST(mouse_without_smooth_key_uses_true_kp_default) {
     CHECK(std::fabs(t.mouse.kd_x - 0.25f) < 1e-6f);
     CHECK(std::fabs(t.mouse.predict_x - 1.0f) < 1e-6f);  // V1.0.13 新默认（离线扫出的安全上限）
     CHECK(t.to_json().dump().find("\"smooth_x\"") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// 持续提前量（continuous_lead）配置往返 —— M2 补齐的断点
+//
+// 背景：ContinuousLeadConfig 结构体与 ContinuousLead.hpp 算法 + 本文件
+// mouse_continuous_lead_needs_accumulated_distance 单测**早就存在**，
+// 但 RuntimeProfile::MouseProfile 缺 continuous_lead 成员、AimThread 亦未调用
+// ⇒ 该功能**永远无法通过配置开启**（算法在、管线断）。
+// 本用例锁死"配置能存能读"，防此断点再次出现。
+// ---------------------------------------------------------------------------
+TEST(mouse_continuous_lead_profile_roundtrip) {
+    RuntimeProfile p;
+    p.mouse.continuous_lead.enabled = true;
+    p.mouse.continuous_lead.enter_distance = 180.0f;
+    p.mouse.continuous_lead.scale = 0.7f;
+    p.mouse.continuous_lead.fade_in_ms = 250.0f;
+    p.mouse.continuous_lead.fade_out_ms = 400.0f;
+    p.mouse.continuous_lead.near_disable_ratio = 0.5f;
+
+    const JsonValue j = p.to_json();
+    const RuntimeProfile q = RuntimeProfile::from_json(j);
+    CHECK(q.mouse.continuous_lead.enabled);
+    CHECK(q.mouse.continuous_lead.enter_distance == 180.0f);
+    CHECK(q.mouse.continuous_lead.scale == 0.7f);
+    CHECK(q.mouse.continuous_lead.fade_in_ms == 250.0f);
+    CHECK(q.mouse.continuous_lead.fade_out_ms == 400.0f);
+    CHECK(q.mouse.continuous_lead.near_disable_ratio == 0.5f);
+}
+
+TEST(mouse_continuous_lead_defaults_off_and_backward_compatible) {
+    // ① 默认必须"关"：这是新插件不得改变既有瞄准行为的安全默认。
+    RuntimeProfile d;
+    CHECK(!d.mouse.continuous_lead.enabled);
+    CHECK(d.mouse.continuous_lead.enter_distance == 150.0f);
+    CHECK(d.mouse.continuous_lead.scale == 0.5f);
+
+    // ② 旧配置 / 旧预设文件里没有 continuous_lead 键 ⇒ 加载后仍为"关"，
+    //    且取与 yu 对齐的默认值（yu config.json: enabled=false,
+    //    enter_distance=150, scale=0.5, fade_in/out=300, near_disable_ratio=0.66）。
+    const RuntimeProfile q = RuntimeProfile::from_json(JsonValue::object());
+    CHECK(!q.mouse.continuous_lead.enabled);
+    CHECK(q.mouse.continuous_lead.enter_distance == 150.0f);
+    CHECK(q.mouse.continuous_lead.scale == 0.5f);
+    CHECK(q.mouse.continuous_lead.fade_in_ms == 300.0f);
+    CHECK(q.mouse.continuous_lead.fade_out_ms == 300.0f);
+    CHECK(q.mouse.continuous_lead.near_disable_ratio == 0.66f);
 }

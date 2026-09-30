@@ -179,6 +179,33 @@ TEST(runtime_profile_validate_rejects_degenerate_capture) {
     }
 }
 
+TEST(runtime_profile_personal_motion_roundtrip) {
+    RuntimeProfile p;
+    p.mouse.personal_motion.enabled = true;
+    p.mouse.personal_motion.curve_blend = 0.8f;
+    p.mouse.personal_motion.knots = {0.1f, 0.4f, 0.9f};
+    // speed_blend / reaction_blend / max_reaction_delay_ms 已删（core 从不读），
+    // 往返只验在用的字段。
+
+    auto parsed = json_parse(p.to_json().dump());
+    CHECK(parsed.ok);
+    if (!parsed.ok) return;
+    RuntimeProfile q = RuntimeProfile::from_json(parsed.value);
+    CHECK(q.mouse.personal_motion.enabled);
+    CHECK_EQ(q.mouse.personal_motion.curve_blend, 0.8f);
+    CHECK_EQ(q.mouse.personal_motion.knots.size(), 3u);
+}
+
+TEST(runtime_profile_personal_motion_validate_bounds) {
+    RuntimeProfile p;
+    std::string err;
+    p.mouse.personal_motion.curve_blend = 1.1f;
+    CHECK(!p.validate(&err));
+    p.mouse.personal_motion.curve_blend = 0.5f;
+    p.mouse.personal_motion.knots = {1.2f};
+    CHECK(!p.validate(&err));
+}
+
 // ★ 2026-09-29 出货前补的升级路径护栏（1.5.70）：
 //   1.5.69 删掉了一代提前量 Lead1 与 v7.26 扳机 AutoTrigger 的整段配置
 //   （RuntimeProfile 的 lead1 / trigger 三段 + recoil_y_offset_px / target_height_px
@@ -204,7 +231,9 @@ TEST(runtime_profile_legacy_removed_keys_still_load) {
         "trigger_enabled": true,
         "recoil_y_offset_px": 7,
         "target_height_px": 120,
-        "trigger_recoil_offset_px": 3
+        "trigger_recoil_offset_px": 3,
+        "personal_motion": {"speed_blend": 0.3, "reaction_blend": 0.2,
+                            "max_reaction_delay_ms": 40}
       }
     })JSON";
 
