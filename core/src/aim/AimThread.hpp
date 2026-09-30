@@ -191,12 +191,7 @@ private:
     // 热键边沿（对齐 BB「按下 shuwuResetPid、松开完全重置」）。
     // 下降沿 = 本帧未放行（含 mouse.enabled=false / 热键松开 / 挂起）。
     bool last_injection_allowed_ = false;
-    // ---- V3 阶段 2：倍镜真实放大倍率（2026-09-28 训练场实测）----
-    // 倍镜下同一个角度误差在画面上被放大 M 倍（f = 1.44 × 标称 ⇒ 6 倍镜 M≈8.67），
-    // 而 kp 是按腰射标定的 ⇒ 6 倍镜下等效增益放大 8.67 倍 ⇒ 必然过冲振荡。
-    // 修法：PID 输入误差除以 M（等价于 kp/M），kp 保持腰射值即可通吃各倍镜。
-    // 无档命中 / 未配置时 = 1.0 ⇒ 与加此机制前逐字节一致。
-    float active_zoom_scale_ = 1.0f;
+    // ---- V1.0.12（2026-09-30）：active_zoom_scale_（PID 误差分母）已删 —— 不区分倍镜。----
     // ---- V1.0.08：裁剪区下边界（与检测框/准星同一坐标系，全帧像素）----
     // = 帧高/2 + capture.offset_y + search_radius（板端实测 1440/2 + 0 + 320 = 1040）。
     // 只给「框底被裁剪区截断 ⇒ 落点外推」用；<0 = 未知（不做外推）。
@@ -226,8 +221,6 @@ private:
     AccuracySim accuracy_sim_;
     // 原版口径：速度波动只在**刚锁定目标的第一帧**生效一次（一次性标志）。
     bool speed_fluct_first_lock_ = false;
-    // 本档实测 px/count（热键档 gain_px_per_count，0 ⇒ 回退 mouse.gain_y_px_per_count）
-    float active_gain_px_per_count_ = 0.0f;
     // 本帧实际加回的像素量（诊断用，供后续观测字段）
     float jitter_ff_x_px_ = 0.0f;
     float jitter_ff_y_px_ = 0.0f;

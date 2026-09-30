@@ -416,9 +416,6 @@ JsonValue RuntimeProfile::to_json() const {
         j.set("offset_y", JsonValue::number(static_cast<double>(ap.offset_y)));
         j.set("sensitivity", JsonValue::number(static_cast<double>(ap.sensitivity)));
         j.set("fov_scale", JsonValue::number(static_cast<double>(ap.fov_scale)));
-        j.set("zoom_scale", JsonValue::number(static_cast<double>(ap.zoom_scale)));
-        // V3 阶段 5：本档实测 px/count（0 = 没测过 ⇒ 回退 mouse.gain_y_px_per_count）
-        j.set("gain_px_per_count", JsonValue::number(static_cast<double>(ap.gain_px_per_count)));
         JsonValue ap_cos = JsonValue::array();
         for (const auto& c : ap.class_offsets) {
             JsonValue o = JsonValue::object();
@@ -1127,17 +1124,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 ap.offset_y = static_cast<float>(obj_num(j, "offset_y", 0.5));
                 ap.sensitivity = static_cast<float>(obj_num(j, "sensitivity", 1.0));
                 ap.fov_scale = static_cast<float>(obj_num(j, "fov_scale", 1.0));
-                // V3 阶段 2：倍镜真实放大倍率（默认 1.0 = 腰射，不改变任何既有行为）。
-                // 兜底：<=0 视为未填，回退 1.0（除零/负倍率会把误差符号与量级都搞坏）。
-                {
-                    const double z = obj_num(j, "zoom_scale", 1.0);
-                    ap.zoom_scale = (z > 0.0) ? static_cast<float>(z) : 1.0f;
-                }
-                // V3 阶段 5：本档实测 px/count（0/负 = 没测过 ⇒ 回退腰射 gain_y）。
-                {
-                    const double g = obj_num(j, "gain_px_per_count", 0.0);
-                    ap.gain_px_per_count = (g > 0.0) ? static_cast<float>(g) : 0.0f;
-                }
+                // V1.0.12（2026-09-30）：本档 zoom_scale / gain_px_per_count 已删（不区分倍镜）。
+                // 旧配置里出现这两个键一律**静默忽略** —— 等价 1.0 / 0，与删除前行为一致。
                 if (const JsonValue* co = j.find("class_offsets"); co && co->is_array()) {
                     for (const auto& e : co->as_array()) {
                         if (!e.is_object()) continue;

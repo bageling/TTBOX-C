@@ -261,13 +261,11 @@ TEST(selector_switch_hysteresis_blocks_far_candidate) {
 
 // ── V3 阶段 4：选靶打分去量纲（2026-09-28）──
 // 两个候选到中心**距离相同** ⇒ dist 项打平，胜负只由 size 项决定。
-// scale = 本档倍镜真实倍率 M：所有像素量同比放大 M 倍，cfg.zoom_scale 同步给 M，
-// 归一化后打分必须与腰射（M=1）逐位相同 ⇒ 选出的还是同一个目标。
-static int pick_winner_width(float scale, float zoom) {
+// scale = 画面整体放大倍数（所有像素量同比缩放）。
+static int pick_winner_width(float scale) {
     TargetSelectorConfig cfg = make_cfg();
     cfg.roi_w = 640.0f * scale;
     cfg.roi_h = 480.0f * scale;
-    cfg.zoom_scale = zoom;
     cfg.priority_scoring = true;
     cfg.weight_dist = 1.0f;
     cfg.weight_size = 0.3f;
@@ -284,27 +282,21 @@ static int pick_winner_width(float scale, float zoom) {
 // ⇒ size 项等于没配，只能看 dist（这里打平）⇒ 取先出现的那个（宽 100）。
 // 改 sqrt(面积)/参考边长后，大目标（宽 150）应当靠尺寸胜出。
 TEST(selector_size_score_no_longer_saturates) {
-    CHECK(pick_winner_width(1.0f, 1.0f) == 150);
+    CHECK(pick_winner_width(1.0f) == 150);
 }
 
-// ★ 去量纲：6 倍镜下所有像素量同比放大 6 倍，距离与尺寸都除以 M 之后
-//   必须回到腰射那一组打分 ⇒ 选出的仍是同一个目标（宽度也同比 = 150×6）。
-//   不归一化的话：dist 项变小、size 项变大，同一组权重在倍镜下会选出另一个目标。
-TEST(selector_scoring_is_zoom_invariant) {
-    const int hip = pick_winner_width(1.0f, 1.0f);
-    const int scoped = pick_winner_width(6.0f, 6.0f);
-    CHECK(hip > 0);
-    CHECK(scoped == hip * 6);
-}
-
-// ★ 对照组：画面同比放大 6 倍，但 zoom_scale 留在 1（= 阶段 4 之前的行为）。
-//   这时两项都不除 M：dist 项被压小、size 项全部撞顶 1.0 ⇒ 同分 ⇒ 取先出现的
-//   那个（宽 100×6）⇒ **选错人**。这条保证上面的"不变性"不是白测的。
-TEST(selector_scoring_without_zoom_norm_picks_wrong_target) {
-    const int hip = pick_winner_width(1.0f, 1.0f);
-    const int unnormalized = pick_winner_width(6.0f, 1.0f);
-    CHECK(hip == 150);
-    CHECK(unnormalized == 100 * 6);   // 没归一化 ⇒ 尺寸项失效，退回"谁先谁赢"
+// ★ V1.0.12（2026-09-30）：原先「两项都除以本档倍镜真实倍率 M」的归一化已删
+//   （业主口径：不区分倍镜）。本用例锁**删除后**的真实行为：
+//   画面整体放大 ⇒ 尺寸项全部撞顶 1.0、距离项被同一组权重压小 ⇒ 两者同分，
+//   退回"谁先谁赢" ⇒ 选出的是先出现的那个小目标（宽 100×6）。
+//   ★ 已知取舍：板端无影响 —— zoom_scale 一直是 1，归一化本来就没生效过。
+//     真要让打分对倍镜不敏感，正确做法是让 size_ref_px / dist_ref_px 跟着
+//     画面尺度走，而不是在打分里除一个需要人工填的 M（那正是被删掉的"参考物"）。
+TEST(selector_scoring_is_pixel_absolute_after_zoom_removal) {
+    const int hip = pick_winner_width(1.0f);
+    const int scaled = pick_winner_width(6.0f);
+    CHECK(hip == 150);         // 腰射：大目标靠尺寸胜出
+    CHECK(scaled == 100 * 6);  // 放大 6 倍：尺寸项撞顶 ⇒ 同分 ⇒ 取先出现的
 }
 
 int main() {

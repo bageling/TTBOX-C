@@ -5510,12 +5510,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <span id="calibStatusPill" class="pill">未运行</span>
                   </div>
                   <p class="field-hint">对着画面里静止的目标跑一轮（约 15 秒）：自动测出每 count 移动的像素数（gain）与响应延迟，并按结果换算 Kp / Kd / 预判。标定期间会临时使用温和的 PID 参数（不影响测量），结束自动恢复或应用推导值。</p>
-                  <label class="field" style="margin-top:8px">这次标定写进哪一档（先开好对应的镜子）
-                    <select id="calibScopeSelect">
-                      <option value="-1">只写全局（腰射标定用这个）</option>
-                    </select>
-                    <span class="field-hint">倍镜下的 px/count 跟腰射不一样，必须按镜子各测一次。开好镜子、选对档位再点开始，测完会自动填进那一档的「本档 px/count」。</span>
-                  </label>
                   <div class="hardware-actions">
                     <button id="calibStartButton" class="ghost-button" type="button">开始标定</button>
                     <button id="calibCancelButton" class="danger-button" type="button" disabled>取消</button>
@@ -6440,11 +6434,7 @@ const AIM_PROFILE_AXIS_OFFSET_MIN = 0;
 const AIM_PROFILE_AXIS_OFFSET_MAX = 1;
 const AIM_PROFILE_FOV_SCALE_MIN = 0.1;
 const AIM_PROFILE_FOV_SCALE_MAX = 1;
-// V3 阶段 2：倍镜真实放大倍率。1 = 腰射（不折算误差），上限 20 覆盖到 15 倍镜。
-const AIM_PROFILE_ZOOM_SCALE_MIN = 1;
-const AIM_PROFILE_ZOOM_SCALE_MAX = 20;
-// V3 阶段 5：本档 px/count（0 = 没测过 ⇒ 回退腰射 gain）
-const AIM_PROFILE_GAIN_PX_PER_COUNT_MAX = 20;
+// V1.0.12（2026-09-30）：倍镜倍率 / 本档 px/count 两个控件已删（不区分倍镜）。
 // 总览「FOV 半径」= 内接圆倍率，下限与后端 FOV_FACTOR_MIN（ttbox-web.py）保持一致：
 // 倍率 0 会让 core 的 fov.radius=0 撞上「必须在 (0,1]」校验，整个保存失败。
 const OVERVIEW_FOV_FACTOR_MIN = 0.1;
@@ -6477,7 +6467,6 @@ const NUMERIC_RANGE_LIMITS = {
   sens: [0, 5],
   aim_profile_sensitivity: [0.1, 3],
   aim_profile_fov_scale: [AIM_PROFILE_FOV_SCALE_MIN, AIM_PROFILE_FOV_SCALE_MAX],
-  aim_profile_zoom_scale: [AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX],
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
@@ -8630,16 +8619,6 @@ function aimProfileFovScale(profile) {
   );
 }
 
-// V3 阶段 2：倍镜真实放大倍率（core 拿它当 PID 误差的分母）。1 = 腰射。
-function aimProfileZoomScale(profile) {
-  const value = Number(profile && profile.zoom_scale !== undefined ? profile.zoom_scale : 1);
-  return clamp(
-    Number.isFinite(value) ? value : 1,
-    AIM_PROFILE_ZOOM_SCALE_MIN,
-    AIM_PROFILE_ZOOM_SCALE_MAX
-  );
-}
-
 function profileTemplate(profile, index) {
   const classCount = currentModelClassCount();
   const classNames = currentModelClassNames();
@@ -8648,11 +8627,6 @@ function profileTemplate(profile, index) {
   const offsetY = aimProfileOffsetY(profile).toFixed(2);
   const sensitivity = clamp(Number(profile && profile.sensitivity !== undefined ? profile.sensitivity : 1), 0.1, 3).toFixed(2);
   const fovScale = aimProfileFovScale(profile).toFixed(2);
-  const zoomScale = aimProfileZoomScale(profile).toFixed(2);
-  const gainPxPerCount = clamp(
-    Number(profile && profile.gain_px_per_count !== undefined ? profile.gain_px_per_count : 0),
-    0, AIM_PROFILE_GAIN_PX_PER_COUNT_MAX
-  ).toFixed(3);
   const classPickers = Array.from({ length: classCount }, (_, classId) => {
     const checked = mask & (1 << classId) ? "checked" : "";
     const className = classDisplayName(classId, classNames);
@@ -8736,21 +8710,6 @@ function profileTemplate(profile, index) {
         </div>
         <input class="aim-profile-fov-scale-range" type="range" min="0.1" max="1" step="0.01" value="${fovScale}">
         <span class="field-hint">在总览 FOV 半径上再乘这个倍率，只对本组热键生效。</span>
-      </div>
-      <div class="slider-field span-all">
-        <div class="label-row">
-          <label>倍镜倍率</label>
-          <input class="aim-profile-zoom-scale value-input" type="number" min="1" max="20" step="0.01" autocomplete="off" value="${zoomScale}">
-        </div>
-        <input class="aim-profile-zoom-scale-range" type="range" min="1" max="20" step="0.01" value="${zoomScale}">
-        <span class="field-hint">开镜时画面被放大几倍（腰射填 1）。填了之后高倍镜不再过冲，灵敏度沿用腰射标定值即可。实测这套镜子：2 倍≈2.87、4 倍≈5.79、6 倍≈8.67。</span>
-      </div>
-      <div class="slider-field span-all">
-        <div class="label-row">
-          <label>本档 px/count</label>
-          <input class="aim-profile-gain-px-per-count value-input" type="number" min="0" max="20" step="0.001" autocomplete="off" value="${gainPxPerCount}">
-        </div>
-        <span class="field-hint">鼠标动 1 格 = 画面走多少像素。**必须按倍镜各测一次**（腰射约 0.7，倍镜下会变）。填 0 = 没测过，先借用腰射的值。测法：开这个镜子 → 自动标定 → 结果写进本档。</span>
       </div>
       <div class="aim-profile-axis-grid span-all">
         <div class="slider-field aim-profile-axis-field">
@@ -9010,8 +8969,6 @@ function bindAimProfileCard(card, profile) {
   bindProfileNumberRange(card, ".aim-profile-offset-y", ".aim-profile-offset-y-range", 0.5, 0, 1);
   bindProfileNumberRange(card, ".aim-profile-sensitivity", ".aim-profile-sensitivity-range", 1, 0.1, 3);
   bindProfileNumberRange(card, ".aim-profile-fov-scale", ".aim-profile-fov-scale-range", 1, 0.1, 1);
-  bindProfileNumberRange(card, ".aim-profile-zoom-scale", ".aim-profile-zoom-scale-range", 1, AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX);
-  bindProfileNumberRange(card, ".aim-profile-zoom-scale", ".aim-profile-zoom-scale-range", 1, AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX);
 
   card.querySelectorAll(".aim-profile-class").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
@@ -9150,8 +9107,6 @@ function renderAimProfiles(profiles) {
       offset_y: defaultAimProfileOffsetY(),
       sensitivity: 1,
       fov_scale: 1,
-      zoom_scale: 1,
-      gain_px_per_count: 0,
     }];
   safeProfiles.forEach((profile) => addAimProfileCard(profile, false));
   state.aimClassRenderSignature = currentModelClassRenderSignature();
@@ -9190,8 +9145,6 @@ function collectAimProfiles() {
       class_offsets: [],
       sensitivity: 1,
       fov_scale: 1,
-      zoom_scale: 1,
-      gain_px_per_count: 0,
     }];
   }
   const profiles = Array.from(editor.querySelectorAll(".aim-profile-card")).map((card) => {
@@ -9230,8 +9183,6 @@ function collectAimProfiles() {
       fov_scale: aimProfileFovScale({
         fov_scale: card.querySelector(".aim-profile-fov-scale").value || 1,
       }),
-      zoom_scale: clamp(Number(card.querySelector(".aim-profile-zoom-scale").value || 1), AIM_PROFILE_ZOOM_SCALE_MIN, AIM_PROFILE_ZOOM_SCALE_MAX),
-      gain_px_per_count: clamp(Number(card.querySelector(".aim-profile-gain-px-per-count").value || 0), 0, AIM_PROFILE_GAIN_PX_PER_COUNT_MAX),
     };
   });
 
@@ -9244,8 +9195,6 @@ function collectAimProfiles() {
       class_offsets: [],
       sensitivity: 1,
       fov_scale: 1,
-      zoom_scale: 1,
-      gain_px_per_count: 0,
     }];
   }
   return profiles;
@@ -9646,7 +9595,7 @@ function collectConfig() {
 
 function hasInvalidConfigInput() {
   const fields = Array.from(document.querySelectorAll(
-    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale, .aim-profile-zoom-scale, .aim-profile-gain-px-per-count"
+    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale"
   ));
   return fields.some((field) => {
     const value = field.value.trim();
@@ -13457,36 +13406,6 @@ function bindEvents() {
   };
   const calibTraceLines = [];
 
-  // V3 阶段 5：标定"写进哪一档"的下拉 = 当前热键档列表（带倍镜倍率）。
-  // 只在选项数量/内容变化时重建，避免每次轮询把用户已选中的值冲掉。
-  function syncCalibScopeOptions() {
-    const select = $("calibScopeSelect");
-    if (!select) return;
-    const profiles = Array.isArray(state.profiles) ? state.profiles : [];
-    const wanted = ["-1", ...profiles.map((_, i) => String(i))].join(",");
-    const current = Array.from(select.options).map((o) => o.value).join(",");
-    if (current === wanted && select.options.length === profiles.length + 1) {
-      return;   // 没变就别动（保住用户的选择）
-    }
-    const keep = select.value;
-    select.innerHTML = "";
-    const all = document.createElement("option");
-    all.value = "-1";
-    all.textContent = "只写全局（腰射标定用这个）";
-    select.appendChild(all);
-    profiles.forEach((p, i) => {
-      const z = Number(p && p.zoom_scale !== undefined ? p.zoom_scale : 1);
-      const g = Number(p && p.gain_px_per_count || 0);
-      const opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = `档位 #${i + 1}（倍率 ${z.toFixed(2)}${g > 0 ? ` · 已测 ${g.toFixed(3)}` : " · 未测"}）`;
-      select.appendChild(opt);
-    });
-    if (Array.from(select.options).some((o) => o.value === keep)) {
-      select.value = keep;
-    }
-  }
-
   function calibPhaseLabel(payload) {
     const phase = payload && payload.phase;
     if (phase === "done" || phase === "saved") {
@@ -13528,8 +13447,6 @@ function bindEvents() {
     if (cancelButton) {
       cancelButton.disabled = !active;
     }
-    // V3 阶段 5：把热键档列进"写进哪一档"（带上它的倍镜倍率，方便对号入座）
-    syncCalibScopeOptions();
     if (bar) {
       bar.style.width = `${Math.round((runtime.progress || 0) * 100)}%`;
     }
@@ -13657,18 +13574,11 @@ function bindEvents() {
       fitsLog.hidden = true;
       fitsLog.textContent = "";
     }
-    const scopeSelect = $("calibScopeSelect");
-    const scopeIndex = scopeSelect ? Number(scopeSelect.value || -1) : -1;
-    await api("/api/control/calibration/start", {
-      method: "POST",
-      body: JSON.stringify({ scope_index: scopeIndex }),
-    });
+    await api("/api/control/calibration/start", { method: "POST" });
     state.calibKeepPolling = true;
     scheduleCalibrationPolling(true);
     await refreshCalibration();
-    showToast(scopeIndex >= 0
-      ? `标定已启动（结果将写入档位 #${scopeIndex + 1}），过程中请保持目标静止`
-      : "标定已启动，过程中请保持目标静止");
+    showToast("标定已启动，过程中请保持目标静止");
   }));
 
   on("calibCancelButton", "click", () => runUiAction(async () => {
@@ -13751,8 +13661,6 @@ function bindEvents() {
       offset_y: defaultAimProfileOffsetY(),
       sensitivity: 1,
       fov_scale: 1,
-      zoom_scale: 1,
-      gain_px_per_count: 0,
     });
   });
 

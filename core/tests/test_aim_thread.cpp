@@ -483,73 +483,18 @@ TEST(aim_thread_trigger2_move_throttle_suspends_output) {
     CHECK(on.sum_y != 0);
 }
 
-// ── V3 阶段 2（2026-09-28）：倍镜倍率把 PID 误差压回角度域 ──
-// 根因：kp 是按腰射标定的，倍镜下同一**角度**偏差在画面上被放大 M 倍
-//   ⇒ 等效增益被放大 M 倍 ⇒ 6 倍镜必过冲（实测 530px 且振荡）。
-// 修法：PID 输入误差除以本档真实倍率 M（腰射 M=1 ⇒ 行为不变）。
-// 用例锁的是"同一段帧、只改 zoom_scale，累计输出按倍率缩小"这个**端到端**结论。
-namespace {
-struct ZoomRun {
-    int64_t sum_x = 0;
-    int64_t sum_y = 0;
-};
-ZoomRun run_zoom_output(float zoom_scale) {
-    AimTargetMailbox mailbox(1);
-    auto output = std::make_shared<CountingHidOutput>();
-    auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
-    ttbox::core::RuntimeConfig config;
-    std::atomic<uint16_t> buttons{0x02};   // 按住右键，否则 Hotkey Gate 整帧归零 ⇒ 假绿
-
-    profile->mouse.enabled = true;
-    profile->mouse.aim_profiles[0].hotkey = 0x02;
-    profile->mouse.aim_profiles[0].zoom_scale = zoom_scale;
-    profile->mouse.output_deadzone = 0.0f;   // 关掉输出门限，只比"误差折算"这一件事
-    config.update(profile);
-
-    AimThread thread;
-    thread.start(&mailbox, output, 1000, &config, &buttons);
-    for (uint64_t f = 1; f <= 30; ++f) {
-        AimTargetTask t;
-        t.frame_number = f;
-        t.timestamp_us = 1000ULL * f;
-        t.frame_width = 1280;
-        t.frame_height = 720;
-        t.has_target = true;
-        t.target = calib_box();
-        t.aim_point = {800.0f, 240.0f};   // 画面中心 640 ⇒ 恒定 +160px 横向误差
-        t.detections.push_back(calib_box());
-        mailbox.offer(0, t);
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    const ZoomRun r{output->sum_x(), output->sum_y()};
-    thread.stop();
-    return r;
-}
-}  // namespace
-
-// 判据用 **Y 轴**：检测框中心 y=240、画面中心 360 ⇒ 天然有 -120px 恒定误差，
-// 不必靠 aim_point 造误差（X 轴在这个 harness 里误差为 0，比 0 是假绿）。
-static int64_t zoom_abs_y(const ZoomRun& r) { return r.sum_y < 0 ? -r.sum_y : r.sum_y; }
-
-TEST(aim_thread_zoom_scale_shrinks_output_by_magnification) {
-    const ZoomRun hip = run_zoom_output(1.0f);      // 腰射：不折算
-    const ZoomRun scoped = run_zoom_output(8.674f); // 6 倍镜真实倍率（实测 1.44×6）
-    const int64_t a = zoom_abs_y(hip);
-    const int64_t b = zoom_abs_y(scoped);
-    CHECK(a > 0);            // 前提：腰射真的动了（否则比的是两个 0）
-    CHECK(b > 0);            // 前提：高倍下仍有输出（被压成 0 说明折算过头）
-    CHECK(b * 4 < a);        // ★ 8.67 倍 ⇒ 输出应缩到约 1/8.67，放宽到 1/4 防取帧抖动
-}
-
-// 倍率越大 ⇒ 输出越小（单调）。用实测的三个档位（腰射 / 2 倍 / 6 倍）串起来，
-// 防止"只压第一个档、其余档没接上"这种局部接线错误蒙混过关。
-TEST(aim_thread_zoom_scale_monotonic_across_scopes) {
-    const int64_t hip = zoom_abs_y(run_zoom_output(1.0f));
-    const int64_t s2 = zoom_abs_y(run_zoom_output(2.873f));   // 2 倍镜实测
-    const int64_t s6 = zoom_abs_y(run_zoom_output(8.674f));   // 6 倍镜实测
-    CHECK(hip > s2);     // ★ 2 倍必须比腰射压得狠
-    CHECK(s2 > s6);      // ★ 6 倍必须比 2 倍压得更狠
-}
+// ── V1.0.12（2026-09-30）：不区分倍镜 —— 原倍镜用例已随功能一并删除 ──
+// 原有两个用例（aim_thread_zoom_scale_shrinks_output_by_magnification /
+// _monotonic_across_scopes）锁的是「PID 误差除以本档倍率 M ⇒ 输出按 M 缩小」，
+// 而这个机制本身就是被删掉的东西（业主口径：不区分倍镜，靠压枪和自瞄把准星拉回目标身上），
+// 留着等于给已删功能做回归，故一并删除。
+//
+// 「老配置带着 zoom_scale / gain_px_per_count 时必须与不带时行为一致」这条语义，
+// 改由两处更严且**不依赖线程时序**的手段覆盖：
+//   1) test_aim_profiles.cpp 第 11 节：整份配置序列化后逐字相同；
+//   2) 同文件顶部的 static_assert 编译期守卫（字段不许加回来）。
+// 原因：AimThread 跑在独立线程里，两次跑的取帧/步长不可能逐位一致，
+// 在这里比“两次运行输出相等”本身就是不稳定的。
 
 int main() {
     std::printf("=== ttbox_core tests (aim_thread) ===\n");

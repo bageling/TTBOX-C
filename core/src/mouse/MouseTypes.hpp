@@ -137,19 +137,9 @@ struct AimHotkeyProfile {
     std::vector<int> class_filter;            // 本档目标类别（空=不限）
     float sensitivity = 1.0f;                 // 本档移动倍率（乘在全局 mouse.sensitivity 之后）
     float fov_scale = 1.0f;                   // 本档 FOV 倍率（0.1~1.0，乘在全局 fov.radius 之后）
-    // V3 阶段 2（2026-09-28）：本档**倍镜真实放大倍率**（误差角度化的分母）。
-    // 语义：开这档时，同一物理偏差在画面上被放大几倍。填 1.0 = 腰射（不改变行为）。
-    // ★ 训练场实测（docs/calib/range-measure-2026-09-28.json）：
-    //   真实倍率 ≈ 1.44 × 镜上标称 ⇒ 2 倍填 2.87、4 倍填 5.79、6 倍填 8.67。
-    //   **不能按镜子标称填**（标称 2 实际 2.87，按标称调会偏 44%）。
-    // 用途：PID 输入的像素误差除以它，等价于把误差换成角度域（差一个常数 1/f_hip，已并入 kp）
-    //   ⇒ kp 保持腰射标定值即可通吃各倍镜，**不需要知道绝对焦距、也不需要知道靶子高度**。
-    float zoom_scale = 1.0f;
-    // V3 阶段 5（2026-09-28）：本档实测 px/count（鼠标 1 count = 画面多少 px）。
-    // ★ 必须按倍镜各测一次：px/count 随 f × ADS 系数变，腰射的 0.686 在 6 倍镜下不成立。
-    //   填 0 = 还没测过 ⇒ 回退到 mouse.gain_y_px_per_count（腰射值）。
-    //   测法同 gain 标定：训练场里固定发 N count，量画面位移 px，取 px/N。
-    float gain_px_per_count = 0.0f;
+    // V1.0.12（2026-09-30）：本档「倍镜真实放大倍率」zoom_scale 与「本档 px/count」
+    // gain_px_per_count 已删除 —— 业主口径「不区分倍镜，靠压枪和自瞄把准星拉回目标身上」。
+    // 旧配置里出现这两个键一律**静默忽略**（等价 1.0 / 0 ⇒ 与删除前行为一致）。
 };
 
 // 单档命中判定：当前按键位图是否落进这一档。
@@ -276,7 +266,7 @@ struct PersonalTrajectoryConfig {
 struct JitterFeedforwardConfig {
     bool enabled = false;           // 总开关
     float delay_ms = 0.0f;          // 落帧延迟；0 = 用 mouse.response_delay_ms（实测 51ms）
-    float gain_px_per_count = 0.0f; // 本档 px/count；0 = 用热键档 gain_px_per_count，再兜底 gain_y
+    float gain_px_per_count = 0.0f; // 鼠标 1 count = 画面多少 px；0 = 用 mouse.gain_y_px_per_count
     float scale = 1.0f;             // 扣除比例（1.0=全额；0.5=只扣一半，留一点人味残差）
     float max_px = 40.0f;           // 单帧加回量的绝对值上限（px），防异常值把误差顶飞
 };

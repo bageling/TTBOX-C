@@ -185,9 +185,6 @@ void AimThread::loop() {
                 lead_last_move_y_ = 0.0f;
             }
             last_injection_allowed_ = injection_allowed;
-            // V3 阶段 2：每帧以腰射（1.0）为起点，下面命中档位时才覆盖。
-            // 这样即便本帧 frame_profile 为空，也不会残留上一帧的倍率分母。
-            active_zoom_scale_ = 1.0f;
             if (frame_profile) {
                 // 本周期生效档；无档命中（未按热键 / 全部挂起）时退回全局量，
                 // 此时输出本来就被 Gate 拦着，选靶仍用全局参数 —— 与加档位前逐位一致。
@@ -205,23 +202,6 @@ void AimThread::loop() {
                 // ★ 此前 scfg.class_filter 从未被赋值 ⇒ 瞄准侧类别过滤一直是关的，
                 //   全靠推理侧把非本类别框丢掉。多档位必须把这个字段接上。
                 if (ap) scfg.class_filter = ap->class_filter;
-                // ---- V3 阶段 2：本档倍镜真实放大倍率（误差角度化的分母）----
-                // 2026-09-28 训练场实测：真实倍率 ≈ 1.44 × 镜上标称
-                // （腰射 1.000 / 2 倍 2.873 / 4 倍 5.785 / 6 倍 8.674）。
-                // 面板「热键 FOV 缩放」填的是标称倍率，这里乘 1.44 得到真实倍率；
-                // zoom_scale 为 1.0（腰射/未填）⇒ 分母 = 1 ⇒ 与加此机制前完全一致。
-                // 兜底：<=0 或非有限值一律按 1.0（防除零 / 防 NaN 污染整条输出链）。
-                {
-                    const float z = ap ? ap->zoom_scale : 1.0f;
-                    active_zoom_scale_ = (std::isfinite(z) && z > 0.0f) ? z : 1.0f;
-                }
-                // ---- V3 阶段 5：本档实测 px/count（前馈换算用）----
-                // 倍镜下 px/count 随 f × ADS 系数变 ⇒ 必须按倍镜各测一次；
-                // 本档没测过（0）⇒ 回退腰射 gain_y_px_per_count（见下面换算处）。
-                {
-                    const float g = ap ? ap->gain_px_per_count : 0.0f;
-                    active_gain_px_per_count_ = (std::isfinite(g) && g > 0.0f) ? g : 0.0f;
-                }
                 // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
                 // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
                 // 之前用整帧 task.frame_width/height（2560×1440）⇒ min/2 = 720px，
@@ -267,12 +247,7 @@ void AimThread::loop() {
                 scfg.priority_scoring = frame_profile->mouse.priority_scoring;
                 scfg.weight_dist = frame_profile->mouse.weight_dist;
                 scfg.weight_size = frame_profile->mouse.weight_size;
-                // V3 阶段 4：打分的两项（距离/尺寸）都要除以本档倍率归一到腰射等效量纲，
-                // 否则倍镜下 dist 项变小、size 项变大 ⇒ 同一组权重选出不同的目标。
-                scfg.zoom_scale = active_zoom_scale_;
-                // V3 阶段 4：选靶打分的两项（距离 / 尺寸）都要除以本档倍率归一到腰射
-                // 等效量纲，否则倍镜下 dist 项变小、size 项变大，同一组权重选出不同目标。
-                scfg.zoom_scale = active_zoom_scale_;
+                // V1.0.12（2026-09-30）：此处原两处 scfg.zoom_scale 赋值已删（不区分倍镜）。
                 scfg.stickiness = frame_profile->mouse.stickiness;
                 scfg.switch_threshold_px = frame_profile->mouse.switch_threshold_px;
                 scfg.head_body_stable = frame_profile->mouse.head_body_stable;
@@ -564,7 +539,6 @@ void AimThread::loop() {
                     float delay_ms = ff.delay_ms;
                     if (!(delay_ms > 0.0f)) delay_ms = frame_profile->mouse.response_delay_ms;
                     float g = ff.gain_px_per_count;
-                    if (!(g > 0.0f)) g = active_gain_px_per_count_;
                     if (!(g > 0.0f)) g = frame_profile->mouse.gain_y_px_per_count;
                     if (delay_ms > 0.0f && g > 0.0f) {
                         float jx = 0.0f, jy = 0.0f;
@@ -598,15 +572,10 @@ void AimThread::loop() {
                     aibox_y = fov_out_y;
                 } else {
                     // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
-                    // ★ V3 阶段 2（2026-09-28）：误差先除以本档真实倍率再进 PID。
-                    //   推导：倍镜下同一角度误差在画面上放大 M 倍，而 kp 按腰射标定
-                    //   ⇒ 等效增益被放大 M 倍 ⇒ 高倍镜必然过冲。除 M 后等效增益
-                    //   = kp × (deg/count) × f_hip，与倍镜无关（ADS 系数除外）。
-                    //   active_zoom_scale_ 默认 1.0 ⇒ 腰射与未配置档位逐字节不变。
-                    const float err_x = control_x / active_zoom_scale_;
-                    const float err_y = control_y / active_zoom_scale_;
-                    aibox_x = static_cast<float>(pid_x_.update(err_x));
-                    aibox_y = static_cast<float>(pid_y_.update(err_y));
+                    // ★ V1.0.12（2026-09-30）：原先误差先除以本档倍镜倍率再进 PID，已按
+                    //   业主口径删除（不区分倍镜，所有档位共用一套 kp）。
+                    aibox_x = static_cast<float>(pid_x_.update(control_x));
+                    aibox_y = static_cast<float>(pid_y_.update(control_y));
                 }
                 // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。

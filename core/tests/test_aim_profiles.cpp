@@ -16,16 +16,41 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/Json.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "mouse/MouseTypes.hpp"
+#include "mouse/TargetSelector.hpp"   // 编译期守卫要探测 TargetSelectorConfig
 
 using ttbox::core::JsonValue;
 using ttbox::core::RuntimeProfile;
 using ttbox::core::aim::AimHotkeyProfile;
 using ttbox::core::aim::ClassOffset;
+
+// ── 编译期守卫（V1.0.12）：按倍镜区分的字段不得再出现 ──
+// 业主口径「不区分倍镜，靠压枪和自瞄把准星拉回目标身上」⇒ 这三个字段已删。
+// 用 SFINAE 探测把它们钉死在编译期：谁哪天把 zoom_scale / 本档 gain_px_per_count
+// 加回来，**编译直接失败** —— 比任何运行时用例都早一步，且不可能被"跳过"。
+template <typename T, typename = void>
+struct has_zoom_scale_field : std::false_type {};
+template <typename T>
+struct has_zoom_scale_field<T, decltype(void(std::declval<T&>().zoom_scale))> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_profile_gain_field : std::false_type {};
+template <typename T>
+struct has_profile_gain_field<T, decltype(void(std::declval<T&>().gain_px_per_count))>
+    : std::true_type {};
+
+static_assert(!has_zoom_scale_field<AimHotkeyProfile>::value,
+              "V1.0.12：AimHotkeyProfile 不得再有 zoom_scale（不区分倍镜）");
+static_assert(!has_zoom_scale_field<ttbox::core::aim::TargetSelectorConfig>::value,
+              "V1.0.12：TargetSelectorConfig 不得再有 zoom_scale（不区分倍镜）");
+static_assert(!has_profile_gain_field<AimHotkeyProfile>::value,
+              "V1.0.12：AimHotkeyProfile 不得再有 gain_px_per_count（不区分倍镜）");
 
 namespace {
 
@@ -91,8 +116,6 @@ int main() {
         check_eq_i64(p.mouse.aim_profiles[0].hotkey_mode, 0, "默认档触发方式 = any");
         check_eq_f(p.mouse.aim_profiles[0].sensitivity, 1.0f, "默认档移动倍率 = 1.0");
         check_eq_f(p.mouse.aim_profiles[0].fov_scale, 1.0f, "默认档 FOV 倍率 = 1.0");
-        // V3 阶段 2：默认 1.0 = 腰射 = 误差不做倍率折算 ⇒ 老配置行为不变。
-        check_eq_f(p.mouse.aim_profiles[0].zoom_scale, 1.0f, "默认档倍镜倍率 = 1.0（腰射）");
     }
 
     // ================= 2. 命中判定 =================
@@ -226,8 +249,6 @@ int main() {
         a.offset_y = 0.31f;
         a.sensitivity = 1.35f;
         a.fov_scale = 0.72f;
-        a.zoom_scale = 2.873f;   // V3 阶段 2：2 倍镜实测真实倍率
-        a.gain_px_per_count = 0.343f;  // V3 阶段 5：本档实测 px/count（前馈换算用）
         a.class_filter = {0, 2};
         ClassOffset co;
         co.class_id = 2; co.offset_x = 0.25f; co.offset_y = 0.15f; co.priority = 3;
@@ -238,7 +259,6 @@ int main() {
         b.offset_y = 0.66f;
         b.sensitivity = 0.85f;
         b.fov_scale = 0.40f;
-        b.zoom_scale = 8.674f;   // V3 阶段 2：6 倍镜实测真实倍率
         b.class_filter = {1};
 
         p.mouse.aim_profiles = {a, b};
@@ -252,8 +272,6 @@ int main() {
         check_eq_f(q.mouse.aim_profiles[0].offset_y, 0.31f, "往返：档0 offset_y");
         check_eq_f(q.mouse.aim_profiles[0].sensitivity, 1.35f, "往返：档0 移动倍率");
         check_eq_f(q.mouse.aim_profiles[0].fov_scale, 0.72f, "往返：档0 FOV 倍率");
-        check_eq_f(q.mouse.aim_profiles[0].zoom_scale, 2.873f, "往返：档0 倍镜倍率");
-        check_eq_f(q.mouse.aim_profiles[0].gain_px_per_count, 0.343f, "往返：档0 px/count");
         check_eq_i64(static_cast<int64_t>(q.mouse.aim_profiles[0].class_filter.size()), 2,
                      "往返：档0 类别过滤个数");
         check_eq_i64(q.mouse.aim_profiles[0].class_filter[1], 2, "往返：档0 类别过滤内容");
@@ -266,7 +284,6 @@ int main() {
         check_eq_i64(q.mouse.aim_profiles[1].hotkey2, 0x08, "往返：档1 副键");
         check_eq_i64(q.mouse.aim_profiles[1].hotkey_mode, 1, "往返：档1 触发方式 = all");
         check_eq_f(q.mouse.aim_profiles[1].fov_scale, 0.40f, "往返：档1 FOV 倍率");
-        check_eq_f(q.mouse.aim_profiles[1].zoom_scale, 8.674f, "往返：档1 倍镜倍率");
         check_eq_i64(static_cast<int64_t>(q.mouse.aim_profiles[1].class_filter.size()), 1,
                      "往返：档1 类别过滤个数");
 
@@ -348,47 +365,35 @@ int main() {
         check_eq_f(q.mouse.aim_profiles[0].sensitivity, 1.0f, "档内缺字段 -> 倍率默认 1.0");
     }
 
-    // ================= 11. V3 阶段 2：倍镜倍率的兜底 =================
-    // zoom_scale 是 PID 误差的**分母**，0 / 负数 / 缺失会让误差变号或变无穷大，
-    // 整条输出链直接废掉 ⇒ 解析层必须一律回退 1.0（腰射 = 不折算）。
+    // ================= 11. V1.0.12：倍镜相关旧键一律忽略 =================
+    // 2026-09-30 业主口径「不区分倍镜，靠压枪和自瞄把准星拉回目标身上」⇒ 本档
+    // zoom_scale / gain_px_per_count 已从 AimHotkeyProfile 删除。老配置里出现这两个键
+    // 必须**静默忽略**（等价 1.0 / 0 ⇒ 与删除前行为一致），既不报错也不能影响别的字段。
     {
-        const RuntimeProfile miss = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8}]}})", "倍镜倍率缺失");
-        check_eq_f(miss.mouse.aim_profiles[0].zoom_scale, 1.0f,
-                   "倍镜倍率缺失 -> 回退 1.0（腰射，不做折算）");
+        const RuntimeProfile bare = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"sensitivity":1.35}]}})",
+            "基准（不带倍镜键）");
+        const RuntimeProfile legacy = from_text(
+            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"sensitivity":1.35,)"
+            R"("zoom_scale":8.674,"gain_px_per_count":0.343}]}})",
+            "旧配置带倍镜键");
+        // ★ 判据用**整份配置序列化后逐字相同**：只要旧键还参与任何一处解析，这里必然不等。
+        //   比逐字段挑着比更严，也堵住"旧键被塞进别的字段"这种改法。
+        check(bare.to_json().dump() == legacy.to_json().dump(),
+              "带旧键 / 不带旧键 -> 整份配置逐字相同（旧键被静默忽略）");
+        check_eq_i64(legacy.mouse.aim_profiles[0].hotkey, 8, "带旧键 -> 其余字段照常解析");
+        check_eq_f(legacy.mouse.aim_profiles[0].sensitivity, 1.35f, "带旧键 -> 敏感度照常解析");
 
-        const RuntimeProfile zero = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"zoom_scale":0}]}})", "倍镜倍率 0");
-        check_eq_f(zero.mouse.aim_profiles[0].zoom_scale, 1.0f,
-                   "倍镜倍率 0 -> 回退 1.0（防除零）");
-
-        const RuntimeProfile neg = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"zoom_scale":-3.5}]}})",
-            "倍镜倍率负数");
-        check_eq_f(neg.mouse.aim_profiles[0].zoom_scale, 1.0f,
-                   "倍镜倍率负数 -> 回退 1.0（防误差变号）");
-    }
-
-    // ================= 12. V3 阶段 5：本档 px/count =================
-    // 前馈换算要用"当前倍镜的 px/count"。没测过必须是 0（回退腰射 gain），
-    // 负数也同样回退 0 —— 拿负数去换算会把抖动扣成反向，比不扣更糟。
-    {
-        const RuntimeProfile miss = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8}]}})", "本档 px/count 缺失");
-        check_eq_f(miss.mouse.aim_profiles[0].gain_px_per_count, 0.0f,
-                   "本档 px/count 缺失 -> 0（未标定，回退腰射 gain）");
-
-        const RuntimeProfile neg = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"gain_px_per_count":-1.2}]}})",
-            "本档 px/count 负数");
-        check_eq_f(neg.mouse.aim_profiles[0].gain_px_per_count, 0.0f,
-                   "本档 px/count 负数 -> 0（防抖动被反向扣除）");
-
-        const RuntimeProfile ok = from_text(
-            R"({"mouse":{"enabled":true,"aim_profiles":[{"hotkey":8,"gain_px_per_count":0.343}]}})",
-            "本档 px/count 正常");
-        check_eq_f(ok.mouse.aim_profiles[0].gain_px_per_count, 0.343f,
-                   "本档 px/count 正常值往返一致");
+        // 写回也不该再产出这两个键 —— 否则面板/外部工具会以为这个功能还在。
+        const JsonValue j = legacy.to_json();
+        const JsonValue* mm = j.find("mouse");
+        const JsonValue* aps = (mm && mm->is_object()) ? mm->find("aim_profiles") : nullptr;
+        check(aps && aps->is_array() && aps->as_array().size() == 1, "写回：档数组仍在");
+        if (aps && aps->is_array() && !aps->as_array().empty()) {
+            const JsonValue& ap0 = aps->as_array()[0];
+            check(!ap0.find("zoom_scale"), "写回：不再输出 zoom_scale");
+            check(!ap0.find("gain_px_per_count"), "写回：不再输出 gain_px_per_count");
+        }
     }
 
     if (g_fails == 0) std::printf("test_aim_profiles: PASS\n");

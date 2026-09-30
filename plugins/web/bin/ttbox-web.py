@@ -1066,13 +1066,9 @@ def normalize_profile_capture_size(prof: dict) -> dict:
 # 取 0.1 ⇒ 半径 = 0.05 × 内接圆（板端 640 截取 ⇒ 32px），仍可用且合法。
 FOV_FACTOR_MIN = 0.1
 
-# V3 阶段 2（2026-09-28）：倍镜**真实放大倍率**的合法区间。
-# 腰射 = 1.0（下限，也是默认值）。上限 20 覆盖到 15 倍镜（真实 ≈ 1.44 × 15 ≈ 21.6，
-# 取 20 是留余量又不至于让分母大到把误差压成 0）。
-ZOOM_SCALE_MIN = 1.0
-ZOOM_SCALE_MAX = 20.0
-# V3 阶段 5：本档 px/count 上限（腰射实测 ≈0.7，给到 20 足够覆盖高倍镜 × 高灵敏度）
-GAIN_PX_PER_COUNT_MAX = 20.0
+# V1.0.12（2026-09-30）：ZOOM_SCALE_MIN/MAX 与 GAIN_PX_PER_COUNT_MAX 已删。
+# 业主口径「不区分倍镜，靠压枪和自瞄把准星拉回目标身上」⇒ 本档不再有"倍镜真实倍率"，
+# 也没有"本档 px/count"。旧配置里出现这两个键由 core 侧静默忽略。
 
 
 def _fov_factor_clamp(v, default=1.0) -> float:
@@ -1098,40 +1094,6 @@ def _fov_radius_to_factor(radius, enabled=True) -> float:
         return _fov_factor_clamp(float(radius) * 2.0)
     except (TypeError, ValueError):
         return 1.0
-
-
-def _zoom_scale_clamp(v, default=1.0) -> float:
-    """V3 阶段 2：把「倍镜真实放大倍率」夹到 [ZOOM_SCALE_MIN, ZOOM_SCALE_MAX]。
-
-    语义与 fov_scale **相反**：fov 是 [MIN, 1.0] 的"截取倍率"（越小看得越窄），
-    zoom 是 [1.0, MAX] 的"放大倍率"（腰射 = 1.0，越大越要压增益）。
-    非数值 / NaN / 越界一律回退 default（腰射），保证 core 侧分母永远 > 0。
-    """
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return default
-    if f != f:  # NaN
-        return default
-    return max(ZOOM_SCALE_MIN, min(ZOOM_SCALE_MAX, f))
-
-
-def _gain_px_per_count_clamp(v, default=0.0) -> float:
-    """V3 阶段 5：本档实测 px/count（鼠标 1 count = 画面多少 px）。
-
-    0 = 还没测过 ⇒ core 回退 mouse.gain_y_px_per_count（腰射值）。
-    ★ 必须按倍镜各测一次：px/count 随 f × ADS 系数变，腰射 0.695 在 6 倍镜下不成立。
-    负值 / NaN 一律回退 0（拿负数换算会把抖动扣成反向，比不扣更糟）。
-    """
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return default
-    if f != f:  # NaN
-        return default
-    if f < 0.0:
-        return default
-    return min(GAIN_PX_PER_COUNT_MAX, f)
 
 
 # ---- 瞄准档位（多热键，2026-09-24）----
@@ -1168,12 +1130,7 @@ def _aim_profile_core_dict(p: dict) -> dict:
         out['sensitivity'] = p['sensitivity']
     if p.get('fov_scale') is not None:
         out['fov_scale'] = _fov_factor_clamp(p['fov_scale'])
-    # V3 阶段 2：倍镜真实放大倍率（core 拿它当误差分母）。1.0 = 腰射 = 不折算。
-    if p.get('zoom_scale') is not None:
-        out['zoom_scale'] = _zoom_scale_clamp(p['zoom_scale'])
-    # V3 阶段 5：本档实测 px/count（前馈换算用）。0 = 没测过 ⇒ 回退腰射 gain_y。
-    if p.get('gain_px_per_count') is not None:
-        out['gain_px_per_count'] = _gain_px_per_count_clamp(p['gain_px_per_count'])
+    # V1.0.12（2026-09-30）：zoom_scale / gain_px_per_count 不再透传给 core（不区分倍镜）。
     mask = p.get('class_filter_mask')
     if mask is not None:
         m = int(mask or 0)
@@ -1588,10 +1545,6 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
                 'hotkey_mode': _hotkey_mode_to_web(j.get('hotkey_mode', 'any')),
                 'sensitivity': j.get('sensitivity', 1.0),
                 'fov_scale': j.get('fov_scale', 1.0),
-                # V3 阶段 2：倍镜真实放大倍率（1.0 = 腰射）
-                'zoom_scale': j.get('zoom_scale', 1.0),
-                # V3 阶段 5：本档实测 px/count（0 = 没测过 ⇒ 回退腰射 gain）
-                'gain_px_per_count': j.get('gain_px_per_count', 0.0),
                 'offset_x': ox,
                 'offset_y': oy,
                 'alternate_offset_x': ox,
@@ -1609,8 +1562,6 @@ def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
         'hotkey_mode': _hotkey_mode_to_web(mouse.get('aim_hotkey_mode', 'any')),
         'sensitivity': 1.0,
         'fov_scale': 1.0,
-        'zoom_scale': 1.0,
-        'gain_px_per_count': 0.0,
         'offset_x': mouse.get('offset_x', 0.5),
         'offset_y': mouse.get('offset_y', 0.5),
         'alternate_offset_x': mouse.get('offset_x', 0.5),
@@ -4192,18 +4143,9 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
             delay_ms = float(calib.get('mouse_response_delay_ms') or 0)
             if delay_ms > 0:
                 mo['response_delay_ms'] = round(delay_ms, 2)
-            # V3 阶段 5：倍镜下的 px/count 是**按档**的（腰射值在倍镜下不成立）。
-            #   标定时选了哪一档，就把这次测到的 gain 写进那一档的 gain_px_per_count。
-            #   scope_index < 0（默认）= 只写全局 gain，不动任何档。
-            scope_index = int(calib.get('scope_index', -1) or -1)
+            # V1.0.12（2026-09-30）：原先"把 gain 写进指定档位的 gain_px_per_count"已删
+            #   （不区分倍镜 ⇒ 不存在"本档 px/count"）。标定结果只写全局 gain（腰射口径）。
             wrote_scope = ''
-            if scope_index >= 0:
-                aps = mo.get('aim_profiles')
-                if isinstance(aps, list) and scope_index < len(aps):
-                    aps[scope_index]['gain_px_per_count'] = round(gain_y, 4)
-                    wrote_scope = f"，并写入档位 #{scope_index + 1}"
-                else:
-                    wrote_scope = '（档位序号越界，只写了全局）'
             r = ipc_request('SET_CONFIG', {'profile': prof})
         ok = r.get('status') == 0
         return ok, (r.get('error', '配置已更新') + wrote_scope)
@@ -4542,8 +4484,6 @@ def _calib_worker() -> None:
             'model_id': _read_active_model(),
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
-            # V3 阶段 5：这次标定要写进哪个倍镜档（-1 = 只写全局）
-            'scope_index': int(_cal.get('scope_index', -1) or -1),
         }
         # 自动调参：按实测 gain/延迟 + 当前 smooth 推导 KP/KD/predict（pid1 体系，见
         # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
@@ -4757,14 +4697,8 @@ def start_auto_calibration():
         return jsonify({'ok': False, 'error': '推理服务未运行或目标反馈未就绪（请先启动推理）'}), 400
     if _calib_target() is None:
         return jsonify({'ok': False, 'error': '未识别到目标，无法开始标定（请将准星对准画面中的目标，等待检测框稳定出现）'}), 400
-    # V3 阶段 5：倍镜下的 px/count 必须按档各测一次 ⇒ 允许指定"这次标定写进哪一档"。
-    # body: {"scope_index": N}，N 从 0 起；缺省/负数 = 只写全局 gain（腰射）。
-    body = request.get_json(silent=True) or {}
-    try:
-        scope_index = int(body.get('scope_index', -1))
-    except (TypeError, ValueError):
-        scope_index = -1
-    _calib_set(scope_index=scope_index)
+    # V1.0.12（2026-09-30）：不再接受 scope_index —— 不区分倍镜，标定只写全局 gain。
+    # 老面板若仍带这个字段，直接忽略（不报错，保持向后兼容）。
     th = threading.Thread(target=_calib_thread_entry, daemon=True)
     with _cal_lock:
         _cal['thread'] = th

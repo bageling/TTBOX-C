@@ -463,7 +463,7 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     // V3 阶段5：抖动前馈扣除（默认关，这里显式打开验证往返）
     p.mouse.jitter_feedforward.enabled = true;
     p.mouse.jitter_feedforward.delay_ms = 0.0f;          // 0 = 用 response_delay_ms
-    p.mouse.jitter_feedforward.gain_px_per_count = 0.0f; // 0 = 用热键档 / 腰射 gain
+    p.mouse.jitter_feedforward.gain_px_per_count = 0.0f; // V1.0.12 起 0 = 用 mouse.gain_y（热键档 gain 已删）
     p.mouse.jitter_feedforward.scale = 0.8f;
     p.mouse.jitter_feedforward.max_px = 25.0f;
     p.mouse.aim_point.aim_offset_x = 12.0f;

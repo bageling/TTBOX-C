@@ -25,9 +25,8 @@
   gain_x=0.686 / gain_y=0.695 px/count      @144fps
   response_delay = 51ms（渲染→采集→推理→注入→游戏应用→再采集）
 
-★ V3 第五轮修正：gain 跟倍镜走（px/count = 每 count 转角 × f），倍镜下 f 涨 ⇒ gain 同步涨。
-  本文件用 zoom_scale 显式缩放 gain（也同步缩放初始误差/目标速度），保证"同一物理场景、
-  不同倍镜"的仿真成立。
+★ V1.0.12（2026-09-30）：原先用 zoom_scale 模拟"同一物理场景、不同倍镜"的那个维度已删
+  （业主口径：不区分倍镜）。gain 只有一套（腰射标定值），仿真不再有倍镜轴。
 
 两种输出模式（对应 V3 阶段 3b 的改动）
 --------------------------------------
@@ -80,11 +79,6 @@ class Plant:
     box_jump_px: float = 0.0          # 每 N 帧的框跳变（低置信度抖动）
     box_jump_every: int = 20
     target_speed_px_s: float = 0.0    # 目标匀速横向移动（px/s）；0 = 静止靶
-    zoom_scale: float = 1.0           # 倍镜：gain 与画面像素同比缩放（V3 第五轮）
-
-    def effective_gain(self) -> float:
-        """倍镜下 gain 跟 f 走（px/count = 每 count 转角 × f）。"""
-        return self.gain_px_per_count * self.zoom_scale
 
 
 @dataclass
@@ -144,12 +138,11 @@ def run_closed_loop(
     nd = _rng(ctl.seed)
     pid = Pid1(ctl.kp, ctl.kd, ctl.predict, ctl.rate, ctl.smooth)
 
-    g = plant.effective_gain()
+    g = plant.gain_px_per_count
     delay_frames = max(0, int(round(plant.response_delay_ms / plant.frame_ms)))
     px_queue: list[float] = [0.0] * delay_frames
 
-    # 同一物理场景在不同倍镜下：画面像素随 f 缩放，初始误差/目标速度同比例放大
-    err = initial_error_px * plant.zoom_scale
+    err = initial_error_px
     remainder = 0.0
     errors: list[float] = []
     outputs: list[float] = []
@@ -160,12 +153,9 @@ def run_closed_loop(
         if plant.detect_noise_px:
             observed += (nd() * 2.0 - 1.0) * plant.detect_noise_px
         if plant.box_jump_px and plant.box_jump_every and i % plant.box_jump_every == 0:
-            observed += (nd() * 2.0 - 1.0) * plant.box_jump_px * plant.zoom_scale
+            observed += (nd() * 2.0 - 1.0) * plant.box_jump_px
 
-        # --- 控制器：PID 输出在 count 域 ---
-        # ★ 这里刻意**不**做 zoom 折算：当前板端按像素工作，倍镜下画面像素已同比放大
-        #   （observed 含 zoom），而 kp 不变 ⇒ 输出天然被放大 zoom 倍——这正是 V3 阶段 2
-        #   要修的「6x 镜下过冲 6 倍」，仿真必须如实复现。
+        # --- 控制器：PID 输出在 count 域。误差不做任何倍率折算（V1.0.12 起不区分倍镜）---
         u_count = pid.upd(observed)
 
         # --- 输出尾链（V3 阶段 3b 的唯一差别就在这里）---
@@ -190,7 +180,7 @@ def run_closed_loop(
         applied = px_queue.pop(0)
         err -= applied
         if plant.target_speed_px_s:
-            err -= plant.target_speed_px_s * plant.zoom_scale * (plant.frame_ms / 1000.0)
+            err -= plant.target_speed_px_s * (plant.frame_ms / 1000.0)
         errors.append(err)
 
     # ---- 稳态指标（取最后 settle_window 帧）----
@@ -223,30 +213,29 @@ def compare_modes(plant: Plant, ctl: Controller, **kw) -> dict:
     return {
         "legacy": ml.as_dict(),
         "accum": ma.as_dict(),
-        "gain_px_per_count": plant.effective_gain(),
-        "quantization_px": plant.effective_gain(),  # 1 count 对应的最小位移＝量化下限
+        "gain_px_per_count": plant.gain_px_per_count,
+        "quantization_px": plant.gain_px_per_count,  # 1 count 对应的最小位移＝量化下限
     }
 
 
 SCAN_GRID = [
-    # (tag, kp, kd, predict, rate, smooth, deadzone, zoom, target_speed, box_jump)
-    ("腰射 静止靶", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 1.0, 0.0, 0.0),
-    ("腰射 移动60px/s", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 1.0, 60.0, 0.0),
-    ("腰射 框跳±18px", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 1.0, 0.0, 18.0),
-    ("6x镜 静止靶", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 6.07, 0.0, 0.0),
-    ("6x镜 移动60px/s", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 6.07, 60.0, 0.0),
+    # (tag, kp, kd, predict, rate, smooth, deadzone, target_speed, box_jump)
+    # V1.0.12（2026-09-30）：原先前两行开头的「6x镜」两组已随倍镜维度一并删除（不区分倍镜）。
+    ("静止靶", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 0.0, 0.0),
+    ("移动60px/s", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 60.0, 0.0),
+    ("框跳±18px", KP_NOMINAL, KD_NOMINAL, 0.35 - RESPONSE_DELAY_MS / 300.0, 0.3, SMOOTH_DEFAULT, 1.0, 0.0, 18.0),
 ]
 
 
 def scan(verbose: bool = True) -> list[dict]:
     """多场景扫描（V3 阶段 0 要求：参考 VisionForge 27 组思路）。
 
-    当前先覆盖最有代表性的 5 组：静止靶/移动目标/框抖 × 腰射/6x 镜。
-    需要更宽生效域时按 GRID 扩展即可，接口不变。
+    覆盖最有代表性的三组：静止靶 / 移动目标 / 框抖。
+    需要更宽生效域时按 SCAN_GRID 扩展即可，接口不变。
     """
     rows = []
-    for tag, kp, kd, pr, rt, sm, dz, zoom, spd, jump in SCAN_GRID:
-        plant = Plant(zoom_scale=zoom, target_speed_px_s=spd, box_jump_px=jump)
+    for tag, kp, kd, pr, rt, sm, dz, spd, jump in SCAN_GRID:
+        plant = Plant(target_speed_px_s=spd, box_jump_px=jump)
         ctl = Controller(kp=kp, kd=kd, predict=pr, rate=rt, smooth=sm, deadzone_count=dz)
         r = compare_modes(plant, ctl)
         rows.append({"scene": tag, **r})
@@ -261,7 +250,13 @@ def scan(verbose: bool = True) -> list[dict]:
 
 
 def check_assertions(rows: list[dict]) -> list[str]:
-    """内置断言：阶段 3b 是否真的达成（用于 CI/改动前后回归检查）。"""
+    """内置断言：阶段 3b 是否真的达成（用于 CI/改动前后回归检查）。
+
+    ★ 已知：断言 2（"稳态必须收敛到 2 count 量化级"）只对**静止靶**成立。
+      纯 P 控制器跟匀速目标必然留 v/Kp_eff 的稳态误差，与死区/余数无关 ——
+      "移动60px/s" 那行长期报这一条（2026-09-30 复核：改动前后同样报，不是回归）。
+      要消掉它得先给控制器加积分项或速度前馈，不在本工具职责内，故保留原样。
+    """
     fails = []
     for row in rows:
         scene = row["scene"]
@@ -286,20 +281,19 @@ def main() -> int:
                     help="跑内置断言，任一失败则退出码非 0")
     ap.add_argument("--json", action="store_true", help="以 JSON 输出，便于存档/diff")
     ap.add_argument("--mode", default=None, choices=["legacy", "accum"], help="只跑单一模式")
-    ap.add_argument("--zoom", type=float, default=1.0, help="倍镜焦距缩放（gain 同比）")
     args = ap.parse_args()
 
     if args.mode:
-        plant = Plant(zoom_scale=args.zoom)
+        plant = Plant()
         ctl = Controller(mode=args.mode)
         m, _, _ = run_closed_loop(plant, ctl)
-        payload = {"mode": args.mode, "zoom": args.zoom, **m.as_dict()}
+        payload = {"mode": args.mode, **m.as_dict()}
         print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json
-              else f"mode={args.mode} zoom={args.zoom} 稳态={m.settle_median_px:.2f}px "
+              else f"mode={args.mode} 稳态={m.settle_median_px:.2f}px "
                    f"p75={m.settle_p75_px:.2f}px max={m.settle_max_px:.2f}px 振荡={'Y' if m.oscillating else 'N'}")
         return 0
 
-    print("闭环 replay：腰射/倍镜 × 静止/移动/框跳（同一物理场景，gain 随倍镜缩放）")
+    print("闭环 replay：静止/移动/框跳（gain 只有一套腰射标定值，不区分倍镜）")
     rows = scan(verbose=not args.json)
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))

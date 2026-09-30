@@ -559,22 +559,21 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             const Candidate* chosen = &cands.front();  // 已按（优先级, 距离）排序
             if (cfg.priority_scoring) {
                 // raw = distScore×w_dist + sizeScore×w_size + stick×0.5
-                //   distScore = 1/(1 + (dist/M)/dist_ref)      —— M = 本档倍镜真实倍率
-                //   sizeScore = min(1, sqrt((w/M)×(h/M))/size_ref)
+                //   distScore = 1/(1 + dist/dist_ref)
+                //   sizeScore = min(1, sqrt(w×h)/size_ref)
                 //   stick = distLast<threshold ? (1-distLast/threshold)×stickiness : 0
-                // ★ V3 阶段 4（2026-09-28）：两项都先除以 M，归一到**腰射等效量纲**。
-                //   尺寸项同时由 面积/10000 改为 sqrt(面积)/参考边长 —— 原式在 640 窗口
-                //   里 2 倍镜起就全部撞顶（实测 70×243=17086 ≫ 10000），等于没配。
-                //   M=1.0（腰射/未配倍率）时 distScore 与旧式逐位相同。
-                const float m = (cfg.zoom_scale > 0.0f) ? cfg.zoom_scale : 1.0f;
+                // ★ V3 阶段 4（2026-09-28）：尺寸项由 面积/10000 改为 sqrt(面积)/参考边长 ——
+                //   原式在 640 窗口里 2 倍镜起就全部撞顶（实测 70×243=17086 ≫ 10000），等于没配。
+                // ★ V1.0.12（2026-09-30）：原先两项都除以本档倍镜倍率 M，已按业主口径删除
+                //   （不区分倍镜）。打分回到像素原值，所有档位共用一套权重。
                 const float dref = (cfg.dist_ref_px > 0.0f) ? cfg.dist_ref_px : 100.0f;
                 const float sref = (cfg.size_ref_px > 0.0f) ? cfg.size_ref_px : 320.0f;
                 float best_score = -1e30f;
                 for (const auto& cand : cands) {
-                    const float dist = std::sqrt(cand.dist_sq) / m;
+                    const float dist = std::sqrt(cand.dist_sq);
                     const float dist_score = dist > 0.0f ? 1.0f / (1.0f + dist / dref) : 0.0f;
-                    const float bw = (cand.box.x2 - cand.box.x1) / m;
-                    const float bh = (cand.box.y2 - cand.box.y1) / m;
+                    const float bw = cand.box.x2 - cand.box.x1;
+                    const float bh = cand.box.y2 - cand.box.y1;
                     // fmax(0,·)：异常框（坐标倒置）会让 sqrt 吃到负数 ⇒ NaN 污染整轮打分
                     const float size_score = std::fmin(1.0f, std::sqrt(std::fmax(0.0f, bw * bh)) / sref);
                     float stick = 0.0f;

@@ -211,10 +211,10 @@ void test_default_is_noop() {
     ttbox::core::aim::MouseProfile mp;  // 默认档
     check(!mp.jitter_feedforward.enabled, "jitter_feedforward 默认关");
     check(mp.aim_profiles.empty() || true, "默认档位不受影响");
-    // 默认档位里的 gain_px_per_count 必须是 0（=没测过，回退腰射）
-    for (const auto& ap : mp.aim_profiles) {
-        check(ap.gain_px_per_count == 0.0f, "热键档 gain_px_per_count 默认 0（未标定）");
-    }
+    // V1.0.12（2026-09-30）：热键档 gain_px_per_count 已删（不区分倍镜）⇒ 前馈换算只剩
+    // 两级回退：jitter_feedforward.gain_px_per_count → mouse.gain_y_px_per_count（腰射）。
+    check(mp.jitter_feedforward.gain_px_per_count == 0.0f,
+          "jitter_feedforward.gain_px_per_count 默认 0（回退腰射 gain_y）");
 }
 }  // namespace
 

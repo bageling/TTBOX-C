@@ -11,11 +11,15 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言对应关系。
-# ★ 2026-09-30 起产品版本为 "V1.0.11"（带字母前缀，原因见 version.hpp 注释）；
+# ★ 2026-09-30 起产品版本为 "V1.0.12"（带字母前缀，原因见 version.hpp 注释）；
 #   CMake 的 project VERSION 只解析数字 ⇒ 这里写**去掉字母前缀的数字镜像**，
 #   门禁 ⑥ 的判据 = 「kCoreVersion 去掉前导字母 == 本行」。出货包名/版本串取自 version.hpp。
 #   V1.0.11 相对 V1.0.10：选靶照 yu 加量测跳变门控（拒绝坏量测，沿用上一帧）＋ continuity 免重置＋ 切靶确认窗＋ 开火期禁切靶。
-project(ttbox_core VERSION 1.0.11 LANGUAGES CXX)
+#   V1.0.12 相对 V1.0.11：按业主口径「系统太臃肿、参考物太多导致功能紊乱」做**减法** ——
+#                      彻底拆掉「按倍镜区分」：AimHotkeyProfile::{zoom_scale, gain_px_per_count}、
+#                      TargetSelectorConfig::zoom_scale、PID 误差的 /zoom 归一、面板两控件全删；
+#                      旧配置出现这些键一律**静默忽略**（等价 1.0/0，与删除前行为一致）。
+project(ttbox_core VERSION 1.0.12 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
