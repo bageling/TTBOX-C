@@ -6,7 +6,9 @@
 #   再原子改名，才是"就地改原图"的正确姿势：要么成品就位，要么原图原封不动。
 set -euo pipefail
 WORK="${WORK:-/root/ttbox-image/work.img}"
-DST="${DST:-/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64-orangepi-5-plus.img}"
+# ★ 回写目标是本机私有路径，刻意不给默认值（用 DST=<xxx.img> 传）。
+DST="${DST:-}"
+[ -n "$DST" ] || { echo "需指定回写目标：DST=<xxx.img>" >&2; exit 1; }
 TMP="${DST}.new"
 
 echo "== 0. 前置检查 =="

@@ -38,7 +38,7 @@ class ProcessPluginRuntime(PluginRuntime):
                 self.process.wait(timeout=self._stop_timeout)
             except subprocess.TimeoutExpired:
                 # ★ 忽略 SIGTERM 的子进程不能就此泄漏：升级 SIGKILL（对照
-                # platform/runtime/process_adapter.py 的做法），否则进程带 fd/端口/子线程
+                # ttbox_platform/runtime/process_adapter.py 的做法），否则进程带 fd/端口/子线程
                 # 残留，同一插件再 start 会双实例。
                 self.process.kill()
                 self.process.wait(timeout=10)

@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+ROOT = Path(_ttbox_repo_root())
 WEB_PLUGIN = ROOT / "plugins" / "web"
 
 

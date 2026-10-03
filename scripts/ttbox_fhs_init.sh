@@ -35,7 +35,7 @@ trap cleanup_payload EXIT
 echo "== TTBOX FHS 初始化（幂等）=="
 echo "仓库根: ${REPO_ROOT}"
 
-# ---- 1. 系统用户/组（与 platform/supervisor/README.md 约定一致）----
+# ---- 1. 系统用户/组（与 ttbox_platform/supervisor/README.md 约定一致）----
 if ! getent group ttbox >/dev/null; then
     groupadd --system ttbox
     echo "  [+] 创建系统组 ttbox"
@@ -272,8 +272,40 @@ tcopy() {
     mkdir -p -- "$dst"
     # E02（2026-09-18）：tests/ 不进出货包 —— 这是 payload 侧唯一口径，
     # install 侧 TAR_EXCLUDES 与此镜像（改口径两处一起改）。
-    tar -C "$src" --exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests -cf - . \
+    # P8（2026-10-01）补 .registry.json：插件注册表是**运行期状态**，由 PluginRegistry
+    # 在 <plugins_root>/.registry.json 现场生成、内含绝对路径（实测泄漏过一条 dev 树
+    # 路径进 payload）。剔除集三处同一口径：本文件 / ttbox_pack_ota.sh /
+    # ttbox_release_install.sh::TAR_EXCLUDES。
+    tar -C "$src" --exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests \
+        --exclude=.registry.json -cf - . \
         | tar -C "$dst" -xf -
+}
+
+# ── 出货清单解析（双列 <源路径> -> <目标路径>）────────────────────────────────
+# 语法与规则见 deploy/pack_manifest.txt 头注释。
+# ★ 本套语义必须与 scripts/ttbox_pack_ota.sh 里的 parse_entry / map_target 完全一致
+#   （装机树与 OTA 包读同一份清单，口径不一致 = 两者出货树不一样）。改一处必须改两处。
+manifest_fail() { echo "  [✗] $*" >&2; exit 1; }
+
+manifest_parse_entry() {   # $1 = 清单原始行；解析成全局 SRC / DST；返回 1 = 空行或注释
+    local entry="$1" left right
+    case "$entry" in ''|'#'*) return 1 ;; esac
+    left="${entry%% -> *}"; right="${entry#* -> }"
+    [ "$right" != "$entry" ] || manifest_fail "清单行缺 ' -> ' 分隔符：${entry}"
+    case "$right" in *' -> '*) manifest_fail "清单行含多处 ' -> '：${entry}" ;; esac
+    SRC="${left%"${left##*[![:space:]]}"}";  SRC="${SRC#"${SRC%%[![:space:]]*}"}"
+    DST="${right%"${right##*[![:space:]]}"}"; DST="${DST#"${DST%%[![:space:]]*}"}"
+    case "$SRC" in ''|*[[:space:]]*|/*|*..*) manifest_fail "清单源路径非法（空/含空白/绝对路径/含 ..）：${entry}" ;; esac
+    case "$DST" in ''|*[[:space:]]*|/*|*..*) manifest_fail "清单目标路径非法（空/含空白/绝对路径/含 ..）：${entry}" ;; esac
+    case "$SRC" in
+        *'*'*) case "$DST" in */) ;; *) manifest_fail "源含通配符时目标必须是目录前缀（以 / 结尾）：${entry}" ;; esac ;;
+        *)     case "$DST" in */) manifest_fail "精确源的落点不得以 / 结尾：${entry}" ;; esac ;;
+    esac
+    return 0
+}
+
+manifest_map_target() {   # $1 = 源的仓库根相对路径（已 glob 展开）；回显映射后的落点
+    case "$DST" in */) printf '%s%s' "$DST" "$(basename "$1")" ;; *) printf '%s' "$DST" ;; esac
 }
 
 # 生成 RELEASE_MANIFEST.json（全量 sha256；T1.01 的 install 依赖它做完整性校验）。
@@ -425,55 +457,50 @@ sync_tree() {
         exit 1
     }
 
-    # ---- 白名单单一真源：deploy/pack_manifest.txt（S3 / 2026-09-19 交付方案批 1）----
-    # sync_tree（首次装机）与 scripts/ttbox_pack_ota.sh（OTA 打包）读同一份清单，
-    # 改清单一处、装机树与出货包一起变。此前装机走本函数硬编码清单、而 OTA 包
-    # 是手工整树 tar，两套口径无机制保证一致 ⇒ 1.4.7 出货树 368 文件混入
-    # docs(123)/tools(8)/platform(25)/modules(10)。现收敛为单一真源。
-    # 条目语义见清单头注释：目录=tcopy 整树；文件/glob=install（.sh/.py=0755，余 0644）。
+    # ---- 白名单单一真源：deploy/pack_manifest.txt（双列：源路径 → 目标路径）----
+    # sync_tree（首次装机）与 scripts/ttbox_pack_ota.sh（OTA 打包）读同一份清单、
+    # 用同一套语义（本文件 manifest_parse_entry / manifest_map_target ↔ 那边
+    # parse_entry / map_target）—— 改清单一处、装机树与出货包一起变。
+    # 历史：此前装机走本函数硬编码清单、而 OTA 包是手工整树 tar，两套口径无机制保证
+    # 一致 ⇒ 1.4.7 出货树 368 文件混入 docs(123)/tools(8)/platform(25)/modules(10)。
+    # 条目语义见清单头注释：源=目录 → tcopy 整树（允许改名落点）；
+    #   源=文件/glob → install（.sh/.py=0755，余 0644），glob 落到「目标目录前缀 + 文件名」。
     # bin/ 与 lib/ 属构建产物，不进清单（上方已按闭集规则安装）。
     local manifest="${REPO_ROOT}/deploy/pack_manifest.txt"
     if [ ! -f "$manifest" ]; then
         echo "  [✗] 缺打包白名单 ${manifest} —— 中止" >&2
         exit 1
     fi
-    local entry src rel mode
+    local entry src rel tgt mode matched
     while IFS= read -r entry <&3; do
-        case "$entry" in ''|'#'*) continue ;; esac
-        case "$entry" in
-            *[[:space:]]*)
-                echo "  [✗] 白名单条目含空白：${entry}" >&2; exit 1 ;;
-        esac
-        # ★ $entry 必须裸奔（不加引号）glob 才会展开；REPO_ROOT 引号保留防分词
-        for src in "${REPO_ROOT}"/$entry; do
-            if [ ! -e "$src" ]; then
-                echo "  [✗] 白名单条目不存在（或 glob 展开为空）：${entry}" >&2
-                exit 1
-            fi
-            rel="${src#${REPO_ROOT}/}"   # glob 展开后的真实相对路径，不能拿原串当目标
+        manifest_parse_entry "$entry" || continue
+        matched=0
+        # ★ $SRC 必须裸奔（不加引号）glob 才会展开；REPO_ROOT 引号保留防分词
+        for src in "${REPO_ROOT}"/$SRC; do
+            [ -e "$src" ] || break   # glob 未匹配 → 原样字面量 → 视为条目失效
+            matched=1
+            rel="${src#${REPO_ROOT}/}"
+            tgt="$(manifest_map_target "$rel")"
             if [ -d "$src" ]; then
-                tcopy "$src" "${payload}/${rel}"
+                tcopy "$src" "${payload}/${tgt}"
             else
                 mode=0644
                 case "$src" in *.sh|*.py) mode=0755 ;; esac
-                install -D -m "$mode" "$src" "${payload}/${rel}"
+                install -D -m "$mode" "$src" "${payload}/${tgt}"
             fi
         done
+        [ "$matched" = 1 ] || manifest_fail "清单源路径不存在（或 glob 展开为空）：${entry}"
     done 3< "$manifest"
 
-    # ---- 清单后的定向修剪/修正（只做减法或权限修正，不新增文件）----
-    # plugins/：★ 2026-09-17 板端实测订正：web 的 framework_api.py
-    #   `from plugins.system_host import SystemPluginHost`（以及 system_common / fan / wifi 等
-    #   顶层模块与子包）——只拷 web/preview 两个子目录会让 release 树里 `plugins` 包残缺，
-    #   web 启动即 ModuleNotFoundError。bin/ 闭集（A7）不受影响（那是 bin/ 的白名单）。
-    #   S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包；
-    #     2026-09-24 面板收敛后两者都从仓库删除（源头不再存在，下面两行 rm 仅作兜底，
-    #     防陈旧工作树/旧清单又把它们带进 payload）。
-    #     api_v1.py / framework_api.py：死路由，且 ttbox-web.py 已同步摘除注册点；
-    #     static/legacy：740K 旧面板资产，现役 index.html 自包含零引用。
-    rm -f "${payload}/plugins/web/api_v1.py" \
-          "${payload}/plugins/web/framework_api.py"
-    rm -rf "${payload}/plugins/web/static/legacy"
+    # ---- 清单后【只做权限修正】，不做任何增删文件（P1-2026-10-01：取消交付减法结构）----
+    # 原先这里剪掉 plugins/web/{api_v1.py,framework_api.py,static/legacy} 三条路径，
+    # 那属于「出货减法」结构（S1-2026-09-18 / A0-3c·A0-3d）—— 该结构已取消：
+    # 出货树 = 清单映射结果 + bin/lib 两个构建产物，脚本不再对 payload 做减法。
+    # 要把某个文件挡在包外，唯一办法是让它不出现在任何清单条目的源里。
+    # ★ 「整包拷 plugins」这条仍然成立（2026-09-17 板端实测订正）：web 侧有
+    #   `from plugins.system_host import SystemPluginHost`（以及 system_common / fan /
+    #   wifi 等顶层模块与子包）——只拷 web/preview 两个子目录会让 release 树里
+    #   `plugins` 包残缺，web 启动即 ModuleNotFoundError。bin/ 闭集（A7）不受影响。
 
     # usbproxy/：预编译 ELF（DEP-04④）
     # ★ 2026-09-17 板端实测订正：预编译 ELF `usb-proxy` 无 shebang ⇒ MSYS/Git-Bash 判定其

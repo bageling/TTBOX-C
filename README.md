@@ -131,7 +131,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 > 板端**不编译源码**。换 core 二进制走正规发布链（`scripts/ttbox_build_release.sh` →
 > `scripts/ttbox_pack_ota.sh` → OTA），不要手工往 `/opt/ttbox/current/` 里拷。
 
-系统用户与用户组的约定见 [`platform/supervisor/README.md`](platform/supervisor/README.md)；
+系统用户与用户组的约定见 [`ttbox_platform/supervisor/README.md`](ttbox_platform/supervisor/README.md)；
 板端依赖清单见 [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md)。
 
 ---
@@ -150,7 +150,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ├── framework/          Python 插件管理框架
 ├── ttbox_motion/       运动校准 / 训练
 ├── usbproxy/           自研鼠标注入代理源码（含预编译 ELF）
-├── platform/           V1 实验骨架（未接入运行链路）
+├── ttbox_platform/     平台服务层（supervisor/health/model/runtime）
 ├── image/              出厂整机镜像烘焙链（不进包）
 ├── tools/              离线工具（模型转换 / 许可 / OTA 签发）
 ├── scripts/            构建 / 发布 / 运维脚本 + edid 工具链
@@ -174,7 +174,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 | `scripts/` | 运维脚本 | 构建/发布/运维 + edid 工具链（★FHS 锚定，**不可移动**） | **白名单点名**：`edid/` + `deploy/pack_manifest.txt` 里逐个列出的 `ttbox*.sh` / `ttbox_*.py` |
 | `deploy/` | 部署输入 | systemd 单元 / 出厂配置 / OTA 公钥 / 已启用 HDMI-RX 的 DTB | 仅 `systemd/*.{service,timer,path}` + `config/{00-factory,10-device,hardware_display}.json` + `keys/*.pub` + `dtb/*.dtb` |
 | `config/` | 配置模板 | 开发侧模板（运行期真值在 `/etc/ttbox/config.d/`） | ❌ |
-| `platform/` | 平台骨架 | V1 实验骨架，代码级不可达 | ❌（出厂即不随包，定案 H-26 / S1） |
+| `ttbox_platform/` | 平台服务层 | supervisor / health / model / runtime（P3 由 `platform/` 改名：目录名 = 包名，且不再遮蔽标准库 `platform`） | ✅ 整包 |
 | `image/` | 出厂镜像 | 厂商整机镜像烘焙链（loop 挂载 + chroot 自检） | ❌ |
 | `tools/` | 离线工具 | 模型转换 / 许可签发 / OTA 签名（不在板端跑） | ❌ |
 | `tests/` | 集成测试 | 板端集成 / 监控 / API 验收脚本 | ❌ |
@@ -329,20 +329,20 @@ cmake --build build-ascii -j8
 ctest --test-dir build-ascii --output-on-failure
 
 # Python 侧（必须显式列出三个目录并带 PYTHONPATH=.）
-PYTHONPATH=. python -m pytest framework/tests platform/tests plugins/web/tests -q
+python -m pytest -q   # 裸入口即跑全量：testpaths 已含 framework / ttbox_platform / plugins/web 三套件
 
 # 口径门禁 + 文档链接
 bash scripts/ttbox_conventions_gate.sh
 python docs/check_links.py
 ```
 
-当前状态（2026-09-29 本机实测）：
+当前状态（2026-10-01 本机实测）：
 
 | 套件 | 结果 |
 |---|---|
-| Core CTest（构建目录 `core/build-ascii`） | **39 / 39 passed** |
+| Core CTest（宿主 ASCII 构建目录；仓库内 `core/build-ascii` 为本地构建产物，已 .gitignore） | **41 / 41 passed** |
 | C++ 单测断言（同一产物的汇总行） | **222 passed / 1 skipped / 0 failed** |
-| `framework/tests` + `platform/tests` + `plugins/web/tests`（pytest） | **563 passed** |
+| `framework/tests` + `ttbox_platform/tests` + `plugins/web/tests`（pytest，裸入口） | **582 passed** |
 | `scripts/ttbox_conventions_gate.sh` | **PASS**（退出码 0） |
 | `python docs/check_links.py` | **broken_count=0** |
 
@@ -439,7 +439,7 @@ CMake 的 `project(VERSION)` 只认数字，所以 `core/CMakeLists.txt` 里写�
 | 构建可复现 | [`docs/build/build-reproducibility.md`](docs/build/build-reproducibility.md) |
 | 出货构建留档 | [`docs/build/release-records/`](docs/build/release-records/) |
 | 板端依赖与出货约束 | [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md) |
-| 服务账号约定 | [`platform/supervisor/README.md`](platform/supervisor/README.md) |
+| 服务账号约定 | [`ttbox_platform/supervisor/README.md`](ttbox_platform/supervisor/README.md) |
 | 历史交接 | [`docs/handover/`](docs/handover/) |
 
 > 2026-09-19 一次清理移除了 100 份与代码无关的过程报告与介绍文档（763 KB）。

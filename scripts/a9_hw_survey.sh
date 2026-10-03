@@ -1,16 +1,21 @@
 #!/bin/bash
 # A9 硬件只读调查脚本
 echo "===== USB controller drivers ====="
-for d in fc000000.usb fc400000.usb fc800000.usb fc840000.usb fc880000.usb fc8c0000.usb; do
-  echo "-- $d --"
-  grep -E 'DRIVER|OF_NAME|OF_FULLNAME' /sys/bus/platform/devices/$d/uevent 2>/dev/null
-  ls /sys/bus/platform/devices/$d/ 2>/dev/null | head -12
+# 控制器名不写死（P8）：列举所有 *.usb 平台设备，不硬编码 fc000000/fc400000/… 一套
+for c in /sys/bus/platform/devices/*.usb; do
+  [ -e "$c" ] || continue
+  echo "-- $(basename "$c") --"
+  grep -E 'DRIVER|OF_NAME|OF_FULLNAME' "$c/uevent" 2>/dev/null
+  ls "$c" 2>/dev/null | head -12
 done
 
-echo "===== usbdrd3_0 / usbdrd3_1 ====="
-ls /sys/bus/platform/devices/usbdrd3_0/ 2>&1 | head
-ls /sys/bus/platform/devices/usbdrd3_1/ 2>&1 | head
-cat /sys/bus/platform/devices/usbdrd3_0/uevent 2>/dev/null | grep DRIVER
+echo "===== usbdrd3_* ====="
+for c in /sys/bus/platform/devices/usbdrd3_*; do
+  [ -e "$c" ] || continue
+  echo "-- $(basename "$c") --"
+  ls "$c" 2>&1 | head
+  grep DRIVER "$c/uevent" 2>/dev/null
+done
 
 echo "===== typec ====="
 ls /sys/class/typec 2>&1

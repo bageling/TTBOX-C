@@ -13,8 +13,12 @@
 #   wsl.exe -d Ubuntu-22.04 -- bash "/mnt/g/.../image/v5_verify.sh" 2>&1 | tee /root/ttbox-image/v5-verify.log
 set -uo pipefail
 
-DST="/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64-orangepi-5-plus-V5.img"
-KEYS="/mnt/c/Users/Administrator/ttbox-image-keys"
+# ★ 两个都是本机私有路径，刻意不给默认值（用 DST= / KEYS= 传），
+#   免得下一个人看到一个"看起来像"的路径就以为能直接跑。
+DST="${DST:-}"
+KEYS="${KEYS:-}"
+[ -n "$DST" ]  || { echo "需指定待验镜像：DST=<xxx.img>" >&2; exit 1; }
+[ -n "$KEYS" ] || { echo "需指定密钥目录：KEYS=<dir>（含 root-password.txt）" >&2; exit 1; }
 M="/mnt/v5check"
 PASS="$(cat "$KEYS/root-password.txt")"
 EXP_HK_ED="9ddda0aa622722ce189b6f88dd85c05ab29df4c7313871cc26636ced5854818b"

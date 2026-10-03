@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 只读抽查：出厂镜像的**联网能力**（激活要联网，没网 = 激活页连不上服务器）
 set -u
-IMG="${IMG:-/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64-orangepi-5-plus.img}"
+IMG="${IMG:-${1:-}}"
+[ -n "$IMG" ] && [ -f "$IMG" ] || { echo "需指定镜像：IMG=<xxx.img> 或第一个参数" >&2; exit 1; }
 M="${M:-/mnt/final}"
 mkdir -p "$M"
 LOOP="$(losetup --find --show --partscan "$IMG")"

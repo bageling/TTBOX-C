@@ -11,14 +11,22 @@ done
 echo "== hidg 设备 ==="
 ls -la /dev/hidg* 2>&1
 
-echo "== UDC 状态 =="
-cat /sys/class/udc/fc000000.usb/uevent 2>/dev/null
-cat /sys/class/udc/fc000000.usb/state 2>/dev/null
-cat /sys/class/udc/fc000000.usb/device/current_role 2>/dev/null
+# UDC 名不写死硬件编号（P8）：优先 USB_PROXY_DEVICE，否则 /sys/class/udc 排序首个
+UDC=${USB_PROXY_DEVICE:-$(ls /sys/class/udc 2>/dev/null | sort | head -n1)}
 
-echo "== dwc3 角色 sysfs =="
-ls /sys/bus/platform/devices/fc000000.usb/usb_role/ 2>&1
-cat /sys/bus/platform/devices/fc000000.usb/usb_role/*/role 2>&1
+echo "== UDC 状态 =="
+if [ -z "$UDC" ]; then
+  echo "  (无 UDC：/sys/class/udc 为空)"
+else
+  echo "  udc: $UDC"
+  cat "/sys/class/udc/$UDC/uevent" 2>/dev/null
+  cat "/sys/class/udc/$UDC/state" 2>/dev/null
+  cat "/sys/class/udc/$UDC/device/current_role" 2>/dev/null
+
+  echo "== dwc3 角色 sysfs =="
+  ls "/sys/bus/platform/devices/$UDC/usb_role/" 2>&1
+  cat "/sys/bus/platform/devices/$UDC/usb_role/"*/role 2>&1
+fi
 
 echo "== typec port0 =="
 cat /sys/class/typec/port0/data_role 2>/dev/null

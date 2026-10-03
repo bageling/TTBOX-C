@@ -14,7 +14,16 @@ set -e
 
 GADGET_DIR=/sys/kernel/config/usb_gadget
 GADGET=ttbox-hid
-UDC=fc000000.usb
+# UDC 名不写死硬件编号（P8）：优先 USB_PROXY_DEVICE（与 usbproxy 启动脚本
+# usbproxy/board/run-ttbox-usb-proxy.sh 同一覆盖链，登记于
+# docs/protocols/config-path-env-registry.md），否则取 /sys/class/udc 里名字排序首个。
+# 编号由内核枚举顺序决定，不是板子身份 —— 换内核 / 加控制器就可能移位。
+UDC=${USB_PROXY_DEVICE:-$(ls /sys/class/udc 2>/dev/null | sort | head -n1)}
+if [ -z "$UDC" ]; then
+  echo "[A9] 找不到 USB Device Controller（/sys/class/udc 为空）" >&2
+  echo "     确认 dwc3 已加载、控制器已切到 device 模式；或用 USB_PROXY_DEVICE=<名> 显式指定" >&2
+  exit 1
+fi
 
 # 真实 c53f 各接口 report descriptor（从板端 hidraw ioctl 读取）：
 #   键盘 59B：标准 boot 键盘

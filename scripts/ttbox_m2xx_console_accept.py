@@ -40,13 +40,31 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
+# ── 路径 bootstrap（A-PATH-3）────────────────────────────────────────────────
+# 树根用**锚点发现**确定，不写死目录深度（原 `parents[1]`：换布局即静默指错根）。
+def _ttbox_tree_root() -> Path:
+    cur = Path(__file__).resolve().parent
+    while True:
+        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            return cur
+        if cur.parent == cur:
+            raise RuntimeError(
+                "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
+                "plugins/framework/scripts/deploy 的目录" % __file__
+            )
+        cur = cur.parent
+
+
+_TREE_ROOT = _ttbox_tree_root()
+
 # ===========================================================================
 # 配置（板端默认；可用命令行/环境变量覆盖）
 # ===========================================================================
 WEB_BASE = 'http://127.0.0.1:8000'
 
 # IPC socket / 端口 SSOT：复用同仓 plugins/web/lib/paths.py，不散写字面量（A-PATH-5）。
-sys.path.append(str(Path(__file__).resolve().parents[1] / 'plugins' / 'web'))
+sys.path.append(str(_TREE_ROOT / 'plugins' / 'web'))
 try:
     from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT       # type: ignore
     from lib.paths import WEB_PORT_DEFAULT as _WEB_PORT_DEFAULT    # type: ignore
@@ -464,7 +482,7 @@ def a6() -> None:
 # ===========================================================================
 def a7() -> None:
     desc = 'A7 旧测试全绿（pytest plugins/web/tests/：freeauth 302/403 + brand 9 标签 + grep 门禁）'
-    repo_tests = Path(__file__).resolve().parents[1] / 'plugins' / 'web' / 'tests'
+    repo_tests = _TREE_ROOT / 'plugins' / 'web' / 'tests'
     if not repo_tests.is_dir():
         skip('A7', desc, '板端 release 树无 plugins/web/tests/ ⇒ 请在**仓库树**跑 '
                          '`python -m pytest plugins/web/tests/`')

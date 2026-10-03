@@ -78,7 +78,11 @@ TRANSITIONAL_LINKS=(
 
 # tar 排除项（不依赖 rsync）；E02（2026-09-18）：--exclude=tests 与 fhs_init tcopy 的
 # payload 侧口径镜像，两处一起改。
-TAR_EXCLUDES=(--exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests)
+# P8（2026-10-01）补 --exclude=.registry.json：插件注册表是**运行期状态**（PluginRegistry
+# 在 <plugins_root>/.registry.json 现场生成，内含绝对路径 —— 实测泄漏过一条 dev 树路径进
+# payload）。剔除集三处同一口径：本文件 / ttbox_fhs_init.sh::tcopy / ttbox_pack_ota.sh。
+TAR_EXCLUDES=(--exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests
+              --exclude=.registry.json)
 
 # 记录切换前的版本，供健康检查失败时回切
 PREV_VERSION=""

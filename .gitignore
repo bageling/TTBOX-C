@@ -253,3 +253,13 @@ tools/license/.testkeys/
 # 目录名以点号开头 + 固定日期，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
 # 自检：`git check-ignore -v .archive-2026-09-23/README.md`（期望命中本行）
 /.archive-2026-09-23/
+
+# ---------- P8（2026-10-01）：插件注册表（运行期状态，不入库/不入包）----------
+# `PluginRegistry` 在 `<plugins_root>/.registry.json` 现场生成，内容含**绝对路径**
+# （dev 树实测泄漏过 `/mnt/g/WORKBUDDY工作区/...` 一条进 payload）。它是运行期状态，
+# 不是源码：板端首次运行时自行生成，dev 树不必留。
+# 剔除集三处同一口径：ttbox_pack_ota.sh / ttbox_fhs_init.sh::tcopy /
+# ttbox_release_install.sh::TAR_EXCLUDES；pack 断言 2 亦把它列为禁入物（fail-closed）。
+# 自检：`git check-ignore -v plugins/.registry.json`（期望命中本行）
+.registry.json
+perf-record/

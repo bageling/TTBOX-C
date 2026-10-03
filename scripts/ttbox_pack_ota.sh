@@ -109,37 +109,66 @@ mkdir -p "${PAYLOAD}/bin" "${PAYLOAD}/lib"
 install -m 0755 "$CORE_BIN" "${PAYLOAD}/bin/ttbox_core_main"
 install -m 0644 "$RKNNRT_SO" "${PAYLOAD}/lib/librknnrt.so"
 
-# 白名单循环（与 fhs_init sync_tree 同一语义，改清单两处一起变）
-#   目录条目：tar 整树（剔除 __pycache__/*.pyc/.git/tests，与 tcopy 同一剔除集）
-#   文件/glob 条目：逐个 install 到【展开后的真实相对路径】（不能用 glob 原串当目标）
-#   ★ $entry 必须裸奔（不加引号）才能做 glob 展开；REPO_ROOT 引号保留防分词。
-#     条目自身含空白 = 清单写坏，fail-closed。
-entry="" src="" rel="" mode=""
+# ── 清单解析：双列 <源> -> <目标>（与 fhs_init sync_tree 同一份清单、同一套语义）──
+#   语法与规则见 deploy/pack_manifest.txt 头注释。此处只做解析 + 落点计算，
+#   装配与核对（断言4）共用这两个函数，保证「怎么装」和「怎么查」永远同一口径。
+parse_entry() {   # $1 = 清单原始行；解析成全局 SRC / DST；返回 1 = 空行或注释
+    local entry="$1" left right
+    case "$entry" in ''|'#'*) return 1 ;; esac
+    left="${entry%% -> *}"; right="${entry#* -> }"
+    [ "$right" != "$entry" ] || die "清单行缺 ' -> ' 分隔符: ${entry}"
+    case "$right" in *' -> '*) die "清单行含多处 ' -> ': ${entry}" ;; esac
+    SRC="${left%"${left##*[![:space:]]}"}";  SRC="${SRC#"${SRC%%[![:space:]]*}"}"
+    DST="${right%"${right##*[![:space:]]}"}"; DST="${DST#"${DST%%[![:space:]]*}"}"
+    case "$SRC" in ''|*[[:space:]]*|/*|*..*) die "源路径非法（空/含空白/绝对路径/含 ..）: ${entry}" ;; esac
+    case "$DST" in ''|*[[:space:]]*|/*|*..*) die "目标路径非法（空/含空白/绝对路径/含 ..）: ${entry}" ;; esac
+    case "$SRC" in
+        *'*'*) case "$DST" in */) ;; *) die "源含通配符时目标必须是目录前缀（以 / 结尾）: ${entry}" ;; esac ;;
+        *)     case "$DST" in */) die "精确源的落点不得以 / 结尾: ${entry}" ;; esac ;;
+    esac
+    return 0
+}
+
+map_target() {   # $1 = 源的仓库根相对路径（已 glob 展开）；回显映射后的落点（相对 payload 根）
+    case "$DST" in */) printf '%s%s' "$DST" "$(basename "$1")" ;; *) printf '%s' "$DST" ;; esac
+}
+
+# 白名单循环
+#   目录条目：tar 整树（剔除 __pycache__/*.pyc/.git/tests，与 tcopy 同一剔除集）；
+#             源目录名 ≠ 目标目录名时整树改名落点（如 platform -> ttbox_platform）
+#   文件/glob 条目：逐个 install 到【映射后的落点】（不能用 glob 原串当目标）
+#   ★ $SRC 必须裸奔（不加引号）才能做 glob 展开；REPO_ROOT 引号保留防分词。
+entry="" src="" rel="" tgt="" mode=""
 while IFS= read -r entry <&3; do
-    case "$entry" in ''|'#'*) continue ;; esac
-    case "$entry" in *[[:space:]]*) die "白名单条目含空白: ${entry}" ;; esac
+    parse_entry "$entry" || continue
     matched=0
-    for src in "${REPO_ROOT}"/$entry; do
+    for src in "${REPO_ROOT}"/$SRC; do
         [ -e "$src" ] || break   # glob 未匹配 → 原样字面量 → 视为条目失效
         matched=1
         rel="${src#${REPO_ROOT}/}"
+        tgt="$(map_target "$rel")"
         if [ -d "$src" ]; then
-            mkdir -p -- "${PAYLOAD}/$(dirname "$rel")"
             tar -C "${REPO_ROOT}" --exclude='__pycache__' --exclude='*.pyc' \
-                --exclude=.git --exclude=tests -cf - "$rel" | tar -C "$PAYLOAD" -xf -
+                --exclude=.git --exclude=tests --exclude=.registry.json \
+                -cf - "$rel" | tar -C "$PAYLOAD" -xf -
+            if [ "$rel" != "$tgt" ]; then
+                mkdir -p -- "${PAYLOAD}/$(dirname "$tgt")"
+                mv -f -- "${PAYLOAD}/${rel}" "${PAYLOAD}/${tgt}"
+            fi
         else
             mode=0644
             case "$src" in *.sh|*.py) mode=0755 ;; esac
-            install -D -m "$mode" "$src" "${PAYLOAD}/${rel}"
+            install -D -m "$mode" "$src" "${PAYLOAD}/${tgt}"
         fi
     done
-    [ "$matched" = 1 ] || die "白名单条目不存在（或 glob 展开为空）: ${entry}"
+    [ "$matched" = 1 ] || die "清单源路径不存在（或 glob 展开为空）: ${entry}"
 done 3< "$MANIFEST"
 
-# 定向修剪（与 sync_tree 同步：只做减法/权限修正，不新增文件）
-rm -f "${PAYLOAD}/plugins/web/api_v1.py" \
-      "${PAYLOAD}/plugins/web/framework_api.py"
-rm -rf "${PAYLOAD}/plugins/web/static/legacy"
+# 清单后【只做权限修正】，不做任何增删文件（P1-2026-10-01：取消交付减法结构）
+#   原先这里剪掉 plugins/web/{api_v1.py,framework_api.py,static/legacy} 三条路径，
+#   那属于「出货减法」结构（S1-2026-09-18 / A0-3c·A0-3d）—— 该结构已取消：
+#   出货树 = 清单映射结果 + bin/lib 两个构建产物，脚本不再对 payload 做减法。
+#   要把某个文件挡在包外，唯一办法是让它不出现在任何清单条目的源里。
 chmod 0755 -- "${PAYLOAD}/usbproxy/usb-proxy"
 
 # ---- 权限归一化（与 ota_updater.normalize_staging_perms 同一口径）----
@@ -158,8 +187,9 @@ WW="$(find "$PAYLOAD" \( -type f -o -type d \) -perm -o+w -print)"
 ${WW}"
 ok "断言0 无 world-writable"
 
-# ---- 断言 1：顶层闭集（docs/tools/platform/modules/tests/config 等禁入）----
-EXPECT_TOP="bin deploy framework lib plugins scripts ttbox_motion usbproxy"
+# ---- 断言 1：顶层闭集（docs/tools/modules/tests/config 等禁入）----
+#   ★ ttbox_platform = 冻结口径：仓库 platform 包出货时落 ttbox_platform（见清单头注释）
+EXPECT_TOP="bin deploy framework lib plugins scripts ttbox_motion ttbox_platform usbproxy"
 ACTUAL_TOP="$(cd "$PAYLOAD" && ls -A | sort | tr '\n' ' ' | sed 's/ $//')"
 EXPECT_TOP_E="$(printf '%s\n' $EXPECT_TOP | sort | tr '\n' ' ' | sed 's/ $//')"
 [ "$ACTUAL_TOP" = "$EXPECT_TOP_E" ] \
@@ -174,15 +204,29 @@ BAD="$(cd "$PAYLOAD" && {
         -o -name 'CMakeFiles' -o -name 'tests' \) -print
     # 坏文件（deploy/keys 整目录放行，其余命中即报）
     #   ★ 不能用 *_backup*：正当脚本 ttbox_backup.sh 会被误杀；只认备份残渣后缀
+    #   ★ .registry.json（P8-2026-10-01）：插件注册表是运行期状态、内含绝对路径。
+    #     正常路径上已被 tar 剔除（三处剔除集同口径）；这里再兜一道 —— 若哪天剔除
+    #     集被改坏，出包就地 fail-closed，不会带着 dev 树路径发到客户机器上。
     find . -path './deploy/keys' -prune -o -type f \( \
         -name '*.pem' -o -name '*.priv.pem' -o -name '*.pub' -o -name 'id_rsa*' \
         -o -name '*.pyc' -o -name '*.bak' -o -name '*.bak-*' -o -name '*.backup' \
-        -o -name '*.orig' -o -name '*.rej' \
+        -o -name '*.orig' -o -name '*.rej' -o -name '.registry.json' \
         -o -name '*.o' -o -name '*.a' -o -name '*.cmake' \) -print
 })"
 [ -z "$BAD" ] || die "payload 混入禁用物:
 ${BAD}"
 ok "断言2 无密钥/无垃圾/无构建残渣"
+
+# ---- 断言 2b：payload 内容里不得出现开发机/构建机绝对路径（P8-2026-10-01）----
+#   由来：插件注册表 plugins/.registry.json（运行期状态）曾把
+#   `/mnt/g/WORKBUDDY工作区/...` 一条绝对路径带进 payload。断言 2 按【文件名】挡，
+#   挡不住"内容里的路径"；这里按【文件内容】再扫一道，命中即 fail-closed。
+#   为什么值得单独一条：这类泄漏不会让包装不上，只会把开发机目录结构发给客户。
+DEV_PATH_PAT='/mnt/[a-z]/|G:/WORKBUDDY|C:/Users|/Users/Administrator'
+DEVHIT="$(cd "$PAYLOAD" && { grep -rIlE "$DEV_PATH_PAT" . 2>/dev/null || true; } | sort | head -20)"
+[ -z "$DEVHIT" ] || die "payload 含开发机绝对路径（元数据泄漏）:
+${DEVHIT}"
+ok "断言2b 无开发机绝对路径泄漏"
 
 # ---- 断言 3：bin/ 闭集 = 恰 1 文件 ttbox_core_main ----
 BIN_N="$(find "${PAYLOAD}/bin" -type f | wc -l)"
@@ -190,41 +234,70 @@ BIN_N="$(find "${PAYLOAD}/bin" -type f | wc -l)"
     || die "bin/ 应恰 1 个文件 ttbox_core_main，实得 ${BIN_N} 个"
 ok "断言3 bin/ 闭集: 恰 1 文件 ttbox_core_main"
 
-# ---- 断言 4：双向核对（混入必现、漏装必现）----
-# 反向：payload 里除 bin/lib 外的每个文件，仓库里必须存在（否则 = 混入）
+# ---- 断言 4：双列映射双向核对（混入必现、漏装必现）----
+#   P1-2026-10-01 重写：旧版按「源路径 = 目标路径」恒等假设做核对，
+#   双列化后源与目标可以不同（如 platform -> ttbox_platform），必须按【映射后的落点】核对。
+#   先把清单解析成两份目标集合，装配时怎么算落点、这里就怎么算（共用 map_target）。
+TGT_DIRS=(); TGT_FILES=()
+while IFS= read -r entry <&3; do
+    parse_entry "$entry" || continue
+    for src in "${REPO_ROOT}"/$SRC; do   # $SRC 裸奔才能 glob 展开（与装配循环同语义）
+        [ -e "$src" ] || continue
+        rel="${src#${REPO_ROOT}/}"
+        tgt="$(map_target "$rel")"
+        if [ -d "$src" ]; then TGT_DIRS+=("$tgt"); else TGT_FILES+=("$tgt"); fi
+    done
+done 3< "$MANIFEST"
+
+# 目标冲突：两条映射写同一个精确落点 ⇒ 后写覆盖先写，直接判失败
+DUP="$(printf '%s\n' "${TGT_FILES[@]:-}" | sed '/^$/d' | sort | uniq -d)"
+[ -z "$DUP" ] || die "清单目标冲突（多条映射同一精确落点）:
+${DUP}"
+
+# 反向（混入）：payload 里除 bin/lib 外的每个文件，必须落在某个【目标】之下
+in_targets() {   # $1 = payload 相对路径
+    local f="$1" d t
+    for d in "${TGT_DIRS[@]:-}"; do
+        [ -n "$d" ] || continue
+        case "$f" in "$d"|"$d"/*) return 0 ;; esac
+    done
+    for t in "${TGT_FILES[@]:-}"; do [ "$f" = "$t" ] && return 0; done
+    return 1
+}
 LEAK="$(cd "$PAYLOAD" && find . -type f | sed 's|^\./||' \
         | grep -v -e '^bin/' -e '^lib/' \
-        | while IFS= read -r f; do [ -e "${REPO_ROOT}/${f}" ] || echo "$f"; done)"
-[ -z "$LEAK" ] || die "payload 存在仓库外文件（混入）:
+        | while IFS= read -r f; do in_targets "$f" || echo "$f"; done)"
+[ -z "$LEAK" ] || die "payload 存在清单未映射的文件（混入）:
 ${LEAK}"
-# 正向：白名单展开的每个文件，payload 里必须存在（api_v1/framework_api/legacy 是定向修剪，
-#   2026-09-24 起 legacy 源头已删、此条 continue 仅作兜底；
-#   find 剔除集必须与装配 tar 的 --exclude 完全一致，否则 tests 会假报漏装）
+
+# 正向（漏装）：清单展开的每个文件，其【映射后的落点】必须存在
+#   find 剔除集必须与装配 tar 的 --exclude 完全一致，否则 tests 会假报漏装
+#   （P8-2026-10-01：.registry.json 加入 tar 剔除集后，这里不同步就会把
+#    「已按口径剔除」误报成「漏装」—— 两边一起改。）
 MISS=""
 while IFS= read -r entry <&3; do
-    case "$entry" in ''|'#'*) continue ;; esac
-    for src in "${REPO_ROOT}"/$entry; do   # $entry 裸奔才能 glob 展开（与装配循环同语义）
+    parse_entry "$entry" || continue
+    for src in "${REPO_ROOT}"/$SRC; do
+        [ -e "$src" ] || continue
+        rel="${src#${REPO_ROOT}/}"
+        tgt="$(map_target "$rel")"
         if [ -d "$src" ]; then
             while IFS= read -r f; do
-                rel="${f#${REPO_ROOT}/}"
-                case "$rel" in
-                    plugins/web/api_v1.py|plugins/web/framework_api.py) continue ;;
-                    plugins/web/static/legacy/*) continue ;;
-                esac
-                [ -e "${PAYLOAD}/${rel}" ] || MISS="${MISS}${rel}
+                sub="${f#${REPO_ROOT}/}"; sub="${sub#${rel}}"   # 目录内相对后缀（改名后同样适用）
+                [ -e "${PAYLOAD}/${tgt}${sub}" ] || MISS="${MISS}${tgt}${sub}
 "
             done < <(find "$src" -type f ! -name '*.pyc' ! -path '*__pycache__*' \
-                        ! -path '*/tests/*' ! -path '*/.git/*')
+                        ! -path '*/tests/*' ! -path '*/.git/*' \
+                        ! -name '.registry.json')
         else
-            rel="${src#${REPO_ROOT}/}"
-            [ -e "${PAYLOAD}/${rel}" ] || MISS="${MISS}${rel}
+            [ -e "${PAYLOAD}/${tgt}" ] || MISS="${MISS}${tgt}
 "
         fi
     done
 done 3< "$MANIFEST"
-[ -z "$MISS" ] || die "白名单文件未进 payload（漏装）:
+[ -z "$MISS" ] || die "清单文件未进 payload（漏装）:
 ${MISS}"
-ok "断言4 双向核对: 无混入、无漏装"
+ok "断言4 双列映射双向核对: 无混入、无漏装（目标目录 ${#TGT_DIRS[@]} / 目标文件 ${#TGT_FILES[@]}）"
 
 # ---- 断言 5：版本号一致性（S7）----
 [ -n "$VER" ] || die "版本号为空"

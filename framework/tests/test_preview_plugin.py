@@ -10,7 +10,8 @@ from pathlib import Path
 
 from framework.plugin_manager import InstallRequest, InstallSource, PluginManager, PluginState
 
-ROOT = Path(__file__).resolve().parents[2]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+ROOT = Path(_ttbox_repo_root())
 PLUGIN = ROOT / "plugins" / "preview"
 
 

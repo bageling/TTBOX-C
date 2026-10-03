@@ -18,9 +18,11 @@ cat /sys/class/typec/port0-partner/data_role 2>/dev/null
 cat /sys/class/typec/port0-partner/power_role 2>/dev/null
 
 echo "===== dwc3 角色（extcon / typec）====="
-for c in fc000000.usb fc400000.usb; do
-  echo "-- $c --"
-  ls /sys/bus/platform/devices/$c/ 2>/dev/null | grep -iE 'role|extcon|connector'
+# 控制器名不写死（P8）：列举所有 *.usb 平台设备，不再硬编码 fc000000.usb / fc400000.usb
+for c in /sys/bus/platform/devices/*.usb; do
+  [ -e "$c" ] || continue
+  echo "-- $(basename "$c") --"
+  ls "$c" 2>/dev/null | grep -iE 'role|extcon|connector'
 done
 
 echo "===== dwc3 debug: current role ====="

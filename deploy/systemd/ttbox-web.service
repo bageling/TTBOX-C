@@ -24,11 +24,12 @@ ExecStart=/opt/ttbox/current/plugins/web/bin/ttbox-web
 Environment=TTBOX_ROOT=/opt/ttbox/current/plugins/web
 # 注意：PYTHONPATH 只需插件根目录（现随 release 走：current/plugins/web）。
 # 否则 `from framework_api import ...` 找不到模块。
-# 严禁把 /opt/ttbox 放进来：/opt/ttbox/platform/ 是带 __init__.py 的正式包，
-# 与 Python 标准库 `platform` 同名，一旦进 PYTHONPATH（优先级高于 stdlib），
+# 严禁把 /opt/ttbox 放进来：TTBOX 根下的平台层包**现名 ttbox_platform/**
+# （2026-10-01 P3 由 platform/ 改名而来）。**不要把名字改回 platform/** ——
+# 那个名字与 Python 标准库 `platform` 同名，一旦进 PYTHONPATH（优先级高于 stdlib），
 # `import platform` 会解析到它 → werkzeug 启动即崩
 #   AttributeError: module 'platform' has no attribute 'system'
-# TTBOX 根目录（现为 current/，含 framework/ ttbox_motion/ platform/）由
+# TTBOX 根目录（现为 current/，含 framework/ ttbox_motion/ ttbox_platform/）由
 # ttbox-web.py 内部 sys.path.append() 补进末尾（stdlib 优先）。
 Environment=PYTHONPATH=/opt/ttbox/current/plugins/web
 # IPC socket 唯一真源（A-PATH-5）：与 Core 的 --ipc 及 core/src/common/Paths.hpp::kIpcSocketDefault

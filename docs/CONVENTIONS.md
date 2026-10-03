@@ -94,8 +94,10 @@ docs/
 **一份文档是否入库，取决于有没有"非文档的引用方"** —— 源码、脚本、测试、systemd/CMake/HTML 都算。
 没有任何代码引用的介绍类、盘点类、过程类文档一律不入库。
 
-现状（2026-09-19 清理后）：`docs/` 下 17 份 + `deploy/DEPENDENCIES.md` + `platform/supervisor/README.md`
+现状（2026-09-19 清理后）：`docs/` 下 17 份 + `deploy/DEPENDENCIES.md` + `ttbox_platform/supervisor/README.md`
 + 根 `README.md`，共 **20 份**。谁引用谁见 [`README.md`](README.md) §二。
+> **2026-10-01（P3）**：平台层包 `platform/` 已改名 `ttbox_platform/`（目录名 = Python 包名，
+> 且不再遮蔽标准库 `platform`）；上文那份 README 随之改路径。
 
 > **2026-09-18 清理**：`docs/archive/`（历史快照 / 旧性能报告 / 阶段报告，41 个文件）与四个旧路径指针目录
 > （`架构/` `开发/` `规划/` `验证/`）已删除。

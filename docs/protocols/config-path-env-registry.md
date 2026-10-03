@@ -32,7 +32,7 @@
 |---|---|---|---|---|---|---|
 | `TTBOX_CONFIG` | 路径/目录 | `TTBOX_PROJECT_ROOT "/config/default.json"` | `Application.cpp::kDefaultConfigPath` | 覆盖 `--config` 之后的编译期默认（**仅本机开发兜底**） | RUNTIME | `Application::initialize` |
 | `TTBOX_IPC_SOCKET` | 路径 | `/run/ttbox/core.sock` | `core/src/common/Paths.hpp::kIpcSocketDefault` | 覆盖 IPC socket 默认（CLI `--ipc` 优先） | RUNTIME | `Application::initialize`、`ipc_ping`、web/preview/tools |
-| `TTBOX_MODELS_ROOT` | 路径 | `TTBOX_PROJECT_ROOT "/models"` | `ModelRegistry` 构造兜底 | 覆盖配置 `model_registry_root` | RUNTIME | `ModelRegistry`、`Application`、`ttbox-model.py`、web |
+| `TTBOX_MODELS_ROOT` | 路径 | `TTBOX_PROJECT_ROOT "/models"` | `ModelRegistry` 构造兜底 | 覆盖配置 `model_registry_root` | RUNTIME | `ModelRegistry`、`Application`、`ttbox-model.py`、web、`scripts/a9_ai_isolation.sh`（默认 `/opt/ttbox/models` = FHS 化前旧布局落点） |
 | `TTBOX_HID_ROOT` | 路径 | `TTBOX_PROJECT_ROOT "/hid"` | `HidPackageRegistry` / `HidRuntime` 兜底 | 覆盖 HID 包根 | RUNTIME | `HidPackageRegistry.cpp`、`HidRuntime.cpp` |
 | `TTBOX_LICENSE_SERVER` | URL | 内置默认（云端授权基址） | `TtboxLicenseClient.hpp` | 覆盖授权服务基址 | RUNTIME | `TtboxLicenseClient.hpp` |
 | `TTBOX_APP_KEY` | 字符串 | 空 | `TtboxLicenseClient.hpp` | 云端授权 app_key（**TEST/运维注入**，非产品默认） | RUNTIME | `TtboxLicenseClient.hpp` |
@@ -41,6 +41,8 @@
 | `TTBOX_CORE_CAPTURE_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用，上限 `70`） | `core/src/capture/V4L2Capture.cpp`（**在采集线程内部**调用 `RtSched::apply_fifo`） | 覆盖采集线程实时优先级；失败降级为普通调度 | RUNTIME | `V4L2Capture::capture_loop` |
 | `TTBOX_CORE_CAPTURE_CPU` | CPU 编号 | `-1`（不绑，沿用大核掩码 CPU4~7） | `RtSched::apply_fifo` | 覆盖采集线程单核绑定 | RUNTIME | `V4L2Capture::capture_loop` |
 | `TTBOX_IPC_DEBUG` | 开关 | `0`（`1`=开；空串亦视为关） | `core/src/ipc/IpcServer.cpp::ipc_debug_enabled`（`IPCDBG` 宏） | 打开 IPC **服务端**逐事件日志（监听 / accept / 读到多少字节 / 是否回包 / recv 错误码），排查「客户端连接成功却读不到响应」；生产默认关闭、零开销 | RUNTIME | `IpcServer.cpp` 内 `IPCDBG` 各调用点 |
+| `TTBOX_LOG_DIR` | 路径 | `/var/log/ttbox` | `core/src/common/Paths.hpp::kLogDirDefault` | 覆盖日志目录（批次 1.4）。core 的 `Logger`/`FileSink` 在此写 `ttbox.log`（全量流水，WARN/INFO 批量落盘）/ `ttbox-error.log`（只 FATAL/ERROR，内容永不过滤）/ `operation.log`（客户操作，同步）；web 侧写 `web.log`。目录由 `scripts/ttbox_fhs_init.sh` 创建（ttbox:ttbox 0755）；不可写时 sink 自降级为不可用，**不影响启动** | RUNTIME | `Application::initialize` |
+| `TTBOX_LOG_LEVEL` | 字符串 | 空（=INFO） | `plugins/web/lib/logging_setup.py::resolve_level` | 覆盖 web 侧日志级别（批次 1.4）。取值 **`debug`/`info`/`warn`/`error`/`fatal`/`off`** —— 与 core 的 `--log-level` **同一套取值**（§5.1「级别必须可在配置里调，不用重编译」）。web 侧无 CLI，故走环境变量（systemd unit 可写 `Environment=`） | RUNTIME | `logging_setup.setup_logging` |
 
 > **已删除（不得复活）**：`TTBOX_CONFIG_PATH`（同义异名，V-05），`TTBOX_MODEL_ROOT`（同义异名，V-04）。
 > 二者**不保留兼容读**（D-ENV-3 / D-ENV-5）。
@@ -50,13 +52,13 @@
 | 变量名 | 类型 | 默认 | 真源 | 覆盖语义 | 作用域 |
 |---|---|---|---|---|---|
 | `TTBOX_IPC_SOCKET` | 路径 | `/run/ttbox/core.sock` | `plugins/web/lib/paths.py::IPC_SOCKET_DEFAULT` | 覆盖 IPC socket | RUNTIME |
-| `TTBOX_ROOT` | 路径 | `plugins/web`（`Path(__file__).parents[1]`） | `ttbox-web.py` | 覆盖 web 静态根 | RUNTIME |
+| `TTBOX_ROOT` | 路径 | `<树根>/plugins/web`（根锚派生） | `ttbox-web.py` | 覆盖 web 静态根 | RUNTIME |
 | `TTBOX_PREFIX` | 路径 | `/opt/ttbox` | `plugins/web/lib/paths.py::ttbox_prefix` | 覆盖运行根前缀（派生 scripts/presets/config 子路径） | RUNTIME |
 | `TTBOX_SCRIPTS_DIR` | 路径 | `<TTBOX_PREFIX>/scripts` | `plugins/web/lib/paths.py::scripts_dir` | 覆盖 scripts 目录（`wifi_manager` / `edid` 工具链所在） | RUNTIME |
 | `TTBOX_PRESETS_DIR` | 路径 | `<TTBOX_PREFIX>/presets` | `plugins/web/lib/paths.py::presets_dir` | 覆盖预设目录 | RUNTIME |
 | `TTBOX_HDMIRX_EDID` | 路径 | `<TTBOX_SCRIPTS_DIR>/edid/hdmirx_edid.py` | `plugins/web/lib/paths.py::hdmirx_edid_tool` | 覆盖 EDID 工具路径 | RUNTIME |
 | `TTBOX_MOTION_PROFILES_DIR` | 路径 | `<TTBOX_PREFIX>/config/motion-profiles` | `plugins/web/lib/paths.py::motion_profiles_dir` | 覆盖动作曲线目录 | RUNTIME |
-| `TTBOX_PLUGINS_ROOT` | 路径 | `/opt/ttbox/plugins` | `framework_api.py` | 覆盖插件根 | RUNTIME |
+| `TTBOX_PLUGINS_ROOT` | 路径 | `<树根>/plugins` | `plugins/web/lib/paths.py::plugins_dir`（消费方 `framework_api.py`） | 覆盖插件根 | RUNTIME |
 | `TTBOX_PLUGIN_REPOSITORY_ROOT` | 路径 | `<TTBOX_PLUGINS_ROOT>/repository` | `framework_api.py` | 覆盖插件仓库根 | RUNTIME |
 | `TTBOX_ENABLE_DESIGNER` | 开关 | 未设=关（fail-closed） | `api_v1.py` | 置 `1` 才注册设计器接口（安全闸门） | RUNTIME |
 | `TTBOX_DISPLAY_CONFIG` | 路径 | `/opt/ttbox/config/hardware_display.json` | `scripts/edid/edid_apply.sh` | 覆盖显示配置路径 | RUNTIME |
@@ -84,7 +86,7 @@
 | `TTBOX_PREVIEW_HOST` | 地址 | `127.0.0.1` | `ttbox-preview.service` | RUNTIME |
 | `TTBOX_PREVIEW_PORT` | 端口 | `8001` | `ttbox-preview.service` | RUNTIME |
 | `TTBOX_PREVIEW_URL` | URL | `http://127.0.0.1:8001` | `ttbox-web.service` | RUNTIME |
-| `USB_PROXY_DEVICE` | 设备名 | `fc000000.usb` | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_DEVICE` | 设备名 | 空 = 自动取 `/sys/class/udc` 排序首个（P8 起不再写死硬件编号）；板端由 `ttbox-usbproxy.service` 显式钉为 `fc000000.usb` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_DRIVER` | 驱动名 | `dwc3-gadget` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_SOCKET_DIR` | 路径 | `/run/ttbox-mouse-passthrough` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_WAIT_SECONDS` | 秒 | `1` | `run-ttbox-usb-proxy.sh` | RUNTIME |
@@ -127,7 +129,7 @@
 
 | 变量名 | 类型 | 默认 | 真源 | 作用 | 作用域 |
 |---|---|---|---|---|---|
-| `TTBOX_STAGE_DIR` | 路径 | 无（必填） | `image/prepare_stage.sh`、`run_in_img.sh`、`90_finalize_host.sh` | 覆盖烘焙 stage 暂存目录（灌装树落点） | RUNTIME |
+| `TTBOX_STAGE_DIR` | 路径 | 无（必填） | `image/prepare_stage.sh`、`run_in_img.sh`、`90_finalize_host.sh`、`image/v5_bake.sh` | 覆盖烘焙 stage 暂存目录（灌装树落点） | RUNTIME |
 | `TTBOX_VER` | 版本号 | 无（必填） | `image/prepare_stage.sh` | 覆盖烘焙出的镜像版本号 | RUNTIME |
 | `TTBOX_HOSTKEY_DIR` | 路径 | 无（必填） | `image/v5_bake.sh`、`steps/04_board_config.sh`、`90_finalize_host.sh` | 注入镜像内 ssh host key 的来源目录（**凭据类**） | RUNTIME |
 | `TTBOX_ROOT_PASS` | 口令 | 无（必填，**禁回落到固定弱口令**） | `image/steps/04_board_config.sh` | 烘焙时设置镜像 root 口令（**凭据类**） | RUNTIME |
@@ -146,6 +148,8 @@
 | `TTBOX_DTB_SRC` / `TTBOX_DTB_FIX_TEST` | `scripts/ttbox_dtb_fix.sh` | TEST | DTB 修复脚本的测试钩子：前者覆盖源 DTB 路径（默认真源 `deploy/dtb/…`）、后者放行非 root 并跳过重启安排（仅离线夹具用）。正式运行两值均不设 ⇒ 走真源 + 真实重启；已同步登记进门禁 `ENV_ALLOW` |
 | `TTBOX_DTB_GOOD_SHA` / `TTBOX_DTB_BAD_SHA` / `TTBOX_DTB_REPORT` | `scripts/ttbox_dtb_fix.sh` | TEST | 2026-09-22 从板端回流修复脚本时新增：前两者覆盖「修复后/损坏后 DTB 期望哈希」（默认值即真源 `277d9de8…` / `7b8cc892…`），后者覆盖报告落点（默认 `/opt/ttbox/presets/_dtbfix.json`）。生产不设、走默认；已同步登记进门禁 `ENV_ALLOW` |
 | `TTBOX_USB_MODE_TEST` | `scripts/ttbox_usb_mode.sh` | TEST | 2026-09-22 新增 USB 透传模式运维入口时登记：放行非 root 写 drop-in（`TTBOX_SYSTEMD=0` 一并跳过 daemon-reload/restart），仅供离线夹具。正式运行不设 ⇒ 强制 root + 真实重启；已同步登记进门禁 `ENV_ALLOW` |
+| `TTBOX_HW_TEST_DIR` | `scripts/a9_ai_isolation.sh` | TEST | 2026-10-01 登记（P8）：板端**手动** HW 并发隔离诊断所需的测试二进制目录（须含 `test_worker_hw` / `test_hid_load_sim`，由板端 `cmake -DTTBOX_CORE_BUILD_HW_TESTS=ON` 构建产出）。**刻意无默认值**：板端发布树 `/opt/ttbox` 只有 `releases/V1.0.xx` + `current`，不落构建产物，猜任何路径都错 ⇒ 不指定即报错讲清要什么。★ 不复用 `TTBOX_BUILD_DIR`（后者是 §3.3 BUILD 域 = 交叉编译产物目录，借用即同名异义）。生产不设、该脚本不参与自动链路 ⇒ 零影响；已同步登记进门禁 `ENV_ALLOW` |
+| `TTBOX_PYTHON` | `scripts/ttbox_phase1_gate.sh` | TEST | 2026-10-01 登记（P8 复查）：显式指定门禁脚本用的 Python 解释器。**本机解释器位置属本机事实**，不该硬编码进版本化脚本（原实现写死 `C:/Users/Administrator/...` 当兜底，换台机器即废，且违反口径门禁⑪）。不设则按 `python3` → `python` → `$HOME/.workbuddy/binaries/python/envs/default/Scripts/python.exe` 顺序做**能力探测** —— G6 要的是"能 `import pytest`"的那个，不是单纯"存在"的那个。已同步登记进门禁 `ENV_ALLOW` |
 
 > **§6-5 裁定**：`10015` 属 **TEST** 域（验收脚本常量），登记后**不改值**。
 

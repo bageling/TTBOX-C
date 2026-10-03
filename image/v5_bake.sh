@@ -6,17 +6,29 @@
 #   表现是镜像内文件忽有忽无、chroot 报 no such file）。
 #
 # 前置（项目外，不入 git/镜像/文档）：
-#   /mnt/c/Users/Administrator/ttbox-image-keys/{ssh_host_ed25519_key,ssh_host_rsa_key,*.pub,root-password.txt}
+#   <keys-dir>/{ssh_host_ed25519_key,ssh_host_rsa_key,*.pub,root-password.txt}
+#   ★ keys-dir 与成品落点都是**本机私有**路径，不写死在这里 —— 用 KEYS=<dir> DST=<xxx.img> 传。
 #
-# 用法：
-#   wsl.exe -d Ubuntu-22.04 -- bash "/mnt/g/WORKBUDDY工作区/TTBOX-最终源码-2026-09-18/image/v5_bake.sh" 2>&1 | tee /root/ttbox-image/v5-bake.log
+# 用法（在 WSL 里跑；<repo-wsl> = 本仓库在 WSL 下的路径）：
+#   wsl.exe -d Ubuntu-22.04 -- bash <repo-wsl>/image/v5_bake.sh 2>&1 | tee /root/ttbox-image/v5-bake.log
 set -uo pipefail
 
-REPO="/mnt/g/WORKBUDDY工作区/TTBOX-最终源码-2026-09-18"
-IMG="/mnt/img"
-KEYS="/mnt/c/Users/Administrator/ttbox-image-keys"
-WORK="/root/ttbox-image/work.img"
-DST="/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64-orangepi-5-plus-V5.img"
+# 树根由脚本自身位置派生（本脚本就在 <repo>/image/ 下）：换挂载点 / 换目录名自动跟随。
+# ★ 原为写死 "/mnt/g/WORKBUDDY工作区/..." —— 开发机专属路径，换台机器这片全废。
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# P8（2026-10-01）：挂载点与 staging 目录改用与 20_mount.sh / 90_finalize_host.sh /
+# prepare_stage.sh 同一条覆盖链（IMG_ROOT / TTBOX_STAGE_DIR，默认值不变）。
+# 此前本文件把这两个路径写死 —— 换挂载点或换 staging 目录时，只有这里不跟随，
+# 表现为"prepare_stage 铺到 B，v5_bake 却从 A 拷"，镜像里是上一次的旧树。
+IMG="${IMG_ROOT:-/mnt/img}"
+WORK="${WORK:-/root/ttbox-image/work.img}"
+# ★ 下面两个是**本机私有**路径（密钥目录 / 成品落点）。刻意不给默认值：
+#   给一个"看起来像"的路径只会让下一个人以为它能直接跑。用 KEYS= / DST= 传。
+KEYS="${KEYS:-}"
+DST="${DST:-}"
+[ -n "$KEYS" ] || { echo "需指定镜像密钥目录：KEYS=<dir>（含 ssh_host_*_key 与 root-password.txt）" >&2; exit 1; }
+[ -n "$DST" ]  || { echo "需指定成品输出路径：DST=<xxx.img>" >&2; exit 1; }
+[ -d "$KEYS" ] || { echo "密钥目录不存在: $KEYS" >&2; exit 1; }
 PASS="$(cat "$KEYS/root-password.txt")"
 export TTBOX_HOSTKEY_DIR="$KEYS"
 
@@ -49,7 +61,7 @@ echo "  改前 ssh.service  : $(readlink "$IMG/etc/systemd/system/ssh.service" 2
 echo
 echo "===== P1 staging（steps/deploy/scripts/payload → ext4）====="
 bash "$REPO/image/prepare_stage.sh" || die "prepare_stage.sh 失败"
-STAGE="/root/ttbox-image/_stage"
+STAGE="${TTBOX_STAGE_DIR:-/root/ttbox-image/_stage}"
 [ -d "$STAGE/steps" ] || die "staging 缺 steps/"
 rm -rf "$IMG/root/_bake"
 mkdir -p "$IMG/root/_bake"

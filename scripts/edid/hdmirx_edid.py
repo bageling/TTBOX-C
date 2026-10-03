@@ -145,7 +145,9 @@ def cmd_build(profile, native, added, name, vendor, product_id, serial, device, 
     except Exception as exc:
         print(f"EDID 生成失败: {exc}", file=sys.stderr)
         return 1
-    out = output or "/opt/ttbox/runtime/edid/current.bin"
+    # 运行根派生（A-PATH-4）：与 scripts/edid/mode_builder.py 同口径，不散写 "/opt/ttbox/…"。
+    out = output or os.path.join(
+        os.environ.get("TTBOX_PREFIX", "/opt/ttbox"), "runtime", "edid", "current.bin")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "wb") as handle:
         handle.write(edid)

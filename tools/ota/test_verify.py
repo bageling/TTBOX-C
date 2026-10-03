@@ -21,9 +21,16 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = HERE.parents[1] / "scripts"
-sys.path.insert(0, str(SCRIPTS))
-sys.path.insert(0, str(HERE))
+# 根锚发现（P6/A-PATH-3）：不写死层级（原 `HERE.parents[1]`）。
+_TREE_ROOT = HERE
+while _TREE_ROOT != _TREE_ROOT.parent and not all(
+        (_TREE_ROOT / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+    _TREE_ROOT = _TREE_ROOT.parent
+SCRIPTS = _TREE_ROOT / "scripts"
+# append（不用 insert(0)：顶到 stdlib 前有遮蔽同名标准库的风险）
+for _entry in (str(HERE), str(SCRIPTS)):
+    if _entry not in sys.path:
+        sys.path.append(_entry)
 
 import ttbox_ota_updater as up  # noqa: E402
 import ttbox_ota_sign as sign  # noqa: E402

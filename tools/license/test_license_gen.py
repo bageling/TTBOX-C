@@ -20,7 +20,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
+# append（不用 insert(0)：顶到 stdlib 前有遮蔽同名标准库的风险）
+if str(HERE) not in sys.path:
+    sys.path.append(str(HERE))
 
 import ttbox_license_gen as gen  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402

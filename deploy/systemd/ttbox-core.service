@@ -13,7 +13,7 @@ Type=simple
 # 运行身份：root 用户 + ttbox 组。
 #   组必须是 ttbox：socket 建出来是 <uid>:<gid> 0660，同组 Web/预览才能连。
 #   用户仍是 root：2026-09-16 板端实测，改成 User=ttbox 后两项硬件能力直接失效——
-#     · 风扇控制不可用（hwmon8/pwm1）→ 丢了满转，热节流掉帧
+#     · 风扇控制不可用（PWM 节点 /sys/class/hwmon/*/pwm1，编号运行期解析）→ 丢了满转，热节流掉帧
 #     · CPU 调频失败（写 /sys/.../cpufreq/policy*/scaling_min_freq Permission denied）
 #   这两处 sysfs 节点不支持 chgrp，非 root 无法写；要彻底降权需先补 udev 规则，
 #   见 docs 待办。在那之前保持 root，但已消除旧"root + /tmp socket 0666 全局可写"的风险：

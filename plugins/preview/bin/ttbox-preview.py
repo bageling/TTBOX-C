@@ -11,9 +11,31 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-# A-PATH-5 单点真源：IPC socket 字面量只存于 plugins/web/lib/paths.py（跨语言同值，门禁断言）。
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "web"))
+def _ttbox_tree_root():
+    """定位 TTBOX 树根（开发机 = 仓库根；板端 = release 树根，即 ``current/``）。
+
+    判据与 ``plugins/web/lib/paths.py::_ROOT_ANCHORS`` 同源：向上找**最近一层**
+    同时含 plugins / framework / scripts / deploy 的目录。**不假设目录深度** ——
+    原先这里写死 ``parents[1]`` / ``parents[2]``，改一次目录布局就静默指错根。
+    """
+    cur = Path(__file__).resolve().parent
+    while True:
+        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            return cur
+        if cur.parent == cur:
+            raise RuntimeError(
+                "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
+                "plugins/framework/scripts/deploy 的目录" % __file__
+            )
+        cur = cur.parent
+
+
+_TREE_ROOT = _ttbox_tree_root()
+# 两处都 append 到 sys.path 末尾（不用 insert(0)：防遮蔽 stdlib，见 ttbox-web.py 头部说明）
+#   · <树根>/plugins/preview —— 本插件目录（preview_contract）
+#   · <树根>/plugins/web     —— IPC socket 单点真源 lib/paths.py（A-PATH-5）
+sys.path.append(str(_TREE_ROOT / "plugins" / "preview"))
+sys.path.append(str(_TREE_ROOT / "plugins" / "web"))
 from preview_contract import PreviewConfig, PreviewFrame, PreviewStatus, PixelFormat, now_us
 from lib.paths import IPC_SOCKET_DEFAULT as _IPC_SOCKET_DEFAULT
 

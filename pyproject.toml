@@ -18,7 +18,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["framework*", "plugins*", "platform*", "ttbox_motion*"]
+include = ["framework*", "plugins*", "ttbox_platform*", "ttbox_motion*"]
 
 [tool.pytest.ini_options]
-testpaths = ["framework/tests", "platform/tests"]
+# 三套 Python 用例都是"正常入口"的一部分：裸 `python -m pytest` 即跑全量
+# （P6-2026-10-01：原先只列 2 套 ⇒ 裸入口漏跑 plugins/web/tests 的 482 条）。
+testpaths = ["framework/tests", "ttbox_platform/tests", "plugins/web/tests"]

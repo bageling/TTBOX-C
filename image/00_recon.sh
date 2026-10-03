@@ -13,7 +13,8 @@ echo "-- binfmt_misc 挂载 --"
 ls /proc/sys/fs/binfmt_misc/ 2>/dev/null || echo "(无)"
 echo
 echo "== 镜像 =="
-IMG="${1:-/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64-orangepi-5-plus.img}"
+IMG="${1:-${IMG:-}}"
+[ -n "$IMG" ] && [ -f "$IMG" ] || { echo "需指定镜像路径：脚本第一个参数，或 IMG=<xxx.img>" >&2; exit 1; }
 ls -l "$IMG"
 echo "-- file --"
 file "$IMG" 2>/dev/null

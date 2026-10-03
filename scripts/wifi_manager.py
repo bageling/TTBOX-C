@@ -11,6 +11,25 @@ from pathlib import Path
 from typing import Any
 
 
+# ── 路径 bootstrap（A-PATH-3）────────────────────────────────────────────────
+# 树根用**锚点发现**确定，不写死目录深度（原 `parents[1]`：换布局即静默指错根）。
+def _ttbox_tree_root() -> Path:
+    cur = Path(__file__).resolve().parent
+    while True:
+        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            return cur
+        if cur.parent == cur:
+            raise RuntimeError(
+                "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
+                "plugins/framework/scripts/deploy 的目录" % __file__
+            )
+        cur = cur.parent
+
+
+_TREE_ROOT = _ttbox_tree_root()
+_WEB_DIR = _TREE_ROOT / "plugins" / "web"
+
+
 DEFAULT_PASSWORD = os.environ.get("TTBOX_WIFI_DEFAULT_PASSWORD", "12345678")
 _default_ssids_raw = os.environ.get("TTBOX_WIFI_DEFAULT_SSIDS")
 if _default_ssids_raw is None:
@@ -33,7 +52,7 @@ WEB_PORT_DEFAULT = 8000
 #   两者是**两个真源**，渠道白标上线时必须一起改；本钩子把"漂移"显性化，供渠道自检/开机巡检。
 def brand_registry_ssids() -> list[str]:
     """读取品牌注册表里所有 `default_hotspot_ssid`（文件缺失/损坏 ⇒ 返回 []）。"""
-    cfg = Path(__file__).resolve().parents[1] / "plugins" / "web" / "config" / "ui_brands.json"
+    cfg = _WEB_DIR / "config" / "ui_brands.json"
     try:
         raw = json.loads(cfg.read_text(encoding="utf-8"))
     except (OSError, ValueError):

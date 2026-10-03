@@ -17,6 +17,9 @@
 #   ⑦ 无补丁残迹：hardware_display.json 单点（V-19）；systemd_units.py / runner.py / test_systemd_units.py 已删（V-15/16）
 #   ⑧ V-07 无绝对路径注入：出货 Python 禁 `sys.path.insert(0, '/opt/…')`（散落字面量 + insert(0) 遮蔽 stdlib）
 #   ⑨ TTBOX_PROJECT_ROOT 兜底清零：`#define TTBOX_PROJECT_ROOT` 出现次数必须为 0（强制由 CMake -D 注入）
+#   ⑩ 无层级硬编码：禁 `parents[N]` / `"../.."` 相对跳目录（改用 paths.py::discover_root 根锚发现）
+#   ⑪ 无开发机绝对路径：禁 `/mnt/g/WORKBUDDY…` / `/mnt/c/Users/<名字>/…` / `C:/Users/…` / `G:/WORKBUDDY…`
+#      （这类路径在别人机器上必然不存在、且看起来像正常配置；改脚本自身位置派生或必填项报错）
 #
 # 用法：
 #   bash scripts/ttbox_conventions_gate.sh              # 执行门禁
@@ -212,6 +215,15 @@ ENV_ALLOW = {
     # 2026-09-23 登记：359f0f0（修 SO_RCVTIMEO 平台语义）引入的服务端诊断开关，
     # 当时漏了登记 —— 出货前跑门禁才暴露（第②项 FAIL）。登记表 §2.1 已同步。
     "TTBOX_IPC_DEBUG",
+    # 2026-10-01 登记（批次 1.4 日志分级与分流）：core 日志目录覆盖。
+    #   默认 /var/log/ttbox（Paths.hpp::kLogDirDefault，由 fhs_init 建）；消费方 =
+    #   core Logger 的 FileSink（ttbox.log / ttbox-error.log / operation.log）与
+    #   web 侧文件 sink（web.log）。不设即用默认，属纯增量、生产可不设。
+    "TTBOX_LOG_DIR",
+    # 2026-10-01 登记（批次 1.4）：日志级别（debug|info|warn|error|fatal|off）。
+    #   §5.1「级别必须可在配置里调，不用重编译」—— core 侧对应 --log-level，
+    #   web 侧（plugins/web/lib/logging_setup.py）用本变量，取值集合与 core 完全相同。
+    "TTBOX_LOG_LEVEL",
     # ---- Web / preview (Python) ----
     "TTBOX_ROOT", "TTBOX_PREFIX", "TTBOX_SCRIPTS_DIR", "TTBOX_PRESETS_DIR",
     "TTBOX_HDMIRX_EDID", "TTBOX_MOTION_PROFILES_DIR", "TTBOX_CONFIG_DIR",
@@ -241,6 +253,18 @@ ENV_ALLOW = {
     "TTBOX_DTB_GOOD_SHA", "TTBOX_DTB_BAD_SHA",
     # 2026-09-22 USB 透传模式运维脚本的测试钩子（放行非 root 写 drop-in）
     "TTBOX_USB_MODE_TEST",
+    # 2026-10-01 登记：scripts/a9_ai_isolation.sh（板端手动 HW 并发隔离诊断）用的
+    # HW 测试二进制目录。**刻意无默认值** —— 板端发布树 /opt/ttbox 只有 releases/current，
+    # 不含构建产物，猜任何路径都是错的（不指定即人话报错）。
+    # ★ 刻意不复用 TTBOX_BUILD_DIR：后者在登记表 §3.3 是 BUILD 域（交叉编译产物目录，
+    #   ttbox_build_release.sh / fhs_init 消费），借用即同名异义。
+    "TTBOX_HW_TEST_DIR",
+    # 2026-10-01 登记：ttbox_phase1_gate.sh 的 Python 解释器显式指定。
+    #   本机解释器位置属**本机事实**，不该硬编码进版本化脚本（原实现写死
+    #   "C:/Users/Administrator/..." 当兜底，换机器即废，且违反本门禁⑪）。
+    #   不设则按 python3 → python → $HOME/.workbuddy/.../envs/default/Scripts/python.exe
+    #   顺序做**能力探测**（G6 要的是能 import pytest 的那个，不是"存在"的那个）。
+    "TTBOX_PYTHON",
     # ---- BUILD（编译期/门禁；不得进运行期业务路径）----
     "TTBOX_BUILD_DIR", "TTBOX_PROJECT_ROOT", "TTBOX_GIT_SHA", "TTBOX_RKNNRT_SO",
     "TTBOX_USBPROXY_INCLUDE", "TTBOX_USBPROXY_LIBDIR",
@@ -487,8 +511,8 @@ def check_no_patch():
         bad("⑦ V-19 hardware_display.json 非单点：实际 %s（应仅 deploy/config/hardware_display.json）" % hd)
     else:
         ok("⑦ hardware_display.json 单点 = deploy/config/hardware_display.json")
-    for p in ("platform/supervisor/systemd_units.py", "platform/supervisor/runner.py",
-              "platform/tests/test_systemd_units.py", "config/hardware_display.json"):
+    for p in ("ttbox_platform/supervisor/systemd_units.py", "ttbox_platform/supervisor/runner.py",
+              "ttbox_platform/tests/test_systemd_units.py", "config/hardware_display.json"):
         if os.path.exists(p):
             bad("⑦ 补丁残迹未删除：%s（V-15/V-16/V-19）" % p)
     # config/default.json 不得再自带鼠标透传 socket（单点化）
@@ -549,6 +573,80 @@ def check_project_root_injected():
 
 
 # ---------------------------------------------------------------------------
+# ⑩ 层级硬编码清零（P6-2026-10-01）
+# ---------------------------------------------------------------------------
+# 反模式：`Path(__file__).resolve().parents[3]` / `os.path.join(dirname, "..", "..", "plugins")`
+#   · 层级是硬编码常量：搬一次目录布局就静默指错根；错根**不报错**，只在下游表现为
+#     "某个文件找不到"，排障成本极高；
+#   · 把 parents[3] 改成 parents[4] 只是把错的深度换成另一个错的深度，不是修复。
+# 正解：根锚发现 —— 向上找**最近一层**同时含 plugins/framework/scripts/deploy 的目录
+#   （唯一实现 = plugins/web/lib/paths.py::discover_root）。
+# 豁免：注释行；以及含反引号的说明行（文档式内联引用，如 “原 ``parents[1]``”）。
+_PARENTS_HOP = re.compile(r'\.parents\[[0-9]+\]')
+# 三种"相对跳目录"写法：① 整串就是 "../.." 或 "../../"；② `"..", ".."` 逗号分段；
+# ③ sys.path 操作里出现 ".."。**不**匹配 '../../etc/passwd' 这类路径穿越测试样本。
+_REL_HOP = re.compile(r'''['"]\.\./\.\./?['"]''')
+_JOIN_HOP = re.compile(r''',\s*['"]\.\.['"]\s*,\s*['"]\.\.['"]''')
+_SYSPATH_HOP = re.compile(r'sys\.path\.(?:append|insert|extend)\([^)]*\.\.')
+
+
+def check_no_depth_hardcode():
+    hits = []
+    for p in iter_files():
+        ext = os.path.splitext(p)[1]
+        if ext not in (".py", ".sh"):
+            continue
+        for n, line in enumerate(read(p).splitlines(), 1):
+            if "`" in line:
+                continue                              # 反引号说明行
+            body = strip_comment(line, ext)
+            if (_PARENTS_HOP.search(body) or _REL_HOP.search(body)
+                    or _JOIN_HOP.search(body) or _SYSPATH_HOP.search(body)):
+                hits.append("%s:%d" % (p, n))
+    for h in hits:
+        bad("⑩ 层级硬编码（parents[N] / \"../..\"）@ %s —— 改用 paths.py::discover_root 根锚发现" % h)
+    if not hits:
+        ok("⑩ 无层级硬编码（parents[N] / \"../..\" 出货面全绿）")
+
+
+# ---------------------------------------------------------------------------
+# ⑪ 开发机绝对路径清零（P8 复查-2026-10-01）
+# ---------------------------------------------------------------------------
+# 反模式：把**开发机私有**目录写进版本化文件 ——
+#   `/mnt/g/WORKBUDDY工作区/...`（本机源码树）、`/mnt/c/Users/<名字>/...`（本机下载/密钥目录）、
+#   `C:/Users/<名字>/...`、`G:/WORKBUDDY...`。
+#   · 这些路径在别人机器上**必然不存在**，脚本一跑就是 cd 失败 / 找不到文件；
+#     更糟的是它们**看起来像正常配置**，排障时得先怀疑到它头上；
+#   · 它们描述的是"某个人的机器"，不是项目事实 ⇒ 一律不准进版本化文件。
+#   · 实测来源（2026-10-01 复查）：image/*.sh 的源镜像 / 密钥目录 / 成品落点；
+#     ttbox_phase1_gate.sh 的 python 绝对路径兜底 —— 后者换台机器整个门禁直接废。
+# 正解（按优先级）：
+#   ① 脚本自身位置派生 —— shell：`$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)`；
+#      Python：`Path(__file__).resolve()` + `lib.paths::discover_root` 根锚；
+#   ② 必填项：`${VAR:-}` + 空则**人话报错**（讲清该传什么），不要编一个"看起来像"的默认值
+#      —— 编了等于没修，只是把"确定错"换成"大概率也错"；
+#   ③ 真要默认值就用板端运行根（/opt/ttbox、/var/lib/ttbox）—— 那才是项目事实。
+# 豁免：注释行；含反引号的说明行；**检测规则自身的定义行**（含 DEV_PATH_PAT，
+#   如 ttbox_pack_ota.sh 断言 2b 的正则 —— 它必须原样写出这些字样）。
+_MACHINE_PATH = re.compile(r'/mnt/[a-z]/WORKBUDDY|/mnt/[a-z]/[Uu]sers/|C:/Users/|G:/WORKBUDDY')
+
+
+def check_no_machine_paths():
+    hits = []
+    for p in iter_files():
+        ext = os.path.splitext(p)[1]
+        for n, line in enumerate(read(p).splitlines(), 1):
+            if "`" in line or "DEV_PATH_PAT" in line:
+                continue                          # 反引号说明行 / 检测规则定义行
+            if _MACHINE_PATH.search(strip_comment(line, ext)):
+                hits.append("%s:%d" % (p, n))
+    for h in hits:
+        bad("⑪ 开发机绝对路径 @ %s —— 改脚本自身位置派生，或必填项 `${VAR:-}` + 人话报错" % h)
+    if not hits:
+        ok("⑪ 无开发机绝对路径（源码面全绿）")
+
+
+# ---------------------------------------------------------------------------
 # --selftest 负向控制（证明检测器真能捕获篡改）
 # ---------------------------------------------------------------------------
 def run_selftest(factory):
@@ -585,6 +683,33 @@ def run_selftest(factory):
     # 8) TTBOX_PROJECT_ROOT 兜底 ⇒ 必被捕获
     if not _ROOT_FALLBACK.search('#define TTBOX_PROJECT_ROOT "."'):
         st_bad("TTBOX_PROJECT_ROOT 兜底检测器失效：兜底 #define 未被捕获")
+    # 9) ⑩ 层级硬编码 ⇒ 必被捕获；注释/反引号说明 ⇒ 不得误报
+    if not _PARENTS_HOP.search('ROOT = Path(__file__).resolve().parents[3]'):
+        st_bad("层级硬编码检测器失效：parents[3] 未被捕获")
+    if not _JOIN_HOP.search('os.path.join(d, "..", "..", "plugins")'):
+        st_bad("层级硬编码检测器失效：\"..\", \"..\" 相对跳目录未被捕获")
+    if not _SYSPATH_HOP.search("sys.path.append('../../plugins')"):
+        st_bad("层级硬编码检测器失效：sys.path 里的 '../../plugins' 未被捕获")
+    if not _REL_HOP.search('ROOT = HERE / "../.."'):
+        st_bad("层级硬编码检测器失效：整串 \"../..\" 未被捕获")
+    if _PARENTS_HOP.search(strip_comment('# 原写法 parents[3] 已删', ".py")):
+        st_bad("层级硬编码检测器误报：注释行被当成代码")
+    if _REL_HOP.search("'../../etc/passwd'"):
+        st_bad("层级硬编码检测器误报：测试用例里的路径穿越样本字符串被误判")
+    # 10) ⑪ 开发机绝对路径 ⇒ 必被捕获；正解写法 ⇒ 不得误报
+    for bads in ('KEYS="/mnt/c/Users/Administrator/ttbox-image-keys"',
+                 'REPO="/mnt/g/WORKBUDDY工作区/TTBOX-最终源码-2026-09-18"',
+                 'PYEXE="C:/Users/Administrator/py/python.exe"',
+                 'SRC="G:/WORKBUDDY工作区/x.img"'):
+        if not _MACHINE_PATH.search(bads):
+            st_bad("⑪ 开发机绝对路径检测器失效：%s 未被捕获" % bads)
+    for clean in ('REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+                  'KEYS="${KEYS:-}"',
+                  'IMG="${IMG_ROOT:-/mnt/img}"',
+                  'M="/mnt/v5check"',
+                  'STAGE="${TTBOX_STAGE_DIR:-/root/ttbox-image/_stage}"'):
+        if _MACHINE_PATH.search(clean):
+            st_bad("⑪ 开发机绝对路径检测器误报：正解写法被误判（%s）" % clean)
     if not _selftest_err:
         print("[gate][ OK ] --selftest 负向控制全部命中（篡改必被捕获、注释不误报）")
 
@@ -602,6 +727,8 @@ def main():
     check_no_patch()
     check_no_abs_insert()
     check_project_root_injected()
+    check_no_depth_hardcode()
+    check_no_machine_paths()
     if SELFTEST:
         run_selftest(factory)
 

@@ -62,14 +62,43 @@ except ImportError:  # pragma: no cover
     raise
 
 DEFAULT_KEY_ID = "ttbox-ota-2026b"
-RELEASES = "/opt/ttbox/releases"
-CURRENT_LINK = "/opt/ttbox/current"
-STATE = "/opt/ttbox/state"
-STATUS_FILE = os.path.join(STATE, "ota_status.json")
+
+
+# ── 路径 bootstrap（A-PATH-3）────────────────────────────────────────────────
+# 本脚本随 release 树走（<树根>/scripts/）。树根位置用**锚点发现**确定，不写死
+# 目录深度（原写法 `parents[1]`：搬一次布局就静默指错根，而错根不报错）。
+def _ttbox_tree_root() -> Path:
+    cur = Path(__file__).resolve().parent
+    while True:
+        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            return cur
+        if cur.parent == cur:
+            raise RuntimeError(
+                "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
+                "plugins/framework/scripts/deploy 的目录" % __file__
+            )
+        cur = cur.parent
+
+
+_TREE_ROOT = _ttbox_tree_root()
+# `lib` 包（paths/ipc 单点真源）在 <树根>/plugins/web 下：append 到**末尾**，
+# 不用 insert(0)（顶到 stdlib 前有遮蔽同名标准库的风险）。
+_WEB_DIR = _TREE_ROOT / "plugins" / "web"
+if str(_WEB_DIR) not in sys.path:
+    sys.path.append(str(_WEB_DIR))
+
+from lib.paths import prefix_path as _prefix_path  # noqa: E402  运行根派生（A-PATH-4）
+
+# 运行根下的落点一律经 lib/paths.py 派生：散写 "/opt/ttbox/…" 会让 TTBOX_PREFIX 失效，
+# 也会让同一事实出现第二份字面量（门禁① 的口径）。
+RELEASES = _prefix_path("releases")
+CURRENT_LINK = _prefix_path("current")
+STATE = _prefix_path("state")
+STATUS_FILE = STATE + "/ota_status.json"
 # 发布树内公钥落点（2026-09-18 定案 §2.7）：<ver>/deploy/keys/<key_id>.pub。
 # 旧路径（按仓库布局写的 tools/ota/keys）在板端发布树不存在，已废弃。
 KEYS_DIR = Path(CURRENT_LINK) / "deploy" / "keys"
-INSTALL_SCRIPT = "/opt/ttbox/current/scripts/ttbox_release_install.sh"
+INSTALL_SCRIPT = str(Path(CURRENT_LINK) / "scripts" / "ttbox_release_install.sh")
 HEALTH_UNITS = ("ttbox-core", "ttbox-web", "ttbox-usbproxy")
 HEALTH_TIMEOUT_S = 30
 SIGNED_FIELDS = ("sha256", "version", "built_at", "key_id")
@@ -193,9 +222,6 @@ def _ipc_get_status() -> dict:
     请求体键名是 `type`（IpcServer.cpp:450 `request.find("type")`），
     不是旧版写的 `cmd` —— 那个键 core 根本不认识，GET_STATUS 永远答非所问。
     """
-    import sys as _sys
-    from pathlib import Path as _Path
-    _sys.path.append(str(_Path(__file__).resolve().parents[1] / "plugins" / "web"))
     from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
     sock_path = os.environ.get("TTBOX_IPC_SOCKET", _IPC_DEFAULT)
     try:

@@ -1,66 +1,91 @@
-# TTBOX 出货包白名单 —— 单一真源（S3 / 2026-09-19 交付方案）
+# TTBOX 出货包白名单 —— 单一真源（S3 / 2026-09-19 交付方案；P1 双列化 2026-10-01）
 #
 # 谁读这份文件：
 #   scripts/ttbox_fhs_init.sh 的 sync_tree（首次装机，装到 /opt/ttbox/releases/<ver>）
 #   scripts/ttbox_pack_ota.sh（OTA 出货打包，产出 .ota.tgz + .sign.json）
-#   两处读同一份清单 —— 改这里一处，装机树与 OTA 包一起变。
+#   两处读同一份清单、用同一套语义 —— 改这里一处，装机树与 OTA 包一起变。
 #
-# 条目语义（相对仓库根）：
-#   目录        → 整树拷贝（tcopy 语义：带文件模式，剔除 __pycache__ / *.pyc）
-#   文件        → 单文件安装（.sh/.py → 0755，其余 → 0644）
-#   含通配符    → 按 glob 展开，逐个按上条处理；展开为空 = 打包失败（fail-closed）
+# ── 条目语法（双列：源路径 → 目标路径）────────────────────────────────────────
+#   <源路径> -> <目标路径>
 #
-# 不进这份清单的东西（也不许进）：
+#   · 两条路径都是【仓库根相对路径】。禁绝对路径、禁含 ".."、禁含空白。
+#   · 源路径可以是：目录 / 单个文件 / 末段带通配符（如 deploy/systemd/*.service）。
+#   · 目标路径写法由源决定，二选一，写错即打包失败（fail-closed）：
+#       源不含 "*"  → 目标是【精确落点】，不得以 "/" 结尾。
+#                     源是目录 ⇒ 整树落到该目录名（即允许改名，如 platform -> ttbox_platform）
+#                     源是文件 ⇒ 该文件落到该路径
+#       源含 "*"    → 目标是【目录前缀】，必须以 "/" 结尾；
+#                     每个匹配项落到  目标前缀 + 匹配项的文件名（basename）
+#   · 源路径 glob 展开为空、或源路径不存在 ⇒ 打包失败（不许静默少装）。
+#   · 目录条目整树拷贝时剔除 __pycache__ / *.pyc / .git / tests（与 tcopy 同一剔除集）。
+#
+# ── 这份清单就是出货树的全部来源 ──────────────────────────────────────────────
+#   出货树 = 本清单映射结果 + 两个构建产物（bin/ttbox_core_main、lib/librknnrt.so）。
+#   脚本侧【不再做任何增删文件的后处理】，只做权限归一化。
+#   ⇒ 要把某个文件挡在包外，唯一办法是让它不出现在任何条目的源里。
+#
+# ── 不进这份清单的东西（也不许进）────────────────────────────────────────────
 #   bin/ttbox_core_main、lib/librknnrt.so —— 构建产物，由脚本按闭集规则从构建目录取
-#   docs/ tools/ platform/ modules/ tests/ —— 内部文档与工具，绝不出货（定案 H-26 / S1）
+#   docs/ tools/ modules/ tests/ —— 内部文档与工具，绝不出货（定案 H-26 / S1）
 #   任何 *.priv.pem / .testkeys —— 私钥绝不上板（板端自检逐条扫）
 #
+# ── 数据结构口径（冻结，2026-10-01 业主拍定）──────────────────────────────────
+#   · 物理目录名 = Python 包名；平台层包名 ttbox_platform（**不叫 platform**：
+#     叫 platform 会遮蔽标准库 platform，pytest/werkzeug 启动即崩）
+#   · framework / plugins / ttbox_motion 不改名
+#   · 板端 /opt/ttbox/current/ 布局冻结：顶层闭集 = bin deploy framework lib plugins
+#     scripts ttbox_motion ttbox_platform usbproxy
 # ------------------------------------------------------------------------------
 
 # ---- 运行树（systemd 单元 / web 导入硬依赖；引用审计 2026-09-19）----
 #   systemd 引用：plugins/preview、plugins/web（ExecStart）；usbproxy/board（ExecStart）
-#   ttbox-web.py:37 sys.path 加根目录后导入 ttbox_motion；framework 为历史保留域包
-plugins
-framework
-ttbox_motion
-usbproxy
+#   ttbox-web.py 用根锚发现（A-PATH-3）把树根加进 sys.path 后导入 ttbox_motion；framework 为历史保留域包
+plugins             -> plugins
+framework           -> framework
+ttbox_motion        -> ttbox_motion
+usbproxy            -> usbproxy
+#   平台层包 ttbox_platform：目录名 = 包名（P3 已从 platform 改名）。
+#   ★ 为什么不叫 platform：仓库根一旦在 sys.path 上，本地 platform/ 包会**遮蔽**
+#     标准库 platform ⇒ pytest 在 sessionstart 调 platform.python_version()、
+#     werkzeug 调 platform.system() 全部 AttributeError。改名后此冲突消失。
+ttbox_platform      -> ttbox_platform
 
 # ---- scripts：systemd 引用 + ttbox.sh 子命令 + OTA 调用链 ----
 #   systemd：edid/edid_apply.sh、ttbox_ensure_services.sh、ttbox_ota_updater.py
 #   ttbox.sh 子命令：doctor / backup / restore / uninstall（install 与 rollback 见下两行）
 #   OTA 更新器：ttbox_ota_updater.py:66 调 current/scripts/ttbox_release_install.sh（缺它 OTA 必挂）
 #   ttbox.sh:29 install 转发 ttbox_fhs_init.sh（板端 REPO_ROOT=current，缺它 install 必挂）
-scripts/edid
-scripts/ttbox.sh
-scripts/ttbox_doctor.sh
-scripts/ttbox_backup.sh
-scripts/ttbox_restore.sh
-scripts/ttbox_uninstall.sh
-scripts/ttbox_ensure_services.sh
-scripts/ttbox_ota_updater.py
-scripts/ttbox_dtb_fix.sh
-scripts/ttbox_release_install.sh
-scripts/ttbox_fhs_init.sh
-scripts/ttbox-web-reset-credentials.sh
+scripts/edid                            -> scripts/edid
+scripts/ttbox.sh                        -> scripts/ttbox.sh
+scripts/ttbox_doctor.sh                 -> scripts/ttbox_doctor.sh
+scripts/ttbox_backup.sh                 -> scripts/ttbox_backup.sh
+scripts/ttbox_restore.sh                -> scripts/ttbox_restore.sh
+scripts/ttbox_uninstall.sh              -> scripts/ttbox_uninstall.sh
+scripts/ttbox_ensure_services.sh        -> scripts/ttbox_ensure_services.sh
+scripts/ttbox_ota_updater.py            -> scripts/ttbox_ota_updater.py
+scripts/ttbox_dtb_fix.sh                -> scripts/ttbox_dtb_fix.sh
+scripts/ttbox_release_install.sh        -> scripts/ttbox_release_install.sh
+scripts/ttbox_fhs_init.sh               -> scripts/ttbox_fhs_init.sh
+scripts/ttbox-web-reset-credentials.sh  -> scripts/ttbox-web-reset-credentials.sh
 #   ttbox_usb_mode.sh：USB 鼠标透传模式的**唯一运维入口**（面板已去掉假开关，改为只读展示，
 #     2026-09-22）。客户按「鼠标不动」排查口径要执行它 ⇒ 必须随包，否则板端没有这个文件。
-scripts/ttbox_usb_mode.sh
+scripts/ttbox_usb_mode.sh               -> scripts/ttbox_usb_mode.sh
 
 # ---- deploy：验签公钥 / systemd 单元 / 出厂配置基线 ----
 #   公钥：doctor 检查 ttbox-ota-2026b.pub；OTA 更新器验签用（私钥永不入包）
-#   单元：按扩展名取（.service/.timer/.path），deploy/systemd 里的非单元文件不随包
+#   单元：9 个（8 service + 1 timer + 1 path；ttbox-ota.path 与 ttbox-ensure.timer 亦为单元）
 #   00-factory.json：出厂基线（fhs_init:81 装 /etc/ttbox/config.d）
 #   10-device.json：设备层种子（fhs_init:87 板端 install 用；已存在则跳过、绝不覆盖客户配置）
 #   hardware_display.json：显示配置（P1-1 修复的 root:ttbox 0664 权限基线）
-deploy/keys/*.pub
-deploy/systemd/*.service
-deploy/systemd/*.timer
-deploy/systemd/*.path
-deploy/config/00-factory.json
-deploy/config/10-device.json
-deploy/config/hardware_display.json
+deploy/keys/*.pub                   -> deploy/keys/
+deploy/systemd/*.service            -> deploy/systemd/
+deploy/systemd/*.timer              -> deploy/systemd/
+deploy/systemd/*.path               -> deploy/systemd/
+deploy/config/00-factory.json       -> deploy/config/00-factory.json
+deploy/config/10-device.json        -> deploy/config/10-device.json
+deploy/config/hardware_display.json -> deploy/config/hardware_display.json
 #   rk3588-orangepi-5-plus.dtb：已启用 HDMI-RX 的设备树（1.5.22）
 #     出厂那份里 hdmirx-controller@fdee0000 是 status=disabled ⇒ /dev/video0 不存在
 #     ⇒ HDMI 采集整体不可用、EDID 报「未找到可写 HPD 节点」。
 #     由 scripts/ttbox_dtb_fix.sh 在装机/OTA 时替换（指纹精确匹配才动，需重启生效）。
-deploy/dtb/rk3588-orangepi-5-plus.dtb
+deploy/dtb/rk3588-orangepi-5-plus.dtb -> deploy/dtb/rk3588-orangepi-5-plus.dtb

@@ -6,8 +6,12 @@ import sys
 import time
 from pathlib import Path
 
-# A-PATH-3：scripts 目录相对派生（原硬编码 "/opt/ttbox/scripts" 已删；append 防遮蔽 stdlib）。
-sys.path.append(str(Path(__file__).resolve().parents[2] / "scripts"))
+# A-PATH-3 / P6：根锚发现（原 parents[2]），append 防遮蔽 stdlib。
+_TREE_ROOT = Path(__file__).resolve().parent
+while _TREE_ROOT != _TREE_ROOT.parent and not all(
+        (_TREE_ROOT / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+    _TREE_ROOT = _TREE_ROOT.parent
+sys.path.append(str(_TREE_ROOT / "scripts"))
 from edid.builder import EdidBuilder
 
 HPD = "/sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx/status"

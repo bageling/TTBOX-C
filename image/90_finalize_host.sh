@@ -11,7 +11,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMG_ROOT="${IMG_ROOT:-/mnt/img}"
 WORK="${WORK:-/root/ttbox-image/work.img}"
-REPO_ART="${REPO_ART:-/mnt/g/WORKBUDDY工作区/TTBOX-最终源码-2026-09-18/image/artifacts}"
+REPO_ART="${REPO_ART:-$HERE/artifacts}"
 RC=0
 chk() { if eval "$2"; then printf '  [✓] %s\n' "$1"; else printf '  [✗] %s\n' "$1"; RC=1; fi; }
 

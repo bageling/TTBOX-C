@@ -1,21 +1,22 @@
 import importlib.util
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from flask import Flask
 
-ROOT = Path(__file__).resolve().parents[2]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+ROOT = Path(_ttbox_repo_root())
 WEB_DIR = ROOT / "plugins" / "web"
 
 
 def load_framework_api():
-    """S1-2026-09-18（A0-3c）：framework_api.py（26 条死路由）已从 ttbox-web.py 摘除注册、
-    并移出出货包（仓库内保留）。本测试改为对模块自身构造独立 Flask app，验证其路由契约。"""
-    for p in (str(WEB_DIR), str(ROOT)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    """按文件加载 framework_api.py 并独立构造 Flask app，验证其路由契约。
+
+    ★ framework_api.py 现在**自带路径 bootstrap**（A-PATH-3 根锚发现），测试不再替它
+      插 sys.path —— 原写法用 `sys.path.insert(0, ...)` 救活导入，等于把"它到底能不能
+      在正常入口下导入"这件事藏进测试里（P6 收敛项）。
+    """
     spec = importlib.util.spec_from_file_location(
         "web_framework_api_test", WEB_DIR / "framework_api.py")
     module = importlib.util.module_from_spec(spec)
