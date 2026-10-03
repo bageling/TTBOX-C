@@ -6,6 +6,7 @@
 #   ① 后端 /api/control/calibration 要把「当前生效的 PID」报出来（effective）；
 #   ② 前端到达 completed 终态时要拉一次 /api/config 并 populateForm。
 import os
+import re
 import threading
 
 
@@ -19,7 +20,32 @@ def _read(rel):
 
 
 WEB_SRC = _read('plugins/web/bin/ttbox-web.py')
-HTML_SRC = _read('plugins/web/templates/index.html')
+# ★ 2026-10-02（web 换写法 S4）：标定实现搬到 lib/calibration.py，
+#   _calibration_payload 整体在那边；命名空间注入的东西不变。
+CALIB_SRC = _read('plugins/web/lib/calibration.py')
+HTML_SRC = (_read('plugins/web/templates/index.html')
+     + _read('plugins/web/static/panel.css')
+
+     + _read('plugins/web/static/panel/00-const.js')
+     + _read('plugins/web/static/panel/10-flow.js')
+     + _read('plugins/web/static/panel/calib-bind.js')
+     + _read('plugins/web/static/panel/01-home.js')
+     + _read('plugins/web/static/panel/02-hotkey.js')
+     + _read('plugins/web/static/panel/03-pointer.js')
+     + _read('plugins/web/static/panel/04-assist.js')
+     + _read('plugins/web/static/panel/05-model.js')
+     + _read('plugins/web/static/panel/06-hardware.js')
+     + _read('plugins/web/static/panel/07-preset.js')
+     + _read('plugins/web/static/panel/08-license.js')
+     + _read('plugins/web/static/panel/09-fan.js'))
+
+
+def _func_src(text, name):
+    """取顶层函数源码：起点是 `def <name>(`，终点是下一个顶层 def（没有就到文件尾）。
+    S4 前用的是入口里 `@app.get('/api/control/calibration')` 当终点，搬到 lib 后没这个锚点了。"""
+    start = text.index('def %s(' % name)
+    nxt = text.find('\n\ndef ', start)
+    return text[start:] if nxt < 0 else text[start:nxt + 1]
 
 CAL_KEYS = ('thread', 'phase', 'state', 'status', 'ready', 'reason', 'total_rounds',
             'round', 'progress', 'current_axis', 'valid_sample_count', 'axis_fits',
@@ -31,15 +57,13 @@ CAL_KEYS = ('thread', 'phase', 'state', 'status', 'ready', 'reason', 'total_roun
 
 
 def _payload(profile, record):
-    start = WEB_SRC.index('def _calibration_payload(')
-    end = WEB_SRC.index("@app.get('/api/control/calibration')")
     ns = {
         '_cal_lock': threading.Lock(),
         '_cal': {k: (0 if 'width' in k or 'height' in k else None) for k in CAL_KEYS},
         '_read_calibration': lambda: record,
         '_get_runtime_profile': lambda: profile,
     }
-    exec(WEB_SRC[start:end], ns)
+    exec(_func_src(CALIB_SRC, '_calibration_payload'), ns)
     return ns['_calibration_payload']()
 
 
@@ -61,15 +85,13 @@ def test_effective_empty_when_core_offline():
     """core 离线时生效值留空，绝不拿留档/默认值冒充。"""
     def boom():
         raise RuntimeError('core down')
-    start = WEB_SRC.index('def _calibration_payload(')
-    end = WEB_SRC.index("@app.get('/api/control/calibration')")
     ns = {
         '_cal_lock': threading.Lock(),
         '_cal': {k: (0 if 'width' in k or 'height' in k else None) for k in CAL_KEYS},
         '_read_calibration': lambda: {'valid': True, 'pid_params': {'kp': 0.1}},
         '_get_runtime_profile': boom,
     }
-    exec(WEB_SRC[start:end], ns)
+    exec(_func_src(CALIB_SRC, '_calibration_payload'), ns)
     calib = ns['_calibration_payload']()['calibration']
     assert calib['effective'] == {}, calib
 
@@ -85,11 +107,25 @@ def test_frontend_refreshes_form_on_completed():
     """completed 终态 → 拉 /api/config → populateForm（用户不用刷新页面）。"""
     assert 'syncConfigAfterCalibration' in HTML_SRC
     block = HTML_SRC[HTML_SRC.index('if (["completed", "failed", "cancelled"].includes(state2)'):]
-    block = block[:block.index('scheduleCalibrationPolling(running);')]
+    # ★ 2026-10-03：renderCalibration 拆成 5 段后，这段终态处理搬进了
+    #   calibHandleTerminalState()，块尾不再是 scheduleCalibrationPolling(running)。
+    #   改用「下一个顶层函数定义」作为块尾——意图（这段逻辑必须在 completed 时
+    #   拉一次配置）不变，只是不再依赖某个具体调用恰好在后面。
+    tail = HTML_SRC.find('\nfunction ', HTML_SRC.index('if (["completed", "failed", "cancelled"].includes(state2)'))
+    assert tail > 0, '终态处理块之后应有下一个顶层函数'
+    block = block[:tail]
     assert 'state2 === "completed"' in block, block
     assert 'syncConfigAfterCalibration()' in block, block
     # 只能触发一次：不设闸门会被 800ms 轮询反复拉配置，把用户正在改的输入冲掉
     assert 'state.calibConfigSynced' in block, block
+    # ★ 2026-10-03 补强：原断言只查「calibConfigSynced 字样存在」，
+    #   故障注入证明把 `state.calibConfigSynced = true;` 整行删掉它照样绿
+    #   （字样还在别处被读，但闸门永远不置位 ⇒ 每次 completed 都重复拉配置）。
+    #   ⇒ 必须同时锁住「读」与「写」两侧，且写的那行在同一个 if 块内。
+    assert re.search(r'!\s*state\.calibConfigSynced', block), \
+        '闸门读侧缺失：应看到 !state.calibConfigSynced，实际\n%s' % block
+    assert re.search(r'state\.calibConfigSynced\s*=\s*true', block), \
+        '闸门写侧缺失：应看到 state.calibConfigSynced = true，实际\n%s' % block
 
 
 def test_frontend_sync_pulls_config_and_populates():

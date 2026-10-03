@@ -21,6 +21,8 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from . import paths as _paths
+
 # 云端 expire_at 的固定时区：北京时间 UTC+8（契约钉死，不做本地时区推断）
 _CLOUD_TZ = timezone(timedelta(hours=8))
 
@@ -28,10 +30,11 @@ SESSION_FILENAME = 'cloud_session.json'
 
 
 def _default_session_path() -> str:
-    # 与其它状态同区：/opt/ttbox/config/（0700，fhs_init 已建）。
+    # 与其它状态同区：<config_dir>（0700，fhs_init 已建）。路径经 lib/paths.py 派生
+    # （A-PATH-4）：散写 "/opt/ttbox/config/…" 会让 TTBOX_PREFIX 失效。
     # 环境变量覆盖仅供宿主侧测试注入，板端恒用默认路径。
     return os.environ.get('TTBOX_CLOUD_SESSION',
-                          '/opt/ttbox/config/cloud_session.json')
+                          _paths.join_path(_paths.config_dir(), 'cloud_session.json'))
 
 
 class CloudSessionStore:

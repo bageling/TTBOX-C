@@ -1,10 +1,13 @@
 # test_web_calibration_apply.py — ttbox-web.py 标定结果写回逻辑单测（本地，不启动 Web）
 # 验证：标定 gain 写回 mouse.gain_x/y_px_per_count + 拟人化联动，
 #      且不再用旧体系 K_LOOP 改写 kp（pid1 体系 kp 保持不动）。
+# ★ 2026-10-02（web 换写法 S4）：实现已从 bin/ttbox-web.py 搬到 plugins/web/lib/calibration.py，
+#   切片源跟着换文件；命名空间仍注入 _get_runtime_profile / ipc_request / _CFG_WRITE_LOCK
+#   三个名字（lib 侧对这三个只用裸名，所以注入照样生效）。
 import sys
 import threading
 
-src = open('plugins/web/bin/ttbox-web.py', encoding='utf-8').read()
+src = open('plugins/web/lib/calibration.py', encoding='utf-8').read()
 
 # 提取 _calib_apply_gain 函数体（到下一个顶层 def 为止）
 start = src.index('def _calib_apply_gain(')

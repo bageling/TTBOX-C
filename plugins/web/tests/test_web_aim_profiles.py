@@ -21,9 +21,11 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
 TEMPLATE = REPO_ROOT / 'plugins' / 'web' / 'templates' / 'index.html'
+from plugins.web.tests import panel_src  # noqa: E402  2026-10-03 面板外链：读整个面板
 
 _load_seq = 0
 
@@ -341,7 +343,7 @@ def test_put_config_accepts_two_disjoint_profiles(web_mod, monkeypatch):
 # ===========================================================================
 
 def _html() -> str:
-    return TEMPLATE.read_text(encoding='utf-8')
+    return panel_src.all_src()
 
 
 def test_html_defines_overlap_check_before_submit():

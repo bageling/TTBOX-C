@@ -29,9 +29,15 @@ import types
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
+#★ 2026-10-02（web 换写法 S7）：风扇/loopout 载荷已从入口搬到 lib/hw_payloads.py。
+#   下面那条「源码级兜底」断言抽的是 _fan_control_payload 的函数体，
+#   目标跟着搬 —— 规则（不许恒False、必须调 _fan_enabled）一个字没改。
+PAYLOAD_SRC = REPO_ROOT / 'plugins' / 'web' / 'lib' / 'hw_payloads.py'
 TEMPLATE = REPO_ROOT / 'plugins' / 'web' / 'templates' / 'index.html'
+from plugins.web.tests import panel_src  # noqa: E402  2026-10-03 面板外链：读整个面板
 
 _load_seq = 0
 
@@ -87,7 +93,7 @@ def test_fan_enabled_follows_real_pwm_not_a_constant(web_mod):
 
 def test_fan_payload_does_not_hardcode_enabled_false():
     """源码级兜底：那行恒 False 不许回来。"""
-    src = WEB_SRC.read_text(encoding='utf-8')
+    src = PAYLOAD_SRC.read_text(encoding='utf-8')
     start = src.index('def _fan_control_payload()')
     end = src.index('def _loopout_payload()')
     body = src[start:end]
@@ -361,7 +367,7 @@ def test_source_has_no_fabricated_mouse_env_path_or_constant_applied():
 # ── 前端契约：三个面板都要读真实字段 ─────────────────────────────────────
 
 def test_frontend_reads_action_available_and_gadget_config():
-    src = TEMPLATE.read_text(encoding='utf-8')
+    src = panel_src.all_src()
     assert 'rootfs.action_available' in src, '扩容按钮必须受执行通道开关约束'
     assert 'gadget_config' in src, '鼠标面板必须优先显示已落盘的真实身份'
     assert 'payload.rootfs' in src, '扩容失败也要按契约渲染真实 rootfs'

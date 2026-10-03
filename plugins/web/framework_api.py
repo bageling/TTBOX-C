@@ -4,9 +4,35 @@
 """
 from __future__ import annotations
 import os
+import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from flask import jsonify, request
+
+
+# ── 路径 bootstrap（A-PATH-3）────────────────────────────────────────────────
+# 本模块有两种加载方式：① web 进程内（sys.path 已就绪）；② 测试按文件 importlib 加载
+# （sys.path 里没有本树）。这里自己保证「树根 + 本插件目录」在 sys.path **末尾**，
+# 判据与 plugins/web/lib/paths.py::_ROOT_ANCHORS 同源，**不写死目录深度**
+# （原写法靠调用方 parents[N] 先注入，改布局即静默指错根）。
+def _ttbox_tree_root():
+    cur = Path(__file__).resolve().parent
+    while True:
+        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            return cur
+        if cur.parent == cur:
+            raise RuntimeError(
+                "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
+                "plugins/framework/scripts/deploy 的目录" % __file__
+            )
+        cur = cur.parent
+
+
+_TREE_ROOT = _ttbox_tree_root()
+# append 到末尾（不用 insert(0)：顶到 stdlib 前会遮蔽同名标准库模块）
+for _path_entry in (str(_TREE_ROOT), str(_TREE_ROOT / "plugins" / "web")):
+    if _path_entry not in sys.path:
+        sys.path.append(_path_entry)
 
 from framework.plugin_manager import InstallRequest, InstallSource, LocalRepository, PluginManager
 from framework.plugin_manager.models import PluginHealth, PluginState
@@ -14,13 +40,13 @@ from plugins.system_host import SystemPluginHost
 
 # IPC socket 唯一真源（A-PATH-5）：TTBOX_IPC_SOCKET 环境变量 > lib/paths.py 默认。
 # 本文件不再硬编码 "/run/ttbox/core.sock"（单一 Python 真源 = plugins/web/lib/paths.py）。
-from lib import paths as _ttbox_paths
+from plugins.web.lib import paths as _ttbox_paths
 
 CORE_IPC_SOCKET = _ttbox_paths.ipc_socket()
 
 
 # V-13：IPC 客户端**唯一实现** = lib/ipc.py（本处不再重复实现，避免超时/错误码/返回结构漂移）。
-from lib import ipc as _ttbox_ipc
+from plugins.web.lib import ipc as _ttbox_ipc
 
 
 def _ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -> dict:
@@ -37,7 +63,9 @@ def _jsonable(value):
 
 
 def install_framework_api(app):
-    plugins_root = Path(os.environ.get("TTBOX_PLUGINS_ROOT", "/opt/ttbox/plugins"))
+    # 插件根默认值不再散写 FHS 字面量：走 lib/paths.py 的根锚派生（A-PATH-3）——
+    # 开发机 = <repo>/plugins，板端 = <release 树>/plugins，两态同一判据。
+    plugins_root = Path(os.environ.get("TTBOX_PLUGINS_ROOT", _ttbox_paths.plugins_dir()))
     repository_root = Path(os.environ.get("TTBOX_PLUGIN_REPOSITORY_ROOT", str(plugins_root / "repository")))
     manager = PluginManager(plugins_root=plugins_root)
     repository = LocalRepository(repository_root)

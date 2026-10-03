@@ -22,8 +22,8 @@ import threading
 import time
 from typing import Callable
 
-from lib.cloud_client import CloudLicenseClient, CloudLicenseError
-from lib.cloud_session import CloudSessionStore, device_serial
+from .cloud_client import CloudLicenseClient, CloudLicenseError
+from .cloud_session import CloudSessionStore, device_serial
 
 _BACKOFF_BASE_S = 5.0
 _BACKOFF_CAP_S = 60.0

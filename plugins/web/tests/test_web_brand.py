@@ -28,7 +28,8 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
 
 _load_seq = 0

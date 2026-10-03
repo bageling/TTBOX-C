@@ -34,9 +34,12 @@ import re
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 UPDATER_SRC = REPO_ROOT / 'scripts' / 'ttbox_ota_updater.py'
-WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
+# ★ 2026-10-02（web 换写法 S6）：_ota_ver_key 已搬到 lib/ota.py。面板侧的版本排序规则
+#   现在住在这个文件里 —— 抽真源码的目标跟着走，规则本身一个字没改。
+OTA_SRC = REPO_ROOT / 'plugins' / 'web' / 'lib' / 'ota.py'
 VERSION_HPP = REPO_ROOT / 'core' / 'include' / 'ttbox' / 'core' / 'version.hpp'
 
 V_LINE = 'V1.0.01'
@@ -79,7 +82,7 @@ def updater():
 
 @pytest.fixture(scope='module')
 def web_key():
-    return _extract_functions(WEB_SRC, {'_ota_ver_key'})['_ota_ver_key']
+    return _extract_functions(OTA_SRC, {'_ota_ver_key'})['_ota_ver_key']
 
 
 def test_v_prefix_sorts_above_the_numeric_line(updater, web_key):
@@ -124,7 +127,7 @@ def test_current_version_is_on_the_v_line(updater):
 
 def test_both_python_copies_share_one_rule():
     """两处 Python 实现必须是同一套规则（tag 0 = 数字段 / tag 1 = 非数字段）。"""
-    for path in (UPDATER_SRC, WEB_SRC):
+    for path in (UPDATER_SRC, OTA_SRC):
         src = _norm_quotes(path.read_text(encoding='utf-8'))
         assert 'parts.append((0, int(seg), ""))' in src, '%s 的数字段分支已变形' % path.name
         assert 'parts.append((1, 0, seg))' in src, '%s 的非数字段分支已变形' % path.name

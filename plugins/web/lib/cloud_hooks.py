@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+"""cloud_hooks —— 从 bin/ttbox-web.py 原样搬出（2026-10-02 web 换写法 S10 第一步）。
+
+云端授权相关的小钩子：设备停用回调、心跳 worker 拉起、授权缓存失效。
+★ 它们的实现体调用入口的 `ipc_request` 等锚点 ⇒ 经 hub 取。
+搬出 3 个函数：_cloud_deactivate_callback / _ensure_heartbeat_worker / _invalidate_activation_cache
+
+★ 本模块在 lib/，**不能 import 入口** ⇒ 段外依赖一律经 hub 调用时取。
+"""
+
+from __future__ import annotations
+
+from plugins.web.lib import hub
+
+def HeartbeatWorker(*args, **kwargs):
+    """入口的 HeartbeatWorker —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('HeartbeatWorker', *args, **kwargs)
+
+
+def _ACTIVATION_CACHE(*args, **kwargs):
+    """入口的 _ACTIVATION_CACHE —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_ACTIVATION_CACHE', *args, **kwargs)
+
+
+def _CLOUD_CLIENT(*args, **kwargs):
+    """入口的 _CLOUD_CLIENT —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_CLOUD_CLIENT', *args, **kwargs)
+
+
+def _CLOUD_SESSION(*args, **kwargs):
+    """入口的 _CLOUD_SESSION —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_CLOUD_SESSION', *args, **kwargs)
+
+
+def _HEARTBEAT_START_LOCK(*args, **kwargs):
+    """入口的 _HEARTBEAT_START_LOCK —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_HEARTBEAT_START_LOCK', *args, **kwargs)
+
+
+def _cloud_deactivate_callback(*args, **kwargs):
+    """入口的 _cloud_deactivate_callback —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_cloud_deactivate_callback', *args, **kwargs)
+
+
+def _invalidate_activation_cache(*args, **kwargs):
+    """入口的 _invalidate_activation_cache —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_invalidate_activation_cache', *args, **kwargs)
+
+
+def _machine_code(*args, **kwargs):
+    """入口的 _machine_code —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('_machine_code', *args, **kwargs)
+
+
+def ipc_request(*args, **kwargs):
+    """入口的 ipc_request —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('ipc_request', *args, **kwargs)
+
+
+def kAppVersion(*args, **kwargs):
+    """入口的 kAppVersion —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    return hub.call('kAppVersion', *args, **kwargs)
+
+def _cloud_deactivate_callback() -> None:
+    """云端 403（到期/禁用）⇒ 快路径：IPC ACTIVATE_CLOUD{deactivate:true} 让 core 立即锁定。
+
+    注意：发布到 LicenseGate 由 core 完成（本层不碰授权真相）；本回调只触发并清缓存。
+    """
+    ipc_request('ACTIVATE_CLOUD', {
+        'deactivate': True,
+        'source': 'cloud',
+        'reason': '云端返回403（卡密到期或已禁用）',
+    }, timeout=5)
+    _invalidate_activation_cache()
+
+
+def _ensure_heartbeat_worker() -> None:
+    """心跳线程幂等拉起（激活成功 / web 启动时恢复会话后调用）。"""
+    global _HEARTBEAT
+    with _HEARTBEAT_START_LOCK:
+        if _HEARTBEAT is not None and _HEARTBEAT.running():
+            return
+        _HEARTBEAT = HeartbeatWorker(
+            _CLOUD_CLIENT, _CLOUD_SESSION,
+            on_expired=_cloud_deactivate_callback,
+            client_version=kAppVersion,
+            machine_code=_machine_code,
+        )
+        _HEARTBEAT.start()
+
+
+def _invalidate_activation_cache() -> None:
+    """激活/失活后立即失效缓存（使 gate 与页面引导即时翻转）。"""
+    _ACTIVATION_CACHE['ts'] = 0.0

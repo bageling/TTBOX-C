@@ -210,7 +210,7 @@ class CloudLicenseClient:
         if not token:
             raise CloudLicenseError(0, 'http_error', '云端响应缺少 client_token')
         expire_at = str(payload.get('expire_at') or payload.get('expireAt') or '')
-        from lib.cloud_session import parse_expire_at  # 局部导入避免环（§7.2 唯一换算点）
+        from .cloud_session import parse_expire_at  # 局部导入避免环（§7.2 唯一换算点）
         return {
             'mode': str(payload.get('mode') or 'card'),
             'client_token': token,

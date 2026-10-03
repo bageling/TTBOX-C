@@ -17,8 +17,25 @@ def _read(rel):
     raise AssertionError('找不到文件: ' + rel)
 
 
-WEB = _read('plugins/web/bin/ttbox-web.py')
-HTML = _read('plugins/web/templates/index.html')
+# ★ 2026-10-02（web 换写法 S5）：参数翻译层已从 bin/ttbox-web.py 搬到 lib/profile_translate.py。
+#   这两条断言只问「代码里有没有这一段」，故把入口与翻译层拼起来看 —— 以后再怎么搬都成立。
+WEB = (_read('plugins/web/bin/ttbox-web.py')
+       + _read('plugins/web/lib/profile_translate.py'))
+# 2026-10-03 面板外链：CSS/JS 搬到 static/ 后，读上这三个文件才知行代码在哪。
+HTML = (_read('plugins/web/templates/index.html')
+     + _read('plugins/web/static/panel.css')
+
+     + _read('plugins/web/static/panel/00-const.js')
+     + _read('plugins/web/static/panel/10-flow.js')
+     + _read('plugins/web/static/panel/01-home.js')
+     + _read('plugins/web/static/panel/02-hotkey.js')
+     + _read('plugins/web/static/panel/03-pointer.js')
+     + _read('plugins/web/static/panel/04-assist.js')
+     + _read('plugins/web/static/panel/05-model.js')
+     + _read('plugins/web/static/panel/06-hardware.js')
+     + _read('plugins/web/static/panel/07-preset.js')
+     + _read('plugins/web/static/panel/08-license.js')
+     + _read('plugins/web/static/panel/09-fan.js'))
 
 
 def test_profile_to_web_exposes_flag():

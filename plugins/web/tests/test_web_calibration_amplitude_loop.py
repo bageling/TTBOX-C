@@ -14,8 +14,11 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
+# ★ 2026-10-02（web 换写法 S4）：标定实现搬到 lib/calibration.py。
+CALIB_SRC = REPO_ROOT / 'plugins' / 'web' / 'lib' / 'calibration.py'
 
 _ext = {'n': 0}
 
@@ -42,11 +45,14 @@ def web_mod(monkeypatch):
 
 
 def _src() -> str:
-    return WEB_SRC.read_text(encoding='utf-8')
+    """实现可能落在入口或 lib（S4 起标定搬到 lib/calibration.py）——
+    这些断言只问「代码里有没有这一段」，故把两侧拼起来看。"""
+    return (WEB_SRC.read_text(encoding='utf-8') +
+            CALIB_SRC.read_text(encoding='utf-8'))
 
 
 def _worker() -> str:
-    s = _src()
+    s = CALIB_SRC.read_text(encoding='utf-8')
     return s[s.index('def _calib_worker('):s.index('def _calibration_payload(')]
 
 

@@ -25,7 +25,8 @@ import os
 import pathlib
 import sys
 
-WEB_SRC = pathlib.Path(__file__).resolve().parents[3] / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+WEB_SRC = pathlib.Path(_ttbox_repo_root()) / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
 
 _load_seq = 0
 

@@ -44,7 +44,7 @@ api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 # IPC 传输层
 # ====================================================================
 # IPC socket 唯一真源（A-PATH-5）：TTBOX_IPC_SOCKET > lib/paths.py 默认（与 ttbox-web.py 一致）。
-from lib import paths as _ttbox_paths
+from plugins.web.lib import paths as _ttbox_paths
 
 IPC_SOCKET = _ttbox_paths.ipc_socket()
 # Windows 本机开发用：TTBOX_IPC_TCP=127.0.0.1:9100（协议与 Unix socket 完全一致）。

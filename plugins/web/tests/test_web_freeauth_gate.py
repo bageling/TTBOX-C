@@ -21,12 +21,12 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
-for p in (str(REPO_ROOT), str(REPO_ROOT / 'plugins' / 'web')):
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
+# ★ P6：原先在这里 insert(0, REPO_ROOT/WEB_DIR) 替 ttbox-web.py 补 sys.path。
+#   ttbox-web.py 现在**自带根锚 bootstrap**（A-PATH-3），测试不再替它铺路 ——
+#   否则"它到底能不能在正常入口下加载"这件事永远验证不到。
 _load_seq = 0
 
 
@@ -321,10 +321,17 @@ def test_activate_page_replicates_license_gate_card(client, web_mod, monkeypatch
 
 
 def test_panel_template_keeps_license_overlay_fallback():
-    """面板模板保留上游 #licenseGateOverlay 标记（运行期掉线/被撤销时就地兜底）。"""
-    html = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+    """面板保留上游 #licenseGateOverlay 标记 + 锁导航的JS（运行期掉线/被撤销时就地兜底）。
+
+    ★ 2026-10-03 面板外链后：DOM 标记在 index.html，
+      而 `setLicenseNavigationLock` 这个**函数**随脚本搬到了 static/panel.js。
+      ⇒ 分开查，别再一个字符串里找两个文件的东西。
+    """
+    from plugins.web.tests import panel_src
+    html = panel_src.html_src()
+    js = panel_src.js_src()
     assert 'id="licenseGateOverlay"' in html
-    assert 'setLicenseNavigationLock' in html
+    assert 'setLicenseNavigationLock' in js
 
 
 def test_unactivated_double_insurance_302_and_403(client, web_mod, monkeypatch):

@@ -29,7 +29,8 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_SRC = REPO_ROOT / 'plugins' / 'web' / 'bin' / 'ttbox-web.py'
 
 _load_seq = 0
@@ -487,10 +488,11 @@ def test_profile_to_web_legacy_card_count_is_one_never_zero(web_mod):
 # ===========================================================================
 
 TEMPLATE = REPO_ROOT / 'plugins' / 'web' / 'templates' / 'index.html'
+from plugins.web.tests import panel_src  # noqa: E402  2026-10-03 面板外链：读整个面板
 
 
 def _html() -> str:
-    return TEMPLATE.read_text(encoding='utf-8')
+    return panel_src.all_src()
 
 
 def _js_const(src, name):

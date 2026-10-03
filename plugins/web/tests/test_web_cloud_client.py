@@ -26,17 +26,18 @@ import urllib.request
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+from plugins.web.lib.paths import repo_root as _ttbox_repo_root  # noqa: E402  路径单点真源（A-PATH-3）
+REPO_ROOT = pathlib.Path(_ttbox_repo_root())
 WEB_DIR = REPO_ROOT / 'plugins' / 'web'
-for p in (str(REPO_ROOT), str(WEB_DIR)):
-    if p not in sys.path:
-        sys.path.insert(0, p)
 
-from lib.cloud_client import (CloudLicenseClient, CloudLicenseError,   # noqa: E402
-                              DEFAULT_APP_SECRET, PATH_CARD_LOGIN,
-                              PATH_HEARTBEAT)
-from lib.cloud_session import CloudSessionStore, card_mask, parse_expire_at  # noqa: E402
-from lib.heartbeat_worker import HeartbeatWorker                       # noqa: E402
+# ★ P6：不再替被测代码插 sys.path（原来 insert(0, REPO_ROOT/WEB_DIR) 换掉了
+#   "lib 包能不能在正常入口下导入"这件事）。`plugins.web.lib.*` 是包内全路径导入，
+#   只需要仓库根在 sys.path —— `python -m pytest` 天然满足。
+from plugins.web.lib.cloud_client import (CloudLicenseClient, CloudLicenseError,   # noqa: E402
+                                          DEFAULT_APP_SECRET, PATH_CARD_LOGIN,
+                                          PATH_HEARTBEAT)
+from plugins.web.lib.cloud_session import CloudSessionStore, card_mask, parse_expire_at  # noqa: E402
+from plugins.web.lib.heartbeat_worker import HeartbeatWorker                       # noqa: E402
 
 TEST_SECRET = 'unit-test-secret-0123456789abcdef'
 
@@ -397,7 +398,7 @@ def test_worker_403_triggers_on_expired(tmp_path):
 
 def test_is_session_loss_predicate():
     """403 文案分层判据（纯函数）：只有"会话级失效"允许重登自愈。"""
-    from lib.heartbeat_worker import _is_session_loss
+    from plugins.web.lib.heartbeat_worker import _is_session_loss
     assert _is_session_loss('登录状态已失效，请重新激活') is True
     assert _is_session_loss('卡密已到期') is False
     assert _is_session_loss('卡密已被禁用') is False
@@ -478,7 +479,7 @@ def test_worker_403_session_loss_relogin_fails_locks(tmp_path):
 
 def test_worker_session_loss_recovery_is_bounded(tmp_path):
     """服务端持续把会话打回 invalid 时，自愈次数必须封顶（防无 sleep 热循环）。"""
-    from lib.heartbeat_worker import _SESSION_RECOVER_MAX
+    from plugins.web.lib.heartbeat_worker import _SESSION_RECOVER_MAX
     client = FakeClient()
     client.heartbeat_results = [
         CloudLicenseError(403, 'session_invalid', '登录状态已失效，请重新激活'),

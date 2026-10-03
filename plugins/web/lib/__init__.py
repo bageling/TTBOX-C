@@ -1,6 +1,7 @@
 # plugins/web/lib — Web 层公共库（M2.07 起）
 #
-# ttbox-web.py 已把本目录加入 sys.path（sys.path.insert(0, parents[1])），
+# ttbox-web.py 已把本目录加入 sys.path 末尾（append，不用 insert(0)：顶到 stdlib
+# 前会遮蔽同名标准库模块）；systemd 单元的 PYTHONPATH 也是同一个目录。
 # 因此可直接 `from lib.cloud_client import CloudLicenseClient`。
 #
 # 本包遵循两条红线：
