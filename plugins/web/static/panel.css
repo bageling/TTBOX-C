@@ -739,6 +739,24 @@ html[data-theme="light"] .modal-card {
   color: #fff;
 }
 
+/* ★ 2026-10-03 交互延迟：启停请求在途（板端 start 要 ~1s）。
+   用「半透明 + 轻微呼吸」表示"正在处理"，别让用户以为没点上。 */
+.power-button.is-busy {
+  opacity: 0.72;
+  cursor: progress;
+  animation: power-button-busy 1.1s ease-in-out infinite;
+}
+
+@keyframes power-button-busy {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 0.94;
+  }
+}
+
 .power-button:hover {
   border-color: rgba(121, 214, 197, 0.56);
   background:

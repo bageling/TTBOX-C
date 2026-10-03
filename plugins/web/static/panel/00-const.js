@@ -283,6 +283,8 @@ const state = {
   modelPanelSignature: "",
   brandRenderSignature: "",
   presetCleanupButtonSignature: "",
+  // ★ 2026-10-03 交互延迟：启停请求在途时按钮显示的临时文字（空=不在途）
+  runtimeControlBusyText: "",
   modelGameFilter: "all",
   modelBackendFilter: "all",
   modelGameOptions: [],

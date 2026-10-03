@@ -2856,6 +2856,11 @@ function renderRuntimeLatencyFps(latencyState, inferenceMs, inferenceFps, captur
 function renderRuntimePowerButton(runtime, isReconnecting, licenseValid) {
   const startButton = $("startButton");
   if (startButton) {
+    // ★ 请求在途时不覆写：否则每 1.5s 的轮询会把「启动中…」冲掉，
+    //   用户看到按钮文字闪回「启动」，以为没点上。
+    if (state.runtimeControlBusyText) {
+      return;
+    }
     const shouldStop = runtime.running || runtime.status === "starting" || isReconnecting;
     startButton.disabled = !licenseValid;
     startButton.className = `power-button ${shouldStop ? "stop" : "start"}`;
@@ -2864,6 +2869,35 @@ function renderRuntimePowerButton(runtime, isReconnecting, licenseValid) {
       label.textContent = !licenseValid ? "未激活" : shouldStop ? "停止" : "启动";
     }
   }
+}
+
+// ★ 2026-10-03 交互延迟修复：启动/停止请求在途时的**立即反馈**。
+//   背景（板端实测）：POST /api/control/start 要 1070 ms（core 加载模型，物理下限），
+//   期间界面零变化 ⇒ 用户体感"点了没反应"。
+//   这里在请求发出前就把按钮切到「启动中…」/「停止中…」并禁用，
+//   请求返回后由renderRuntime 还原成真实状态。
+//   ⚠️ 只改按钮的**临时**状态，不碰 state —— 真实状态仍以 core 返回为准。
+function showRuntimeControlBusy(busy, isStopAction) {
+  const startButton = $("startButton");
+  if (!startButton) {
+    return;
+  }
+  const label = startButton.querySelector("strong");
+  if (busy) {
+    state.runtimeControlBusyText = label ? label.textContent : "";
+    startButton.disabled = true;
+    startButton.className = `power-button ${isStopAction ? "stop" : "start"} is-busy`;
+    if (label) {
+      label.textContent = isStopAction ? "停止中…" : "启动中…";
+    }
+    return;
+  }
+  // 还原：清掉 busy 标记，文字交回 renderRuntimePowerButton 重算
+  if (label && state.runtimeControlBusyText) {
+    label.textContent = state.runtimeControlBusyText;
+  }
+  state.runtimeControlBusyText = "";
+  startButton.className = `power-button ${isStopAction ? "stop" : "start"}`;
 }
 
 function renderSystemStats(payload) {
@@ -5233,7 +5267,17 @@ function bindHomeEvents() {
       await refreshAll();
     }
     const path = shouldStop ? "/api/control/stop" : "/api/control/start";
-    const nextRuntime = await api(path, { method: "POST" });
+    // ★ 2026-10-03 交互延迟修复：点击后**立即**给反馈，别让用户干等。
+    //   实测：POST /api/control/start 板端要 1070 ms（core 加载模型，物理下限），
+    //   而原来这 1 秒里按钮不置灰、文字不变、状态栏不动 ⇒ 体感就是"点了没反应"。
+    //   做法：立刻把按钮切到「启动中…」并禁用，等后端返回再由 renderRuntime 还原。
+    showRuntimeControlBusy(true, shouldStop);
+    let nextRuntime;
+    try {
+      nextRuntime = await api(path, { method: "POST" });
+    } finally {
+      showRuntimeControlBusy(false, shouldStop);
+    }
     if (state.data) {
       state.data.state = {
         ...runtime,
