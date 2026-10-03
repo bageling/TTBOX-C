@@ -33,8 +33,19 @@ def _CLOUD_SESSION(*args, **kwargs):
 
 
 def _HEARTBEAT_START_LOCK(*args, **kwargs):
-    """入口的 _HEARTBEAT_START_LOCK —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
+    """入口的 _HEARTBEAT_START_LOCK —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。
+
+    ★★ 只用于「把它当函数调」的场合。**锁对象请用 `_heartbeat_start_lock()`**：
+       入口侧是真`threading.Lock()`，而本函数是转发函数 —— `with _HEARTBEAT_START_LOCK:`
+       拿到的是函数对象、没有 `__enter__` ⇒ 启动即崩
+       （2026-10-03 板端实测：AttributeError: __enter__，web 服务重启循环）。
+    """
     return hub.call('_HEARTBEAT_START_LOCK', *args, **kwargs)
+
+
+def _heartbeat_start_lock():
+    """取真正的锁对象（`threading.Lock` 实例），供 `with` 使用。"""
+    return hub.get('_HEARTBEAT_START_LOCK')
 
 
 def _cloud_deactivate_callback(*args, **kwargs):
@@ -77,7 +88,7 @@ def _cloud_deactivate_callback() -> None:
 def _ensure_heartbeat_worker() -> None:
     """心跳线程幂等拉起（激活成功 / web 启动时恢复会话后调用）。"""
     global _HEARTBEAT
-    with _HEARTBEAT_START_LOCK:
+    with _heartbeat_start_lock():
         if _HEARTBEAT is not None and _HEARTBEAT.running():
             return
         _HEARTBEAT = HeartbeatWorker(
