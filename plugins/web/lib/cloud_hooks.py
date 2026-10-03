@@ -86,20 +86,33 @@ def _cloud_deactivate_callback() -> None:
 
 
 def _ensure_heartbeat_worker() -> None:
-    """心跳线程幂等拉起（激活成功 / web 启动时恢复会话后调用）。"""
-    global _HEARTBEAT
+    """心跳线程幂等拉起（激活成功 / web 启动时恢复会话后调用）。
+
+    ★★ 心跳句柄是**入口的模块级变量**（`ttbox-web.py::_HEARTBEAT`），
+       本模块没有它的全局 —— 写`global _HEARTBEAT` 会NameError
+       （2026-10-03 板端实测：NameError: name '_HEARTBEAT' is not defined，
+        web 服务重启循环）。必须经 hub.get 读、setattr 写。
+    """
     with _heartbeat_start_lock():
-        if _HEARTBEAT is not None and _HEARTBEAT.running():
+        current = hub.get('_HEARTBEAT')
+        if current is not None and current.running():
             return
-        _HEARTBEAT = HeartbeatWorker(
+        worker = HeartbeatWorker(
             _CLOUD_CLIENT, _CLOUD_SESSION,
             on_expired=_cloud_deactivate_callback,
             client_version=kAppVersion,
             machine_code=_machine_code,
         )
-        _HEARTBEAT.start()
+        setattr(hub.entry(), '_HEARTBEAT', worker)
+        worker.start()
 
 
 def _invalidate_activation_cache() -> None:
-    """激活/失活后立即失效缓存（使 gate 与页面引导即时翻转）。"""
-    _ACTIVATION_CACHE['ts'] = 0.0
+    """激活/失活后立即失效缓存（使 gate 与页面引导即时翻转）。
+
+    ★ 缓存字典是**入口的模块级变量**（`ttbox-web.py::_ACTIVATION_CACHE`），
+      写 `_ACTIVATION_CACHE['ts'] = 0` 是在给**转发函数**下标赋值
+      （2026-10-03 板端同类事故：TypeError: 'function' object does not
+      support item assignment）。必须经 hub.get 取真字典。
+    """
+    hub.get('_ACTIVATION_CACHE')['ts'] = 0.0
