@@ -44,7 +44,11 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
-project(ttbox_core VERSION 1.0.16 LANGUAGES CXX)
+#   V1.0.18 相对 V1.0.17（2026-10-03）：
+#                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
+#                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
+#                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
+project(ttbox_core VERSION 1.0.18 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
