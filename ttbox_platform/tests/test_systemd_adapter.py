@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from platform.supervisor.systemd_adapter import SystemdServiceAdapter
+from ttbox_platform.supervisor.systemd_adapter import SystemdServiceAdapter
 class SystemdAdapterTests(unittest.TestCase):
  def test_status_parsing_and_argv(self):
   calls=[]

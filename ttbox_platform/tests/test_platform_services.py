@@ -1,9 +1,9 @@
 import tempfile,unittest
 from pathlib import Path
-from platform.supervisor.service_catalog import ServiceCatalog
-from platform.health.checks import PlatformHealth
-from platform.runtime.controller import RuntimeController
-from platform.runtime.process_adapter import MockProcessAdapter
+from ttbox_platform.supervisor.service_catalog import ServiceCatalog
+from ttbox_platform.health.checks import PlatformHealth
+from ttbox_platform.runtime.controller import RuntimeController
+from ttbox_platform.runtime.process_adapter import MockProcessAdapter
 class PlatformServiceTests(unittest.TestCase):
  def test_catalog_dependencies(self):
   c=ServiceCatalog(); self.assertEqual(c.get('ttbox-core').restart,'always'); self.assertIn('ttbox-core',c.get('ttbox-supervisor').after)

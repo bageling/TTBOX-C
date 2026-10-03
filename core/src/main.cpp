@@ -46,5 +46,8 @@ int main(int argc, char** argv) {
 
     app.run();
     app.shutdown();
+    // §5.2：WARN/INFO 走内存缓冲批量落盘 —— 进程退出前必须强制刷一次，
+    // 否则最后不足 5 分钟的那批日志会随进程一起丢掉（现场排查最需要的就是最后那几行）。
+    ttbox::core::Logger::instance().flush();
     return 0;
 }

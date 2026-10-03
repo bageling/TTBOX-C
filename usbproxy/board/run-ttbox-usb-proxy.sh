@@ -16,7 +16,12 @@
 #   并在等待期每 10s 打一张接口诊断表。细节见下方 mouse_device_rule 注释。
 set -eu
 
-USB_PROXY_DEVICE=${USB_PROXY_DEVICE:-fc000000.usb}
+# P8：UDC 名**不再默认写死硬件编号**。空 = 让下面的"等 UDC"循环在控制器出现后
+# 自动取其名（/sys/class/udc 下名字排序首个）。RK3588 上历史写死的 fc000000.usb
+# 恰好就是排序首个（该目录只列切到 device 模式的控制器），故行为与旧版一致；
+# 换板/换内核导致编号移位时，不会再"等不到 UDC"直接起不来。
+# 需要固定控制器时用 USB_PROXY_DEVICE=<名>（登记于 docs/protocols/config-path-env-registry.md）。
+USB_PROXY_DEVICE=${USB_PROXY_DEVICE:-}
 USB_PROXY_DRIVER=${USB_PROXY_DRIVER:-dwc3-gadget}
 USB_PROXY_WAIT_SECONDS=${USB_PROXY_WAIT_SECONDS:-1}
 USB_PROXY_EXTRA_ARGS=${USB_PROXY_EXTRA_ARGS:-}
@@ -211,16 +216,27 @@ stop_conflicting_services
 # 交 systemd 重启 + unit 的 StartLimit 兑底。
 UDC_WAIT=${USB_PROXY_UDC_WAIT_SECONDS:-60}
 _waited=0
-while [ ! -e "/sys/class/udc/$USB_PROXY_DEVICE" ]; do
+while :; do
+	if [ -n "$USB_PROXY_DEVICE" ]; then
+		[ -e "/sys/class/udc/$USB_PROXY_DEVICE" ] && break
+	else
+		# 未指定设备名：等任意 UDC 出现并取其名（排序首个）
+		_found=$(ls /sys/class/udc 2>/dev/null | sort | head -n1 || true)
+		if [ -n "$_found" ]; then
+			USB_PROXY_DEVICE=$_found
+			break
+		fi
+	fi
 	if [ "$_waited" -ge "$UDC_WAIT" ]; then
 		printf 'Stopped: USB device controller %s 在 %ss 内未出现。\n' \
-			"$USB_PROXY_DEVICE" "$UDC_WAIT" >&2
+			"${USB_PROXY_DEVICE:-（自动探测：/sys/class/udc 为空）}" "$UDC_WAIT" >&2
 		printf '  预期驱动 %s 已加载、且该 UDC 未被其它服务占用。查：\n' "$USB_PROXY_DRIVER" >&2
 		printf '    ls /sys/class/udc/ ; systemctl status ttbox-usbproxy\n' >&2
+		printf '  如需固定控制器：USB_PROXY_DEVICE=<名>\n' >&2
 		exit 1
 	fi
 	printf 'Waiting for USB device controller %s... (%ss/%ss)\n' \
-		"$USB_PROXY_DEVICE" "$_waited" "$UDC_WAIT"
+		"${USB_PROXY_DEVICE:-auto}" "$_waited" "$UDC_WAIT"
 	sleep "$USB_PROXY_WAIT_SECONDS"
 	_waited=$((_waited + USB_PROXY_WAIT_SECONDS))
 done

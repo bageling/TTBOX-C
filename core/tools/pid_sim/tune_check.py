@@ -2,11 +2,17 @@
 import sys
 import random
 from pathlib import Path
-# 相对派生（A-PATH-3）：不再硬编码某台机器的绝对路径（原 C:\Users\...\TTBOX-Module-Edition）。
+# 根锚发现（A-PATH-3 / P6）：向上找同时含 plugins/framework/scripts/deploy 的目录，
+# 不写死层级（原 `_HERE.parents[2]`：换一次布局就静默指错根）。
 _HERE = Path(__file__).resolve().parent          # core/tools/pid_sim
-_ROOT = _HERE.parents[2]                          # 仓库根
-sys.path.insert(0, str(_HERE))                    # pid1.py 与本文件同目录
-sys.path.append(str(_ROOT))                        # ttbox_motion 领域包（append 防遮蔽 stdlib）
+_ROOT = _HERE
+while _ROOT != _ROOT.parent and not all(
+        (_ROOT / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+    _ROOT = _ROOT.parent
+if str(_HERE) not in sys.path:
+    sys.path.append(str(_HERE))                    # pid1.py 与本文件同目录（append 防遮蔽 stdlib）
+if str(_ROOT) not in sys.path:
+    sys.path.append(str(_ROOT))                    # ttbox_motion 领域包
 from pid1 import Pid1
 from ttbox_motion.calibration import derive_pid_params
 

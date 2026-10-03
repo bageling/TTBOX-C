@@ -1,7 +1,7 @@
 import unittest
-from platform.runtime.lifecycle import RuntimeState, transition
-from platform.config.layers import ConfigLayer
-from platform.update.components import Component, UpdateStage
+from ttbox_platform.runtime.lifecycle import RuntimeState, transition
+from ttbox_platform.config.layers import ConfigLayer
+from ttbox_platform.update.components import Component, UpdateStage
 class ContractTests(unittest.TestCase):
  def test_runtime_happy_path(self):
   s=RuntimeState.STOPPED

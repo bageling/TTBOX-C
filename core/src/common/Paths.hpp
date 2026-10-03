@@ -41,4 +41,12 @@ inline constexpr const char* kCoreBootVersionFileName = "core_boot_version";
 // 更新器安装结果文件（更新器写、web `/api/update/status` 读，键 state/version）。
 inline constexpr const char* kOtaStatusFileName = "ota_status.json";
 
+// 日志目录默认（env 覆盖名 = TTBOX_LOG_DIR）。口径真源《代码书写规矩·技术版》§5.2：
+//   FATAL/ERROR 直写并 fsync 到 <dir>/ttbox-error.log；WARN/INFO 进内存缓冲每 5 分钟
+//   批量落盘到 <dir>/ttbox.log（「少写卡」#64）；客户操作同步写 <dir>/operation.log。
+// 读者：web 面板「导出日志」= plugins/system_common.py::LogService（读 <dir>/ttbox.log
+//   最后 500 行，只按行取、不解析格式）。目录由 scripts/ttbox_fhs_init.sh 创建
+//   （ttbox:ttbox 0755）；目录缺失时 Logger 的 FileSink 自降级，不影响启动。
+inline constexpr const char* kLogDirDefault = "/var/log/ttbox";
+
 }  // namespace ttbox::core::paths

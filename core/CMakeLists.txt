@@ -130,6 +130,9 @@ set(CORE_SOURCES
   src/output/LocalHidBackend.cpp
   src/output/MouseControlClient.cpp
   src/common/Logger.cpp
+  # §4.2 行数规矩：FileSink（轮转 / 环形缓冲 / §5.2 三分流）拆成独立源，
+  #   Logger.cpp 只留「格式与分发」。test_license_daemon 只做符号隔离用，不需本文件。
+  src/common/LoggerFileSink.cpp
   src/common/CpuAffinity.cpp
   src/common/RtSched.cpp
   src/common/Json.cpp

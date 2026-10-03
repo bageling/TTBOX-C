@@ -67,6 +67,52 @@ std::string env_or_empty(const char* name) {
     return (v && *v) ? std::string(v) : std::string();
 }
 
+// ---- 风扇 PWM 节点解析（P8：不写死 hwmon 编号）-------------------------------
+// 历史实现在启动段里写死 "/sys/class/hwmon/hwmon8/pwm1"。hwmon 编号是内核按枚举
+// 顺序分配的，不是板子的身份（换内核 / 加传感器即移位）。写死一旦落空，风扇就
+// 静默不转 ⇒ NPU 热节流降频，而且没有任何报错。
+// 口径与 Web 面板完全一致（plugins/web/bin/ttbox-web.py::_fan_control_payload）：
+//   ① 按 /sys/class/hwmon/hwmon*/name 匹配 pwm-fan / pwmfan / fan / soc-thermal；
+//   ② 无匹配则取排序后第一个 hwmon*/pwm1（尽力而为，且与面板显示同一节点）；
+//   ③ 一个都没有 ⇒ 返回空串，调用方只告警、不假装成功。
+std::string read_first_line(const std::string& path) {
+    std::ifstream f(path);
+    std::string line;
+    std::getline(f, line);
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
+        line.pop_back();
+    }
+    return line;
+}
+
+// base_dir 是唯一的输入（生产调用传 "/sys/class/hwmon"）——留出这个参数是为了能
+// 对真实实现做**离线可复现**测试（假 hwmon 树 → 断言解析结果），不是给业务用的开关。
+std::string resolve_fan_pwm_path(const std::string& base_dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path base(base_dir);
+    if (!fs::is_directory(base, ec)) return std::string();
+    std::string matched;   // name 命中的首选节点
+    std::string fallback;  // 排序后第一个 hwmon*/pwm1
+    for (fs::directory_iterator it(base, ec), end; it != end; it.increment(ec)) {
+        if (ec) break;
+        const fs::path dir = it->path();
+        const fs::path pwm = dir / "pwm1";
+        std::error_code ec2;
+        if (!fs::exists(pwm, ec2)) continue;
+        const std::string p = pwm.string();
+        if (fallback.empty() || p < fallback) fallback = p;
+        if (matched.empty()) {
+            const std::string nm = read_first_line((dir / "name").string());
+            if (nm == "pwm-fan" || nm == "pwmfan" || nm == "fan" || nm == "soc-thermal") {
+                matched = p;
+            }
+        }
+    }
+    if (!matched.empty()) return matched;
+    return fallback;
+}
+
 
 double now_ms() {
     using clock = std::chrono::steady_clock;
@@ -98,6 +144,7 @@ LogLevel parse_log_level(const std::string& s) {
     if (s == "debug") return LogLevel::kDebug;
     if (s == "warn") return LogLevel::kWarn;
     if (s == "error") return LogLevel::kError;
+    if (s == "fatal") return LogLevel::kFatal;  // §5.1 新增最高级
     if (s == "off") return LogLevel::kOff;
     return LogLevel::kInfo;
 }
@@ -539,7 +586,7 @@ int Application::initialize(int argc, char** argv) {
         } else if (arg == "--help" || arg == "-h") {
             TTBOX_LOG_INFO(
                 "用法: ttbox_core [--config <path>] [--ipc <path>]\n"
-                "                [--log-level debug|info|warn|error|off]\n"
+                "                [--log-level debug|info|warn|error|fatal|off]\n"
                 "                [--license <card>] [--license-server-secret <secret>]\n"
                 "                [--verify-only]\n"
                 "                [--debug-license-pro-endpoint <host>]\n"
@@ -551,17 +598,39 @@ int Application::initialize(int argc, char** argv) {
     }
 
     Logger::instance().add_sink(std::make_shared<ConsoleSink>());
-    TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
-                   std::string(kCoreVersion) + " 启动 ===");
+    // §5.2 文件 sink（批次 1.4）：日志落 /var/log/ttbox —— 三条链路各自的落点见 Logger.hpp
+    // 顶部说明。目录不可用（开发机 / 未做 FHS 化的树）时 sink 自降级为不可用：只影响落盘，
+    // 不影响启动，也不影响 ConsoleSink 转发 journald。
+    {
+        const std::string env_log_dir = env_or_empty("TTBOX_LOG_DIR");
+        const std::string log_dir =
+            env_log_dir.empty() ? std::string(paths::kLogDirDefault) : env_log_dir;
+        std::shared_ptr<FileSink> file_sink = std::make_shared<FileSink>(log_dir);
+        Logger::instance().add_sink(file_sink);
+
+        TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
+                       std::string(kCoreVersion) + " 启动 ===");
+        if (file_sink->usable()) {
+            TTBOX_LOG_INFO("日志落盘目录: " + log_dir);
+        } else {
+            TTBOX_LOG_WARN("日志目录不可写，仅输出到控制台: " + log_dir);
+        }
+    }
 
     // ---- 风扇满转（fan_control min_pwm=100）：防热节流拖慢 NPU ----
+    // 节点由 resolve_fan_pwm_path() 动态解析（P8），不再写死 hwmon 编号。
     {
-        std::ofstream pwm("/sys/class/hwmon/hwmon8/pwm1");
-        if (pwm) {
-            pwm << 255;
-            TTBOX_LOG_INFO("风扇已设满转（防热节流）");
+        const std::string fan_pwm = resolve_fan_pwm_path("/sys/class/hwmon");
+        if (!fan_pwm.empty()) {
+            std::ofstream pwm(fan_pwm);
+            if (pwm) {
+                pwm << 255;
+                TTBOX_LOG_INFO("风扇已设满转（防热节流）：" + fan_pwm);
+            } else {
+                TTBOX_LOG_WARN("风扇控制不可写（权限或只读挂载）：" + fan_pwm);
+            }
         } else {
-            TTBOX_LOG_WARN("风扇控制不可用（hwmon8/pwm1）");
+            TTBOX_LOG_WARN("风扇控制不可用（/sys/class/hwmon 下无 pwm1 节点）");
         }
     }
 

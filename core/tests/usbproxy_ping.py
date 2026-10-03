@@ -1,7 +1,14 @@
 import socket,struct,time,os,sys
 # mouse cmd.sock 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "web"))
-from lib.paths import MOUSE_CMD_SOCK_DEFAULT as _CMD
+# 根锚发现（P6）：向上找同时含 plugins/framework/scripts/deploy 的目录，
+# 不写死 "../../" 相对跳目录（换一次布局就静默指错根）。
+_root = os.path.dirname(os.path.abspath(__file__))
+while _root != os.path.dirname(_root) and not all(
+        os.path.isdir(os.path.join(_root, _n))
+        for _n in ("plugins", "framework", "scripts", "deploy")):
+    _root = os.path.dirname(_root)
+sys.path.append(_root)
+from plugins.web.lib.paths import MOUSE_CMD_SOCK_DEFAULT as _CMD
 def rpc(typ,rid,payload=b""):
     s=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
     s.connect(_CMD)

@@ -1,6 +1,6 @@
 import tempfile, unittest
 from pathlib import Path
-from platform.model.manager import ModelManager
+from ttbox_platform.model.manager import ModelManager
 class ModelManagerTests(unittest.TestCase):
  def test_upload_validate_install_activate_rollback(self):
   with tempfile.TemporaryDirectory() as td:

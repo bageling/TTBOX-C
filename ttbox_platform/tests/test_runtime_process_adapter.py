@@ -1,5 +1,5 @@
 import sys, time, unittest
-from platform.runtime.process_adapter import SubprocessProcessAdapter
+from ttbox_platform.runtime.process_adapter import SubprocessProcessAdapter
 
 class SubprocessAdapterTests(unittest.TestCase):
  def test_real_subprocess_lifecycle(self):

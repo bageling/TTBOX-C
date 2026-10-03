@@ -592,6 +592,34 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
     const std::string type = type_v->as_string();
     resp.type = type;
 
+    // §5.2 客户操作留痕（批次 1.4）：只记「改动型」命令，读型（PING / GET_* / MODEL_LIST /
+    // MODEL_VALIDATE）不记 —— 面板每秒都在轮询，记了会把 operation.log 刷爆。
+    //   · 记的是**请求到达**这一事实（不是"操作成功"）：失败本身同样要留痕，成功与否看返回的
+    //     status，两者配合才完整。
+    //   · **刻意不记参数值**：§5.3 禁把卡密/口令等敏感内容写进日志，激活类命令只留"发生过"。
+    {
+        static const char* const kClientOps[] = {
+            "SET_CONFIG",           "RUNTIME_CONTROL",   "MODEL_IMPORT",
+            "MODEL_INSTALL",        "MODEL_ACTIVATE",    "MODEL_REMOVE",
+            "MODEL_SET_CONCURRENCY", "ACTIVATE_LICENSE", "ACTIVATE_CLOUD"};
+        bool is_client_op = false;
+        for (const char* op : kClientOps) {
+            if (type == op) {
+                is_client_op = true;
+                break;
+            }
+        }
+        if (is_client_op) {
+            std::string what = type;
+            if (type == "RUNTIME_CONTROL") {  // start/stop/restart 要分开留痕才有意义
+                const JsonValue* params = request.find("params");
+                const JsonValue* action_v = params ? params->find("action") : nullptr;
+                if (action_v != nullptr) what += " " + action_v->as_string();
+            }
+            Logger::instance().operation(what);
+        }
+    }
+
     if (type == "PING") {
         JsonValue data = JsonValue::object();
         data.set("pong", JsonValue::boolean(true));

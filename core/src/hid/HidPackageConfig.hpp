@@ -29,7 +29,11 @@ struct HidPackageConfig {
     int queue_size = 1024;         // SPSC 队列容量
     // Gadget
     std::string gadget_name = "ttbox-hid";
-    std::string udc = "fc000000.usb";
+    // UDC（USB Device Controller）名：**空 = 运行时解析**，HidRuntime::start 按
+    // 「USB_PROXY_DEVICE 环境变量 → /sys/class/udc 枚举首个控制器」取值。
+    // 不写死 SoC 上的控制器编号（如历史上的 "fc000000.usb"）——那是板级拓扑，
+    // 不是软件常量（P8）。
+    std::string udc;
     std::string keyboard_hidg = "/dev/hidg0";
     std::string mouse_hidg = "/dev/hidg1";
     // 描述符（descriptors/ 目录下文件，空 = 内置默认）

@@ -21,6 +21,7 @@
 #include "hid/HidPackageManifest.hpp"
 #include "hid/HidPackageRegistry.hpp"
 #include "hid/HidRuntime.hpp"
+#include "hid/UdcResolve.hpp"  // P8：UDC 名解析唯一口径（与 HidRuntime 共用）
 
 #ifndef TTBOX_PROJECT_ROOT
 #error "TTBOX_PROJECT_ROOT must be injected by CMake (-DTTBOX_PROJECT_ROOT); refuse silent fallback to '.'."
@@ -155,9 +156,12 @@ int main(int argc, char** argv) {
     const int hidg = list_count("hidg");
     if (hidg >= 2) rpt.ok("USB Gadget", std::to_string(hidg) + " 个 hidg");
     else rpt.bad("USB Gadget", "hidg 不足（先启用 a9_setup_hid_gadget.sh）");
-    const std::string udc_state = read_file_str("/sys/class/udc/fc000000.usb/state");
-    if (!udc_state.empty()) rpt.ok("USB Host/UDC", "udc state=" + udc_state);
-    else rpt.bad("USB Host/UDC", "无 UDC（fc000000.usb 不可用）");
+    const std::string udc = resolve_udc("");
+    const std::string udc_state = udc.empty() ? std::string()
+                                              : read_file_str("/sys/class/udc/" + udc + "/state");
+    if (!udc_state.empty()) rpt.ok("USB Host/UDC", udc + " state=" + udc_state);
+    else if (udc.empty()) rpt.bad("USB Host/UDC", "无 UDC（/sys/class/udc 为空）");
+    else rpt.bad("USB Host/UDC", "无 UDC（" + udc + " 不可用）");
 
     if (hidraw > 0) rpt.ok("HID device", std::to_string(hidraw) + " 个 hidraw");
     else rpt.ok("HID device", "无 hidraw（真实键鼠未插入，NOT AVAILABLE）");

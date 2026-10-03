@@ -1,7 +1,7 @@
 import unittest
-from platform.runtime.lifecycle import RuntimeState, transition
-from platform.runtime.controller import RuntimeController
-from platform.runtime.process_adapter import MockProcessAdapter
+from ttbox_platform.runtime.lifecycle import RuntimeState, transition
+from ttbox_platform.runtime.controller import RuntimeController
+from ttbox_platform.runtime.process_adapter import MockProcessAdapter
 
 class RuntimeControllerTests(unittest.TestCase):
  def setUp(self): self.adapter=MockProcessAdapter(); self.c=RuntimeController(self.adapter)

@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 import socket, struct, os, sys, subprocess, json
 # 路径默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py，禁止在此散写 socket 字面量。
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "web"))
-from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT, MOUSE_CMD_SOCK_DEFAULT as _MOUSE_CMD_DEFAULT
+# 根锚发现（P6）：向上找同时含 plugins/framework/scripts/deploy 的目录，
+# 不写死 "../../" 相对跳目录（换一次布局就静默指错根）。
+_root = os.path.dirname(os.path.abspath(__file__))
+while _root != os.path.dirname(_root) and not all(
+        os.path.isdir(os.path.join(_root, _n))
+        for _n in ("plugins", "framework", "scripts", "deploy")):
+    _root = os.path.dirname(_root)
+sys.path.append(_root)
+from plugins.web.lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT, MOUSE_CMD_SOCK_DEFAULT as _MOUSE_CMD_DEFAULT
 
 # 1. cmd.sock test
 print("=== cmd.sock SEQPACKET test ===")
@@ -60,12 +67,35 @@ except Exception as e:
     except: pass
 
 # 3. DWC3 / typec
+def _first_udc():
+    """首个 UDC 名（P8：不写死 fc000000.usb）。
+
+    UDC 编号是内核枚举顺序的产物，不是板子身份（换内核/加控制器即变）。
+    USB_PROXY_DEVICE 优先（与 usbproxy 启动脚本同一覆盖链，见
+    docs/protocols/config-path-env-registry.md），否则取 /sys/class/udc 里
+    名字排序首个。都没有则返回空串，调用方打印"无 UDC"而不是指一个不存在的节点。
+    """
+    env = os.environ.get("USB_PROXY_DEVICE")
+    if env:
+        return env
+    try:
+        names = sorted(n for n in os.listdir("/sys/class/udc") if not n.startswith("."))
+    except OSError:
+        return ""
+    return names[0] if names else ""
+
+
 print()
 print("=== DWC3 ===")
-for f in ["state","uevent","maximum_speed","current_speed"]:
-    p = f"/sys/class/udc/fc000000.usb/{f}"
-    try: print(f"  {f}: {open(p).read().strip()}")
-    except: pass
+_UDC = _first_udc()
+if not _UDC:
+    print("  (无 UDC：/sys/class/udc 为空)")
+else:
+    print(f"  udc: {_UDC}")
+    for f in ["state", "uevent", "maximum_speed", "current_speed"]:
+        p = f"/sys/class/udc/{_UDC}/{f}"
+        try: print(f"  {f}: {open(p).read().strip()}")
+        except: pass
 
 print()
 print("=== typec ===")

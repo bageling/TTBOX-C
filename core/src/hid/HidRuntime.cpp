@@ -45,6 +45,7 @@ void HidRuntime::parse_state_from_forwarders() {}
 #include <unistd.h>
 
 #include "common/Logger.hpp"
+#include "hid/UdcResolve.hpp"  // P8：UDC 名解析唯一口径（不写死硬件编号）
 
 namespace ttbox::core {
 
@@ -137,12 +138,15 @@ bool HidRuntime::find_hidraw(const std::string& configured, const char* keyword,
 }
 
 bool HidRuntime::setup_gadget_if_needed(std::string* error) {
-    // 已绑定则跳过
-    const std::string udc_state = std::string("/sys/class/udc/") + cfg_.udc + "/state";
-    std::ifstream st(udc_state);
-    std::string state;
-    std::getline(st, state);
-    if (state == "configured" || state == "attached") return true;
+    // 已绑定则跳过（cfg_.udc 已由 start() 解析；为空 = 板上没枚举到 UDC，
+    // 直接跳到下面的启动脚本，由脚本自行解析，不在这里假装成功）
+    if (!cfg_.udc.empty()) {
+        const std::string udc_state = std::string("/sys/class/udc/") + cfg_.udc + "/state";
+        std::ifstream st(udc_state);
+        std::string state;
+        std::getline(st, state);
+        if (state == "configured" || state == "attached") return true;
+    }
 
     // 通过脚本建立 gadget（独立于 AI Runtime）
     const std::string script = root_ + "/bin/a9_setup_hid_gadget.sh";
@@ -173,6 +177,12 @@ bool HidRuntime::start(std::string* error) {
     // 配置：优先注入，否则从包 config 加载
     if (cfg_.gadget_name.empty()) {
         cfg_ = HidPackageConfig::load(root_ + "/config/hid_config.json", nullptr);
+    }
+    // UDC 名不写死硬件编号（P8）：配置未给则按 env → /sys/class/udc 枚举解析，
+    // 与 usbproxy/board/run-ttbox-usb-proxy.sh 同一覆盖链（USB_PROXY_DEVICE）。
+    cfg_.udc = resolve_udc(cfg_.udc);
+    if (cfg_.udc.empty()) {
+        TTBOX_LOG_WARN("未解析到 UDC（/sys/class/udc 为空）：跳过\"已绑定\"快路径，交启动脚本处理");
     }
 
     // 1. 确保 gadget（configfs）

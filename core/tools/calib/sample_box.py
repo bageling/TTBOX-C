@@ -32,11 +32,16 @@ def _resolve_sock() -> str:
     env = os.environ.get("TTBOX_IPC_SOCKET", "")
     if env:
         return env
-    for lib in ("/opt/ttbox/web/lib",):
-        if os.path.isdir(lib) and lib not in sys.path:
-            sys.path.insert(0, lib)
+    # 原写法扫 "/opt/ttbox/web/lib" 硬编码板端路径 —— 开发机永远命中不到，
+    # 只能静默走空串兜底。改为根锚发现（P6/A-PATH-3）。
+    _root = Path(__file__).resolve().parent
+    while _root != _root.parent and not all(
+            (_root / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+        _root = _root.parent
+    if str(_root) not in sys.path:
+        sys.path.append(str(_root))          # append：防遮蔽 stdlib
     try:
-        from paths import ipc_socket
+        from plugins.web.lib.paths import ipc_socket
         return ipc_socket()
     except Exception:
         return ""
