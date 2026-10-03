@@ -71,6 +71,20 @@ function renderLicensePanel(payload) {
     : recoveryMessage
       ? friendlyLicenseMessage(recoveryMessage, recoveryMessage)
       : friendlyLicenseMessage(license.message, activated ? "已激活" : "未激活");
+  // ★ 整函数签名守卫（2026-10-03 性能 B）：本函数是纯展示，输入不变就别碰 DOM。
+  //   它每次会写 statusPill.textContent / .className、plan.textContent、
+  //   summary.innerHTML、installUpdateButton.disabled，并调 updateLicenseGateStatus。
+  //   实测：轮询每 1.5s 调一次，静止 12 秒产生 #licenseStatusPill[class] 16 次、
+  //   #installUpdateButton[disabled] 16 次、无 id 的 DIV 80 次。
+  const nextSignature = [
+    activated ? 1 : 0, statusText, license.plan || "",
+    license.expires_at || 0, (payload && payload.version) || "",
+    state.updatePlan ? 1 : 0,
+  ].join("\u001e");
+  if (state.licensePanelSignature === nextSignature) {
+    return;
+  }
+  state.licensePanelSignature = nextSignature;
   if (statusPill) {
     statusPill.textContent = activated ? "已激活" : "未激活";
     statusPill.className = `pill${activated ? "" : " danger-pill"}`;
@@ -82,6 +96,7 @@ function renderLicensePanel(payload) {
   }
   if (summary) {
     const expiresAt = license.expires_at ? formatDateTime(license.expires_at) : "--";
+    // （内层无需再单独守卫：函数级签名已覆盖本段）
     summary.innerHTML = `
       <div class="runtime-stat">
         <span>授权状态</span>

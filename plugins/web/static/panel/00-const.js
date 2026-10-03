@@ -277,6 +277,12 @@ const state = {
   applyTimer: null,
   modelListSignature: "",
   modelCardsRenderSignature: "",
+  // ★ 2026-10-03 性能 B：三个渲染守卫的签名（防止每 1.5s 轮询重建 DOM）
+  modelGameFiltersSignature: "",
+  modelBackendFiltersSignature: "",
+  modelPanelSignature: "",
+  brandRenderSignature: "",
+  presetCleanupButtonSignature: "",
   modelGameFilter: "all",
   modelBackendFilter: "all",
   modelGameOptions: [],

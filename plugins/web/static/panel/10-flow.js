@@ -152,6 +152,22 @@ function applyBrand(payload) {
   const config = brandConfig(brandFromPayload(payload), ui);
   state.uiBrand = config.uiBrand;
   state.allowThemeSwitch = config.allowThemeSwitch;
+  // ★ 签名守卫（2026-10-03 性能 B）：品牌配置没变就整段跳过。
+  //   下面每一步都在写 DOM（dataset / classList ×3 / 3 个 textContent /
+  //   document.title / placeholder / hidden / applyTheme），
+  //   即使值没变，赋值也会触发 MutationObserver → 浏览器重排。
+  //   实测：轮询每 1.5s 调一次，静止 12 秒产生 .brand 32 / .sidebar 32 /
+  //   themeToggleButton[data-icon] 32 / lanHostnameInput[placeholder] 32 次变更。
+  const nextSignature = [
+    config.uiBrand, config.allowThemeSwitch ? 1 : 0,
+    config.mark, config.eyebrow, config.title, config.appTitle,
+    config.defaultLocalName, config.defaultTheme,
+  ].join("\u001e");
+  if (state.brandRenderSignature === nextSignature) {
+    return;
+  }
+  state.brandRenderSignature = nextSignature;
+
   document.documentElement.dataset.uiBrand = config.uiBrand;
   document.body.classList.toggle("ui-brand-yu", config.uiBrand === UI_BRAND_YU);
   document.body.classList.toggle("ui-brand-xh", config.uiBrand === UI_BRAND_XH);
@@ -3588,6 +3604,14 @@ function renderModelGameFilters(models) {
   if (!filters) {
     return;
   }
+  // ★ 签名守卫（2026-10-03 性能 B）：模型列表没变就别重建筛选条。
+  //   实测：轮询每 1.5s 调一次本函数，每次 filters.innerHTML="" 整体重建，
+  //   12 秒内 .model-filter-stack 被重建 112 次 —— 而列表签名从未变化。
+  const nextSignature = [uniqueModelGames(models).join(","), state.modelGameFilter].join("\u001e");
+  if (state.modelGameFiltersSignature === nextSignature) {
+    return;
+  }
+  state.modelGameFiltersSignature = nextSignature;
   filters.innerHTML = "";
   [{ value: "all", label: "全部" }, ...games.map((game) => ({ value: game, label: modelProfileLabel(game) }))]
     .forEach((filter) => {
@@ -3611,6 +3635,13 @@ function renderModelBackendFilters(models) {
   if (!filters) {
     return;
   }
+  // ★ 签名守卫（同 renderModelGameFilters）：后端筛选项是固定三个，
+  //   只有「当前选中项」变了才需要重画is-active class。
+  const nextSignature = state.modelBackendFilter;
+  if (state.modelBackendFiltersSignature === nextSignature) {
+    return;
+  }
+  state.modelBackendFiltersSignature = nextSignature;
   const options = [
     { value: "all", label: "全部" },
     { value: "rknn", label: "RKNN" },
@@ -3920,12 +3951,22 @@ function updatePresetCleanupButton() {
   }
   const modelsReady = Boolean(state.data && Array.isArray(state.data.models));
   const unusedCount = unusedPresetNames().length;
-  button.disabled = !modelsReady || unusedCount === 0;
-  button.title = !modelsReady
+  const nextDisabled = !modelsReady || unusedCount === 0;
+  const nextTitle = !modelsReady
     ? "模型列表尚未加载"
     : unusedCount > 0
       ? `可清理 ${unusedCount} 个未绑定模型的预设`
       : "没有未使用预设";
+  // ★ 签名守卫（2026-10-03 性能 B）：值没变就别写 disabled/title。
+  //   实测：轮询每 1.5s 调一次，静止 12 秒产生
+  //   #cleanupUnusedPresetsButton[disabled] 16 次 + [title] 16 次。
+  const nextSignature = [nextDisabled ? 1 : 0, nextTitle].join("\u001e");
+  if (state.presetCleanupButtonSignature === nextSignature) {
+    return;
+  }
+  state.presetCleanupButtonSignature = nextSignature;
+  button.disabled = nextDisabled;
+  button.title = nextTitle;
 }
 
 function getSelectedPresetName() {
@@ -4799,6 +4840,14 @@ function initControlSectionNavigation() {
 
 function setLicenseNavigationLock(locked) {
   const wasLocked = state.navigationLockedToLicense;
+  // ★ 幂等守卫（2026-10-03 性能 B）：锁定状态没变就直接返回。
+  //   原来每 1.5s 轮询都会：classList.remove + 9 个 tab 的 disabled/aria-disabled
+  //   全量重写 ⇒ 静止 12 秒产生 72 次 .module-tab[aria-disabled] 属性变更。
+  //   注意：`wasLocked` 仍要更新（下面 locked 分支用它判断是否首次进入）。
+  if (wasLocked === locked) {
+    document.body.classList.remove("license-loading");
+    return;
+  }
   state.navigationLockedToLicense = locked;
   document.body.classList.remove("license-loading");
   if (locked) {
