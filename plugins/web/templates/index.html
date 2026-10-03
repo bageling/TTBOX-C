@@ -18,7 +18,10 @@
       </div>
 
       <div class="status-strip" aria-live="polite">
-        <span id="statusBadge" class="status-badge idle">未连接</span>
+        <!-- ★ 2026-10-03 性能 A：首屏初始文案原为「未连接」，
+     等第一次 /api/state 回来才被替换（实测 6ms~206ms 显示「未连接」）。
+     改为「连接中」——同样如实，但不会让人以为 core 掉线了。 -->
+        <span id="statusBadge" class="status-badge idle">连接中</span>
         <span id="applyIndicator" class="sync-badge ready">已同步</span>
       </div>
 

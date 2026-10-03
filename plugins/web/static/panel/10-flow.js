@@ -611,8 +611,45 @@ async function confirmAuthorizationFailure() {
   }
 }
 
+// ★ 2026-10-03 性能 A：默认超时。
+//   原来 fetch 不带 AbortSignal ⇒ 请求挂住就一直等，
+//   轮询（每 1.5s /api/state）撞上 core 重启时会长时间无响应，
+//   表现为界面卡住 + 徽章被刷成「未连接」。
+//   长耗时接口（OTA 安装、模型导入、标定）可以用 `timeoutMs` 覆盖 ——
+//   绝不能给所有调用套同一个短超时。
+const API_DEFAULT_TIMEOUT_MS = 8000;
+
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const { timeoutMs, signal, ...rest } = options;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
+  let timedOut = false;
+  const limit = typeof timeoutMs === "number" ? timeoutMs : API_DEFAULT_TIMEOUT_MS;
+  if (controller && !signal && limit > 0) {
+    timer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, limit);
+  }
+  let response;
+  try {
+    response = await fetch(path, {
+      ...rest,
+      ...(controller ? { signal: signal || controller.signal } : {}),
+    });
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error(`请求超时（${limit}ms）：${path}`);
+      timeoutError.status = 0;
+      timeoutError.timedOut = true;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok === false) {
     const error = new Error(data.error || `HTTP ${response.status}`);
@@ -3509,6 +3546,9 @@ async function installUpdatePlan(plan) {
       // 显式带 version：更新器以此为准浇筑 releases/<ver>，避免 delta 场景
       // 从旁车签名取到 "x.y.z-delta-from-a.b.c" 污染目录名（2026-09-20 板端教训）
       body: JSON.stringify({ url: packageUrl, key_id: keyId, version: (plan && plan.latest_version) || "" }),
+      // ★ 2026-10-03 性能 A：提交 OTA 任务时 core 会重启，连接可能挂几秒
+      //   ⇒ 用长超时，不受 api() 默认 8 秒约束。
+      timeoutMs: 30000,
     });
   } catch (error) {
     stopUpdateStatusPolling();
@@ -5604,6 +5644,8 @@ function bindLicenseEvents() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
+        // ★ 同上：提交任务时 core 会重启 ⇒ 长超时
+        timeoutMs: 30000,
       });
     } catch (error) {
       stopUpdateStatusPolling();
@@ -5971,9 +6013,19 @@ document.querySelectorAll("[data-control-section-target='control-section-calib']
 }
 
 
+// ★ 2026-10-03 性能 A：连续失败多少次才把徽章刷成「未连接」。
+//   原来**任何一次**失败就立刻改徽章 ⇒ 单次网络抖动 / core 重启瞬间，
+//   用户就看到「未连接」闪一下（业主反馈"有时候会报core 未连接"）。
+const LIVE_POLL_FAIL_THRESHOLD = 3;
+
 function handleLivePollError(error) {
   const message = error && error.message ? error.message : String(error || "连接已断开");
   if (suppressMouseSwitchDaemonTimeout(message)) {
+    return;
+  }
+  state.livePollFailCount = (state.livePollFailCount || 0) + 1;
+  // ★ 未达阈值：只记数，不改徽章、不弹 toast —— 单次抖动不该惊动用户。
+  if (state.livePollFailCount < LIVE_POLL_FAIL_THRESHOLD) {
     return;
   }
   if (!state.livePollErrorNotified) {
@@ -5996,6 +6048,8 @@ async function pollLiveState() {
     let payload = await api("/api/state");
     payload = await maybeRunLicenseRecovery(payload);
     applyLiveState(payload);
+    // ★ 成功即清零：否则失败攒到阈值后，即使恢复也永远显示「未连接」
+    state.livePollFailCount = 0;
     state.livePollErrorNotified = false;
   } catch (error) {
     handleLivePollError(error);
