@@ -168,9 +168,22 @@ constexpr float kUpperBodyRatio = 0.5f;
 
 float upper_body_ratio() { return kUpperBodyRatio; }
 
+// ★★ V1.0.26（2026-10-04，业主给的完整定义）：
+//     「上半身」= **从胯到头 + 不要胳膊** —— 垂直砍到身高 50%（Y 轴偏移 0.5），
+//     水平收窄到**肩宽**（张开的胳膊要排除在外）。
+//     我前一版只做了垂直、水平原样不动 ⇒ 框里一直含着两侧胳膊，那是错的。
+//
+// 肩宽系数：人体测量「肩宽 ≈ 0.23 × 身高」（肩峰宽 / 身高，成年男性约 0.22~0.24）。
+// 只**收窄**、绝不放宽（框本来比肩窄时说明检测框没含胳膊，放宽会凭空引入背景）。
+// ★ 收窄是**对称**的（以框中线为基准）⇒ 落点 x = x1 + offset_x·w 里 offset_x=0.5
+//   （或任何比例）都落在中线上 ⇒ **落点横向完全不受收窄影响**，只动框的"显示/量测"
+//   几何。这条性质是本改动敢不改落点公式的依据（见 test_upper_body.cpp 的落点等效断言）。
+constexpr float kShoulderWidthOverHeight = 0.23f;
+
 // 上半身收缩：把控制链用的框与瞄准点配置一起映射到上半身域（无条件生效）。
-//   out_box = (x1, y1, x2, y1 + k·h)          —— x 不动（肩宽不受腿部影响）
-//   out_prof 的「相对框高」比例量统一 ÷k        —— 落点物理位置不变（等效换算）
+//   垂直：y2 = y1 + 0.5·h              （头顶 → 胯）
+//   水平：收窄到肩宽（min(原宽, 0.23·h)），以中线对称
+//   等效：相对框高的比例量统一 ÷k       —— 落点纵向物理位置不变
 //   框无效 ⇒ 原样返回，调用方走原框。
 bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
                           DetectionBox* out_box, AimPointProfile* out_prof) {
@@ -181,7 +194,25 @@ bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
     const float h = box.y2 - box.y1;
     if (w <= 0.0f || h <= 0.0f) return false;
     const float k = kUpperBodyRatio;
+
+    // ---- 水平：收窄到肩宽（去掉两侧胳膊），中线不动 ----
+    // ★ 用**原始框高** h 算肩宽（不是垂直截断后的 0.5h）：肩宽是身体的横向尺度，
+    //   对应完整身高的横向尺度；用 0.5h 会把肩宽砍掉一半、收得过窄。
+    // ★ 近身（框底被画面切掉）时 h 是残缺的 ⇒ 肩宽算得偏小 ⇒ 框会比理想更窄。
+    //   这是**保守方向**（宁可窄一点，也不能把胳膊放进来），且因为收窄对称，
+    //   不影响落点，故不引入反推身高的复杂度。
+    const float shoulder_w = kShoulderWidthOverHeight * h;
+    if (shoulder_w > 0.0f && shoulder_w < w) {
+        const float cx = (box.x1 + box.x2) * 0.5f;
+        const float half = shoulder_w * 0.5f;
+        out_box->x1 = cx - half;
+        out_box->x2 = cx + half;
+    }
+
+    // ---- 垂直：砍到身高 50%（头顶 → 胯）----
     out_box->y2 = box.y1 + k * h;
+
+    // ---- 落点纵向等效换算（横向不用换算：对称收窄不动中线）----
     out_prof->offset_y /= k;
     for (auto& c : out_prof->class_offsets) c.offset_y /= k;
     out_prof->head_aim.head_offset_top_fraction /= k;

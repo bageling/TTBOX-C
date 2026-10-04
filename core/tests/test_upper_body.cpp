@@ -92,10 +92,19 @@ TEST(upper_body_shrink_math) {
     DetectionBox ob; AimPointProfile op;
     CHECK(aim_ns::shrink_to_upper_body(box, p, &ob, &op));
 
-    // 框：x 不动，y2 收到 y1 + k·240
-    CHECK_EQ(ob.x1, box.x1); CHECK_EQ(ob.x2, box.x2); CHECK_EQ(ob.y1, box.y1);
+    // 垂直：y2 收到 y1 + k·240（头顶 → 胯）
+    CHECK_EQ(ob.y1, box.y1);
     CHECK_EQ(ob.y2, 200.0f + k * 240.0f);
     CHECK(ob.y2 < box.y2);
+    // 水平：收窄到肩宽（0.23·h），中线不动。本例 h=240 ⇒ 肩宽 55.2 > 原宽 80？
+    // 不对：0.23*240 = 55.2 < 80 ⇒ 应收窄到 55.2。
+    const float shoulder = 0.23f * 240.0f;
+    CHECK(std::fabs((ob.x2 - ob.x1) - shoulder) < 0.01f);
+    CHECK(ob.x2 - ob.x1 < box.x2 - box.x1);
+    // ★ 中线不动（对称收窄）—— 这是「落点横向不受影响」的根据
+    const float cx_in = (box.x1 + box.x2) * 0.5f;
+    const float cx_out = (ob.x1 + ob.x2) * 0.5f;
+    CHECK(std::fabs(cx_in - cx_out) < 0.01f);
     // offset_y ÷k
     CHECK_EQ(op.offset_y, 0.5f / k);
     // class_offsets 每项 offset_y 同步换算（offset_x 不动）
@@ -226,7 +235,12 @@ TEST(upper_body_display_box_is_the_control_box_e2e) {
     const float raw_h = 240.0f;
     CHECK(std::fabs(e.st.target_height - raw_h * k) < 0.5f);
     CHECK(std::fabs(e.st.target_y1 - 200.0f) < 0.5f);           // 顶部不动
-    CHECK(std::fabs(e.st.target_width - 80.0f) < 0.5f);         // 宽度不收
+    // ★ V1.0.26：水平收窄到肩宽（0.23·h，去掉两侧胳膊）—— 原框宽 80 ⇒ 收窄到 55.2
+    const float shoulder = 0.23f * 240.0f;
+    CHECK(std::fabs(e.st.target_width - shoulder) < 0.5f);
+    CHECK(e.st.target_width < 80.0f);                            // 确实收窄了
+    // 中线不动 ⇒ 落点横向不变（见 shrink 数学用例）
+    CHECK(std::fabs((e.st.target_x1 + e.st.target_x2) * 0.5f - 640.0f) < 0.5f);
     CHECK(std::fabs(e.st.target_y2 - (200.0f + raw_h * k)) < 0.5f);
 }
 

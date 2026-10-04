@@ -222,3 +222,29 @@ def test_geometry_pairing_ignores_class_id():
     assert 'class_id' not in fn, (
         'resolve_head_box 读了 class_id —— 它必须纯几何判据（包含/面积/上半部），'
         '这样换任何模型都成立')
+
+
+# ============================================================ V1.0.26 肩宽收窄
+def test_shrink_narrows_to_shoulder_width_symmetrically():
+    """★ 业主完整定义（2026-10-04 17:56）：「上半身 = 从胯到头 + 不要胳膊」。
+    垂直砍到 0.5（Y 轴偏移 0.5）**且**水平收窄到肩宽。
+    ★ 前一版只做垂直、水平原样不动 ⇒ 框里一直含着两侧胳膊（业主明确纠正）。"""
+    code = _code_only(_src(POINT))
+    m = re.search(r'constexpr\s+float\s+kShoulderWidthOverHeight\s*=\s*([\d.]+)f', code)
+    assert m, '必须有肩宽系数常量 kShoulderWidthOverHeight（肩宽/身高，人体测量 ≈0.23）'
+    ratio = float(m.group(1))
+    assert 0.15 <= ratio <= 0.30, (
+        '肩宽/身高系数 %s 越界：人体测量约 0.22~0.24（成年男性肩峰宽/身高）。'
+        '太小会把躯干切掉，太大收不掉胳膊' % ratio)
+    body = code[code.index('bool shrink_to_upper_body('):]
+    body = body[:body.index('\n}\n')]
+    assert 'kShoulderWidthOverHeight' in body, '收缩函数必须用肩宽系数做横向收窄'
+    # 只收窄、不放宽：判据里有 shoulder_w < w
+    assert re.search(r'shoulder_w\s*<\s*w', body), (
+        '必须「只收窄不���宽」：原框比肩窄时说明检测框没含胳膊，放宽会引入背景')
+    # 对称：中线 cx 不动（这是落点横向不受影响的根据）
+    assert re.search(r'cx\s*=\s*\(box\.x1\s*\+\s*box\.x2\)\s*\*\s*0\.5f', body), (
+        '收窄必须以原框中线为基准（对称），否则落点会横向偏移')
+    # 肩宽用**原始框高**而不是垂直截断后的高度
+    assert re.search(r'kShoulderWidthOverHeight\s*\*\s*h\b', body), (
+        '肩宽要用原始框高 h（肩宽对应完整身高的横向尺度）；用截断后的 0.5h 会收得过窄')
