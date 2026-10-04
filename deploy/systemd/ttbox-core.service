@@ -1,7 +1,10 @@
 [Unit]
 Description=TTBOX Core (C++)
-After=systemd-modules-load.service
-Wants=systemd-modules-load.service
+# ★ V1.0.27：必须**排在 usb-proxy 之后** —— PhysicalMouseReader 连的是 usb-proxy 建的
+#   /run/ttbox-mouse-passthrough/event.sock；两者同秒启动时 core 会先连、拿到 ENOENT。
+#   （core 侧已加 3.6s 重试兜底，这里是第二道保险：让顺序本身就正确。）
+After=systemd-modules-load.service ttbox-usbproxy.service
+Wants=systemd-modules-load.service ttbox-usbproxy.service
 # StartLimit* 属于 [Unit] 段：写成 [Service] 会被 systemd 忽略
 # （实测报 "Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring"），
 # 限流一旦失效，失败时就会无限重启（现场曾 82 次/31 分钟）。

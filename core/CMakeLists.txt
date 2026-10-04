@@ -44,6 +44,30 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.27 相对 V1.0.26（2026-10-04）：**修升级后物理鼠标输入链永久断开**（业主报"出错了"）。
+#                       · 事故：core 与 ttbox-usbproxy **同秒启动**（unit 之间无依赖），
+#                         core 去 connect usb-proxy 的 event.sock 时它还没建 ⇒ ENOENT ⇒
+#                         上层按「不阻塞 AI 流水线」放弃 PhysicalMouseReader
+#                         ⇒ **鼠标输入永久断且不自动重连**（手工 restart core 即恢复）。
+#                       · 修 1（主）：`PhysicalMouseReader::start_event_socket` 遇失败**重试**
+#                         12 次 × 300ms ≈ 最长等 3.6s，覆盖 usb-proxy 的设备枚举时间。
+#                       · 修 2（保险）：ttbox-core.service 加 `After=/Wants=ttbox-usbproxy.service`。
+#                       · 护栏：core/tests/test_usbproxy_socket_race.py（3 条源码级 ——
+#                         该文件走 `#if defined(_WIN32)` 分流，host 编译的是 Windows 分支，
+#                         本机 ctest 对它零覆盖；真正验证靠交叉编译 + 板端实跑）。
+#                       · 连带含 V1.0.26 的「不要胳膊」框算法。
+#   V1.0.27 相对 V1.0.26（2026-10-04）：**修升级后物理鼠标输入链永久断开**（业主报"出错了"）。
+#                       · 事故：core 与 ttbox-usbproxy **同秒启动**（unit 之间无依赖），
+#                         core 去 connect usb-proxy 的 event.sock 时它还没建 ⇒ ENOENT ⇒
+#                         上层按「不阻塞 AI 流水线」放弃 PhysicalMouseReader
+#                         ⇒ **鼠标输入永久断且不自动重连**（手工 restart core 即恢复）。
+#                       · 修 1（主）：`PhysicalMouseReader::start_event_socket` 遇失败**重试**
+#                         12 次 × 300ms ≈ 最长等 3.6s，覆盖 usb-proxy 的设备枚举时间。
+#                       · 修 2（保险）：ttbox-core.service 加 `After=/Wants=ttbox-usbproxy.service`。
+#                       · 护栏：core/tests/test_usbproxy_socket_race.py（3 条源码级 ——
+#                         该文件走 `#if defined(_WIN32)` 分流，host 编译的是 Windows 分支，
+#                         本机 ctest 对它零覆盖；真正验证靠交叉编译 + 板端实跑）。
+#                       · 连带含 V1.0.26 的「不要胳膊」框算法。
 #   V1.0.26 相对 V1.0.25（2026-10-04）：**补上"不要胳膊"—— 框水平收窄到肩宽**。
 #                       · 业主完整定义（17:56）：「上半身 = 从胯到头 + 不要胳膊」。
 #                         垂直砍到身高 50%（Y 轴偏移 0.5）V1.0.24 已做；
@@ -144,7 +168,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.26 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.27 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

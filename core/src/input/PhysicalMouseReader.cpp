@@ -80,10 +80,31 @@ bool PhysicalMouseReader::open_event_socket(std::string* error) {
 }
 
 bool PhysicalMouseReader::start_event_socket(std::string* error) {
-    if (!open_event_socket(error)) return false;
-    std::fprintf(stderr, "PhysicalMouseReader: usb-proxy event.sock subscribed\n");
-    event_thread_ = std::thread(&PhysicalMouseReader::event_socket_loop, this);
-    return true;
+    // ★★ V1.0.27：socket 晚到时**重试**，别一次失败就永久放弃。
+    //   现场事故（2026-10-04 升级 V1.0.25 后）：core 与 ttbox-usbproxy **同一秒**启动
+    //   （systemd 无依赖关系），core 去 connect 时 usb-proxy 还没建 socket ⇒ ENOENT ⇒
+    //   上层按「不阻塞 AI 流水线」放弃 PhysicalMouseReader ⇒ **物理鼠标输入链永久断开**
+    //   （不会自动重连）⇒ 表现为"自瞄像没反应 / 报 event.sock fallback failed"。
+    //   open_event_socket 每次失败都会 close 并复位 event_fd_ ⇒ 可安全重入。
+    //   12 次 × 300ms ≈ 最长等 3.6s，足够覆盖 usb-proxy 的设备枚举时间。
+    // ★ 用 std::this_thread::sleep_for 而不是 usleep/nanosleep —— 这段代码**不在**
+    //   `#if defined(_WIN32)` 分支里（Windows 也要编过），usleep 在 MSVC 下不存在。
+    constexpr int kConnectAttempts = 12;
+    constexpr auto kRetryInterval = std::chrono::milliseconds(300);
+    for (int attempt = 1; attempt <= kConnectAttempts; ++attempt) {
+        if (open_event_socket(error)) {
+            if (attempt > 1) {
+                std::fprintf(stderr,
+                             "PhysicalMouseReader: event.sock 第 %d 次尝试才连上"
+                             "（usb-proxy 启动比 core 慢，已自动等待）\n", attempt);
+            }
+            std::fprintf(stderr, "PhysicalMouseReader: usb-proxy event.sock subscribed\n");
+            event_thread_ = std::thread(&PhysicalMouseReader::event_socket_loop, this);
+            return true;
+        }
+        std::this_thread::sleep_for(kRetryInterval);
+    }
+    return false;
 }
 
 bool PhysicalMouseReader::start(const std::string& requested,std::string* error){
