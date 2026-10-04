@@ -44,6 +44,22 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.28 相对 V1.0.27（2026-10-04）：**修 hub 转发语义用错 ⇒ 升级死锁**（业主报"升不上去"）。
+#                       · 事故：web 换写法(S9/S10)后，入口的 `_CLOUD_CLIENT`/`_CLOUD_SESSION`/
+#                         `_ACTIVATION_CACHE`/`_HEARTBEAT_START_LOCK` 这些**对象型**锚点被
+#                         `hub.call`（**调用**语义）取 ⇒ TypeError ⇒ web 启动即崩
+#                         （'CloudLicenseClient' object is not callable，Main process exited）
+#                         ⇒ **面板「检查更新」必然失败**；手动装新版后 web 仍起不来
+#                         ⇒ 健康检查失败 ⇒ 安装脚本自动回切 ⇒ **永远升不上（死锁）**。
+#                       · 修：对象型锚点一律改 `hub.get`（取值语义）。全仓扫过：违规 2 处
+#                         （cloud_hooks 的 _CLOUD_CLIENT、api/aim.py 的 `_aim_trace`），
+#                         另有 _CLOUD_SESSION/_ACTIVATION_CACHE/_HEARTBEAT_START_LOCK 同类，
+#                         一并改（共 5 个锚点）。
+#                       · 审计器 + 护栏：plugins/web/tests/test_web_hub_anchor_audit.py
+#                         （列出每个锚点在入口的真实类型）+ test_web_hub_object_anchors.py
+#                         （禁止对象型锚点用 hub.call）。**"分不清函数还是对象"是今天
+#                         连踩 4 次的根因，现在由脚本判定而不是靠人猜。**
+#                       · 连带含 V1.0.26 的「不要胳膊」框算法与 V1.0.27 的 usb-proxy 竞态修复。
 #   V1.0.27 相对 V1.0.26（2026-10-04）：**修升级后物理鼠标输入链永久断开**（业主报"出错了"）。
 #                       · 事故：core 与 ttbox-usbproxy **同秒启动**（unit 之间无依赖），
 #                         core 去 connect usb-proxy 的 event.sock 时它还没建 ⇒ ENOENT ⇒
@@ -168,7 +184,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.27 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.28 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

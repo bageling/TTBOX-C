@@ -129,8 +129,11 @@ def _fake_entry():
         #   所以这里必须 stub 成**可调用**的转发函数 —— 旧版本 stub 成字符串，
         #   而当时的实现也恰好"直接传不调用"，两边共谋 ⇒ 传函数当对象的 bug
         #   一路漏到板端（心跳线程一启动就死，2026-10-04 修）。
-        _CLOUD_CLIENT=lambda *a, **k: 'CLIENT',
-        _CLOUD_SESSION=lambda *a, **k: 'SESSION',
+        # ★ hub.get 是**取值**语义 ⇒ stub 必须是对象（不是函数）。
+        #   板端实况：入口的 _CLOUD_CLIENT/_CLOUD_SESSION 是模块级单例**对象**，
+        #   曾用 hub.call（调用）⇒ TypeError ⇒ web 启动崩溃 ⇒ 升级死锁。
+        _CLOUD_CLIENT=object(),
+        _CLOUD_SESSION=object(),
         _cloud_deactivate_callback=lambda: None,
         _invalidate_activation_cache=lambda: None,
         kAppVersion=lambda *a, **k: 'V1.0.18',
@@ -164,8 +167,9 @@ def test_ensure_heartbeat_worker_actually_runs(wired_cloud_hooks):
     assert ns._HEARTBEAT.running() is True
     # ★ 真正咬住"漏括号"这个 bug：构造参数必须是值，不是转发函数本身。
     ns._HEARTBEAT.assert_args_are_values()
-    assert ns._HEARTBEAT.args[0] == 'CLIENT', 'client 应对应 _CLOUD_CLIENT() 的返回值'
-    assert ns._HEARTBEAT.args[1] == 'SESSION', 'session 应对应 _CLOUD_SESSION() 的返回值'
+    # ★ hub.get 是取值语义 ⇒ 传下去的就是**入口那个对象本身**（同一性，不是拷贝）
+    assert ns._HEARTBEAT.args[0] is ns._CLOUD_CLIENT, 'client 必须是 _CLOUD_CLIENT 对象本身'
+    assert ns._HEARTBEAT.args[1] is ns._CLOUD_SESSION, 'session 必须是 _CLOUD_SESSION 对象本身'
     assert ns._HEARTBEAT.kw['client_version'] == 'V1.0.18'
     assert ns._HEARTBEAT.kw['machine_code'] == 'MACHINE'
     # 幂等：第二次不应再建一个

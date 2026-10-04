@@ -17,30 +17,56 @@ def HeartbeatWorker(*args, **kwargs):
     return hub.call('HeartbeatWorker', *args, **kwargs)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ★★★ 下面这 4 个锚点在入口里是**对象**（模块级单例 / dict / Lock），
+#     所以转发时**必须 hub.get（取值）**，**绝不能 hub.call（调用）** ——
+#     调用对象会抛 TypeError。
+#
+#     事故（2026-10-04 18:44 板端实测的死锁）：
+#         hub.call('_CLOUD_CLIENT')  →  get(name)(*args)  →  调用 CloudLicenseClient 实例
+#         TypeError: 'CloudLicenseClient' object is not callable
+#         ttbox-web: Main process exited, status=1/FAILURE
+#     ⇒ web 起不来 ⇒ **面板「检查更新」必然失败**；
+#       手动装新版后 web 仍起不来 ⇒ 健康检查失败 ⇒ 安装脚本自动回切 ⇒ 永远升不上。
+#
+#     对象型锚点清单（新增对象型锚点时必须同步登记到这里 + 测试护栏）：
+#         _CLOUD_CLIENT         = CloudLicenseClient(...)      ttbox-web.py:647
+#         _CLOUD_SESSION        = CloudSessionStore(...)       ttbox-web.py:645
+#         _ACTIVATION_CACHE     = {'ts': 0.0, 'ok': False}    ttbox-web.py:586
+#         _HEARTBEAT_START_LOCK = threading.Lock()            ttbox-web.py:651
+#     其余锚点（ipc_request / _get_status / 各 _xxx 业务函数…）在入口里是**函数**，
+#     用 hub.call 是对的。
+# ═══════════════════════════════════════════════════════════════════════════
+
+
 def _ACTIVATION_CACHE(*args, **kwargs):
-    """入口的 _ACTIVATION_CACHE —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
-    return hub.call('_ACTIVATION_CACHE', *args, **kwargs)
+    """入口的 _ACTIVATION_CACHE（**dict 对象**）—— 取值，勿调用。"""
+    return hub.get('_ACTIVATION_CACHE')
 
 
 def _CLOUD_CLIENT(*args, **kwargs):
-    """入口的 _CLOUD_CLIENT —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
-    return hub.call('_CLOUD_CLIENT', *args, **kwargs)
+    """入口的 _CLOUD_CLIENT（**CloudLicenseClient 单例**）—— 取值，勿调用。
+
+    ★ 事故见本文件上方说明：曾用 hub.call（调用语义）⇒ TypeError ⇒ web 起不来
+      ⇒ 升级按钮失效 + 手动装也过不了健康检查 = 死锁。
+    ★ 曾经"修"过一次（给调用处加括号）—— 方向完全错：括号解决的是"传函数还是传实例"，
+      真正的错是"取对象"用了"调用"语义。两处都要对。
+    """
+    return hub.get('_CLOUD_CLIENT')
 
 
 def _CLOUD_SESSION(*args, **kwargs):
-    """入口的 _CLOUD_SESSION —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
-    return hub.call('_CLOUD_SESSION', *args, **kwargs)
+    """入口的 _CLOUD_SESSION（**CloudSessionStore 单例**）—— 取值，勿调用。"""
+    return hub.get('_CLOUD_SESSION')
 
 
 def _HEARTBEAT_START_LOCK(*args, **kwargs):
-    """入口的 _HEARTBEAT_START_LOCK —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。
+    """入口的 _HEARTBEAT_START_LOCK（**threading.Lock 实例**）—— 取值，勿调用。
 
-    ★★ 只用于「把它当函数调」的场合。**锁对象请用 `_heartbeat_start_lock()`**：
-       入口侧是真`threading.Lock()`，而本函数是转发函数 —— `with _HEARTBEAT_START_LOCK:`
-       拿到的是函数对象、没有 `__enter__` ⇒ 启动即崩
-       （2026-10-03 板端实测：AttributeError: __enter__，web 服务重启循环）。
+    ★★ 锁对象只应通过 `_heartbeat_start_lock()` 取（语义更明确）。
+       入口侧是真 `threading.Lock()`；用 hub.call 会去调用它 ⇒ TypeError。
     """
-    return hub.call('_HEARTBEAT_START_LOCK', *args, **kwargs)
+    return hub.get('_HEARTBEAT_START_LOCK')
 
 
 def _heartbeat_start_lock():

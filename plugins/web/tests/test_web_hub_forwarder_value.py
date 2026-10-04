@@ -53,8 +53,13 @@ def _forwarders() -> dict:
             if not (a.vararg and a.kwarg and not a.args and not a.kwonlyargs):
                 continue
             seg = ''.join(lines[node.lineno - 1:node.end_lineno])
-            if ("hub.call('%s'" % node.name) in seg or \
-                    ('hub.call("%s"' % node.name) in seg:
+            # ★ 两种都是合法转发机制：hub.call（调用语义，取**函数**）与
+            #   hub.get（取值语义，取**对象**）。判据只认 hub.call 会把
+            #   「对象型锚点用 hub.get」的转发全判成"漏了"（2026-10-04 踩过）。
+            if (("hub.call('%s'" % node.name) in seg or
+                    ('hub.call("%s"' % node.name) in seg or
+                    ("hub.get('%s'" % node.name) in seg or
+                    ('hub.get("%s"' % node.name) in seg):
                 out[node.name] = p.name
     return out
 

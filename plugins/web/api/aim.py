@@ -28,8 +28,13 @@ from plugins.web.lib import hub
 bp = Blueprint('aim', __name__)
 
 def _aim_trace(*args, **kwargs):
-    """入口的 _aim_trace —— 调用时取。"""
-    return hub.call('_aim_trace', *args, **kwargs)
+    """入口的 _aim_trace —— 取值（**dict 对象**，ttbox-web.py:991），勿用 hub.call。
+
+    ★ 口径：`hub.call` 是**调用**语义，对象不可调用 ⇒ TypeError。
+      今天随「升级升不上去」一并查实（web 启动即崩 → 面板按钮失效 → 手动装也过不了
+      健康检查 = 死锁）。
+    """
+    return hub.get('_aim_trace')
 
 
 def _get_status(*args, **kwargs):
