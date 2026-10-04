@@ -330,6 +330,13 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
                                        const CoreRuntime::FeatureGates& gates,
                                        std::string* error) {
     out_params.gates = gates;  // ★ M2.03：特性级启停（start() 据此逐模块启停）
+    // ★ 2026-10-03 补注（防误改）：这里的 /dev/video0 **不是"忘了改成运行时解析"的
+    //   残留**，与 V1.0.18 修掉的风扇 hwmon 编号 / UDC 名性质不同 ——
+    //   ① 它确实有配置项capture_device 可覆盖（默认值就在这里）；
+    //   ② 但 RK3588 的 HDMI-RX 输入**物理上只能绑这个 V4L2 节点**，
+    //      DRM card/render 节点只服务 loopout 与 NPU，填错会让整条采集链路失效。
+    //   所以下面那句「非 /dev/video0 直接报错」是**硬件约束的 fail-closed**，
+    //   不要照 hwmon/UDC 那套改成"扫描 /sys 猜节点"。
     out_params.capture.device = config_.get_string("capture_device", "/dev/video0");
     // HDMI-RX 输入必须走 V4L2 video 节点。DRM card/render 节点仅用于
     // loopout/NPU，误填会导致采集线程打开错误设备并让整条链路失效。

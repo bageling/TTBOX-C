@@ -82,6 +82,10 @@ struct V4L2Metrics {
 class V4L2Capture : public capture::ICapture {
 public:
     struct Params {
+        // ★ 2026-10-03 补注：默认值 /dev/video0 是**RK3588 HDMI-RX 的硬约束**
+        //   （DRM card/render 节点只服务 loopout 与 NPU）。生产上真正的取值来自
+        //   配置项 capture_device，由 Application 校验后回填；
+        //   这里只是「没传就用它」的兜底，**不要照风扇 hwmon / UDC 那套改成扫 /sys 猜节点**。
         std::string device = "/dev/video0";
         uint32_t num_buffers = 8;   // 请求 buffer 数（以驱动实际为准，实际更少时降级）
         int poll_timeout_ms = 1000; // poll 超时（ms）

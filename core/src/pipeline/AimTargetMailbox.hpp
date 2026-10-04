@@ -1,5 +1,11 @@
 // AimTargetMailbox.hpp — Worker 到 AimThread 的最新任务邮箱。
 // 任务只含小型检测结果，不传图像；使用 shared_ptr 原子快照避免读写数据竞争。
+//
+// ★ 本文件所属的 pipeline/ 域是 header-only（**故意没有 .cpp**）：
+//   邮箱对象小而热（每帧被多个 Worker 写、AimThread 读），方法 inline 在头里
+//   可以省掉一次函数调用与跨 TU 跳转。找实现请直接看本文件，不要去 runtime/ 翻。
+//   （2026-10-03 核实：曾一度误以为「实现散落在 runtime/CoreRuntime.cpp」，
+//     实际那里只是引用了 kMaxWorkers 常量，不是函数实现。）
 #pragma once
 #include <array>
 #include <atomic>
