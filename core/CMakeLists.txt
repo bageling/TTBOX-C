@@ -44,6 +44,14 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.23 相对 V1.0.22（2026-10-04）：自瞄「只瞄上半身」（业主拍板：只要人物上半身主体）。
+#                       · core：控制链（贴边判定/冻结落点/身高自校准/落点/框高遥测/
+#                         拟人化目标半径）整体换用「上半身虚拟框」= (y1, y1+k·h)；
+#                         **落点做等效换算**（offset 与 class_offsets、head_aim fraction、
+#                         外推兜底宽高比全部 ÷k）⇒ 开关切换时落点同一像素，A/B 可比；
+#                         面板显示框按同一比例收缩（所见即所控）；ratio 越界 fail-closed；
+#                         默认关（未验证不改现网行为）。选靶仍在原始框域。
+#                       · web：面板「只瞄上半身」开关（比例走配置，不进面板）。
 #   V1.0.22 相对 V1.0.21（2026-10-04）：启停"首次点击卡顿 + 动画生硬"两半都修。
 #                       · core：800ms 格式稳定等待补第二条跳过判据 ——
 #                         除"热重开（距上次 close < 5s）"外，新增"盒子已启动 >= 60s"。
@@ -80,7 +88,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.22 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.23 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -713,6 +721,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_aim_thread tests/test_aim_thread.cpp)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
+
+  # V1.0.23：只瞄上半身（收缩 + 落点等效换算 + AimThread 端到端）
+  add_executable(test_upper_body tests/test_upper_body.cpp)
+  target_link_libraries(test_upper_body PRIVATE ttbox_core)
+  add_test(NAME test_upper_body COMMAND test_upper_body)
 
   # P_PID 对照测试（与参考实现输出逐点一致）
   add_executable(test_pid1 tests/test_pid1.cpp)

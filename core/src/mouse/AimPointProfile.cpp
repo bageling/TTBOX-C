@@ -159,4 +159,36 @@ bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& 
     return found;
 }
 
+float upper_body_shrink_ratio(const AimPointProfile& prof) {
+    // 有效域 (0.05, 1.0]；越界（含 0/负/>1）一律当 1.0（不收缩）—— fail-closed。
+    if (!prof.upper_body_enabled) return 1.0f;
+    const float k = prof.upper_body_ratio;
+    if (!(k > 0.05f && k <= 1.0f)) return 1.0f;
+    return k;
+}
+
+bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
+                          DetectionBox* out_box, AimPointProfile* out_prof) {
+    if (!out_box || !out_prof) return false;
+    *out_box = box;
+    *out_prof = prof;
+    const float w = box.x2 - box.x1;
+    const float h = box.y2 - box.y1;
+    if (w <= 0.0f || h <= 0.0f) return false;  // 框无效：不收缩（调用方走原框）
+    const float k = upper_body_shrink_ratio(prof);
+    if (k >= 1.0f) return false;               // 关闭 / ratio 无效：原样返回
+    // ① 框：x 不动（肩宽不受腿部影响），y2 收到 y1 + k·h。
+    out_box->y2 = box.y1 + k * h;
+    // ② 落点等效换算：所有"相对框高"的比例量统一除以 k，
+    //    使 ty = y1 + (oy/k)·(k·h) = y1 + oy·h —— 与不收缩时同一像素。
+    out_prof->offset_y /= k;
+    for (auto& c : out_prof->class_offsets) c.offset_y /= k;
+    out_prof->head_aim.head_offset_top_fraction /= k;
+    out_prof->head_aim.head_height_fraction /= k;
+    // ③ 外推兜底：body_w_over_h 是「宽/全身高」。收缩域要推「宽/上半身高」
+    //    = body_w_over_h / k（上半身矮、同宽 ⇒ 比值变大）。
+    out_prof->body_w_over_h /= k;
+    return true;
+}
+
 }  // namespace ttbox::core::aim

@@ -323,6 +323,16 @@ void AimThread::loop() {
             const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                 ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
+            // ---- V1.0.23：上半身收缩（业主拍板「只要人物上半身主体」）----
+            // 控制链（裁剪判定 / 冻结 / 身高自校准 / 落点 / 框高遥测 / 拟人化目标
+            // 半径）全部换用收缩框 aim_box_src；落点配置 prof_ub 已做等效换算
+            // （offset 等比例量 ÷k）⇒ 开关切换时落点物理位置不变，A/B 可比。
+            // 关闭 / ratio 无效 ⇒ shrink 返回 false，两个变量就是原值原样
+            // ⇒ 以下整条链与改动前逐字节一致（见 test_upper_body）。
+            // 声明刻意放在 target_ok 块**外**：拟人化段（set_target_radius_px）也消费它。
+            DetectionBox aim_box_src = selected.box;
+            AimPointProfile prof_ub = aim_point;
+            shrink_to_upper_body(selected.box, aim_point, &aim_box_src, &prof_ub);
             if (target_ok) {
                 // ---- V1.0.09：框底被裁剪区下边界截断时的身高反推比（按目标自校准）----
                 // V1.0.10 起降级为**兜底**：只在「目标一出现就被截、没有可冻结的框」时使用。
@@ -332,19 +342,22 @@ void AimThread::loop() {
                 DetectionBox frozen_box;
                 bool have_frozen = false;
                 {
+                    // ★ V1.0.23：贴边判定换到收缩框域 —— 上半身框底（髋）比全身框底
+                    //   （脚）高得多，近身时大幅少触发冻结/外推（这正是本特性的收益）。
                     const bool box_bottom_clipped =
                         crop_bottom_px_ > 0.0f &&
-                        selected.box.y2 >= crop_bottom_px_ - aim_point.clip_bottom_margin_px;
+                        aim_box_src.y2 >= crop_bottom_px_ - prof_ub.clip_bottom_margin_px;
                     // 有效量测 = 框没被裁剪区截断（见上面 measurement_valid 的说明）
                     measurement_valid = !box_bottom_clipped;
-                    clip_ratio_tracker_.observe(selected.box.x2 - selected.box.x1,
-                                                selected.box.y2 - selected.box.y1,
+                    // 自校准比（h/w）记录的也是收缩域的比 —— 与外推消费端同域，自洽。
+                    clip_ratio_tracker_.observe(aim_box_src.x2 - aim_box_src.x1,
+                                                aim_box_src.y2 - aim_box_src.y1,
                                                 box_bottom_clipped, selected.target_id);
                     // ---- V1.0.10：冻结落点 ----
                     // 腿被切 ⇒ 停止更新框，落点保持上一次能看全的那一帧（yu 的
                     // holding_previous 思路）。走近时框顶上升与身高变大互相抵消，
                     // 那个点在屏幕上本来就不该动 ⇒ 冻整个 rect 比外推更简单也更准。
-                    frozen_rect_.observe(selected.box, box_bottom_clipped, selected.target_id);
+                    frozen_rect_.observe(aim_box_src, box_bottom_clipped, selected.target_id);
                     if (box_bottom_clipped) {
                         have_frozen = frozen_rect_.frozen_for(selected.target_id, &frozen_box);
                         // 兜底比：只在 have_frozen=false（拐角撞脸，没看过全框）时被消费。
@@ -354,7 +367,9 @@ void AimThread::loop() {
                 // 冻结生效 ⇒ 用冻结框算落点；crop_bottom 传 -1 明确关闭外推路径
                 // （冻结框本身在裁剪区内部，不该再被外推改写）。
                 // 没有冻结框 ⇒ 走 V1.0.09 外推（行为不变，留 A/B 通路）。
-                const DetectionBox& aim_box = have_frozen ? frozen_box : selected.box;
+                // ★ V1.0.23：aim_box 的未冻结分支取收缩框 aim_box_src（frozen_rect
+                //   观察的也是收缩框 ⇒ 冻结域与实时域同域，切换不跳）。
+                const DetectionBox& aim_box = have_frozen ? frozen_box : aim_box_src;
                 // ★ 几何配对识头（不依赖类别号）：模型同一目标给出「大框(身体)+小框(头)」
                 //   两个框时，落点直接取小框正中心（resolve_head_box，见 AimPointProfile）。
                 //   只动**控制链的落点**（tx/ty → 平滑 → PID）；显示框、measurement_valid、
@@ -367,7 +382,9 @@ void AimThread::loop() {
                     tx = (head_box.x1 + head_box.x2) * 0.5f;
                     ty = (head_box.y1 + head_box.y2) * 0.5f;
                 } else {
-                    if (!aim_point_at(aim_box, selected.box.class_id, aim_point, &tx, &ty,
+                    // ★ V1.0.23：落点用收缩框 + 换算后的 prof_ub（offset 等比例量已 ÷k，
+                    //   ty 与不收缩时同一像素）。aim_point_at / constrain 内部不改。
+                    if (!aim_point_at(aim_box, selected.box.class_id, prof_ub, &tx, &ty,
                                       have_frozen ? -1.0f : crop_bottom_px_,
                                       have_frozen ? 0.0f : clipped_h_over_w)) {
                         tx = (aim_box.x1 + aim_box.x2) * 0.5f;
@@ -375,8 +392,8 @@ void AimThread::loop() {
                     }
                     // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
                     // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
-                    if (aim_point.head_aim.enabled) {
-                        constrain_aim_point_to_head(aim_box, aim_point, &tx, &ty);
+                    if (prof_ub.head_aim.enabled) {
+                        constrain_aim_point_to_head(aim_box, prof_ub, &tx, &ty);
                     }
                 }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
@@ -393,7 +410,8 @@ void AimThread::loop() {
                 // update 会把框高 EMA 清零，放之后才能立刻用新目标的框高重建。
                 tracker_.configure(frame_profile->mouse.box_adaptive);
                 tracker_.update(tx, ty, selected.target_id, task.timestamp_us);
-                tracker_.set_box_h(selected.box.y2 - selected.box.y1);
+                // ★ V1.0.23：框高喂收缩框（滤波自适应/遥测与控制域一致，域不混）。
+                tracker_.set_box_h(aim_box_src.y2 - aim_box_src.y1);
                 // 第15阶段：控制误差必须用「平滑后瞄准点」。
                 // 此前 prediction_time_s_=0 时 control 直接用原始 ex/ey，
                 // 检测框上边缘 y1 帧间跳变（±18px，模型头顶边界）直接进 PID：
@@ -673,7 +691,7 @@ void AimThread::loop() {
                     personal_shader_.set_target_age_ms(target_age_ms_);
                     target_age_ms_ += dt_ms;
                     personal_shader_.set_target_radius_px(
-                        (selected.box.y2 - selected.box.y1) * 0.5f);
+                        (aim_box_src.y2 - aim_box_src.y1) * 0.5f);  // ★ V1.0.23：同收缩域
                     personal_shader_.shape_f(&scaled_x, &scaled_y, control_x, control_y, dt_ms,
                                              personal_traj_cfg);
                     // V3 阶段 5：只登记**垂直随机抖动**。transport 增益是故意要走的一段。
@@ -851,6 +869,15 @@ void AimThread::loop() {
                         display_y1 = std::min(display_y1, candidate.y1);
                         display_x2 = std::max(display_x2, candidate.x2);
                         display_y2 = std::max(display_y2, candidate.y2);
+                    }
+                }
+                // ★ V1.0.23：显示框收缩到上半身（与控制框同一比例 ⇒ 所见即所控）。
+                //   并集在原始域做完（头框参与并集 ⇒ 框顶含头），再对并集结果整体收
+                //   底 —— 观感即「头到腰的上半身」。关闭/无效比例时 k=1 ⇒ 原样。
+                {
+                    const float k_disp = upper_body_shrink_ratio(aim_point);
+                    if (k_disp < 1.0f) {
+                        display_y2 = display_y1 + k_disp * (display_y2 - display_y1);
                     }
                 }
                 // 显示框 One-Euro 平滑：检测框上边缘 y1 帧间跳变 ±18px（模型头顶边界），
