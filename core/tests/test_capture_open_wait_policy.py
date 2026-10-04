@@ -48,6 +48,28 @@ def _step4() -> str:
     return src[i:j]
 
 
+def _code_only(text: str) -> str:
+    """去掉行注释与字符串字面量，只留**可执行代码**。
+
+    ★★ 为什么必须这么做（反向验证实测抓到的假绿）：
+      `kBootSettleSec` 这个名字同时出现在三种地方 ——
+        · 注释：`// ② 盒子已启动 >= kBootSettleSec(60s)。`
+        · 日志字符串：`+ std::to_string(static_cast<int>(kBootSettleSec))`
+        · 真正的判据表达式：`uptime_sec >= kBootSettleSec`
+      第一版断言写的是 `assert 'kBootSettleSec' in block`，结果把判据整条
+      改成 `const bool boot_settled = false;`（= 冷路径又白等 800ms）
+      **断言照样绿** —— 因为注释和日志字符串把它喂饱了。
+      ⇒ 断言必须落在代码上，不能落在"这段文本里有没有出现这个名字"上。
+    ★ 顺序很关键：先去 `//` 行注释，再去 `"..."` 字面量。反过来会让注释里的
+      中文引号（如 `当"刚刚关过"`）被当成字符串起点，把后面半段代码整段吃掉。
+    ★ 局限：本块内没有含 `//` 的字符串字面量（没有 URL）。若将来 log 里写了
+      URL，本函数要升级成真正的词法扫描。
+    """
+    text = re.sub(r'//[^\n]*', '', text)
+    text = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', text)
+    return text
+
+
 def _cpp() -> str:
     return CAP_CPP.read_text(encoding='utf-8')
 
@@ -117,17 +139,33 @@ def test_step4_has_exactly_one_else_if():
 # 2. 跳过等待的两条判据必须都在
 # ---------------------------------------------------------------------------
 
-def test_step4_checks_warm_reopen():
-    block = _step4()
-    assert 'warm_reopen' in block
-    assert 'kWarmReopenWindowMs' in block, '热重开窗口常量被拿掉了'
+def test_step4_uses_the_warm_reopen_window_constant():
+    code = _code_only(_step4())
+    assert re.search(r'since_close_ms\s*<\s*kWarmReopenWindowMs', code), (
+        '热重开窗口常量没被真正用于比较（或被换成了写死的数字）')
 
 
-def test_step4_checks_box_uptime():
-    block = _step4()
-    assert 'boot_uptime_sec()' in block, (
-        '少了「盒子已启动多久」这条判据 ⇒ 冷路径又会白等 800ms（业主说的"首次点击卡顿"）')
-    assert 'kBootSettleSec' in block
+def test_step4_reads_uptime_into_a_variable():
+    code = _code_only(_step4())
+    assert re.search(r'const\s+double\s+uptime_sec\s*=\s*boot_uptime_sec\s*\(\s*\)\s*;', code), \
+        '没有真的去读 uptime（少了「盒子已启动多久」这条判据）'
+
+
+def test_step4_actually_compares_uptime_against_the_threshold():
+    """★ 这条断的是**判据表达式本身**，不是"这段文本里出现过这个名字"。
+
+    反向验证实测：第一版写成 `assert 'kBootSettleSec' in block`，
+    把判据改成 `const bool boot_settled = false;`（冷路径又白等 800ms）
+    断言**照样绿** —— 注释 `// ② ... >= kBootSettleSec(60s)` 和日志字符串
+    `to_string(static_cast<int>(kBootSettleSec))` 把名字喂饱了。
+    """
+    code = _code_only(_step4())
+    assert re.search(
+        r'const\s+bool\s+boot_settled\s*=\s*uptime_sec\s*>=\s*kBootSettleSec\s*;', code), (
+        '「盒子已启动够久」这条判据被架空了 —— 冷路径又会白等 800ms'
+        '（业主说的"首次点击卡顿"）')
+    assert re.search(r'else\s+if\s*\(\s*boot_settled\s*\)', code), (
+        '算出了 boot_settled 却没拿去分支 ⇒ 判据等于不存在')
 
 
 def test_warm_reopen_does_not_treat_never_closed_as_zero_gap():
@@ -137,9 +175,17 @@ def test_warm_reopen_does_not_treat_never_closed_as_zero_gap():
       开机后的第一次打开会被误判成热重开 ⇒ 恰好跳过"真正需要等"的那一次
       （这是"冷启动第一次可能拿到过渡中的格式"的成因）。
     """
-    block = _step4()
-    assert 'last_close_ms_ > 0.0' in block, (
+    code = _code_only(_step4())
+    assert re.search(r'\(\s*last_close_ms_\s*>\s*0\.0\s*\)', code), (
         '又拿 0 当"刚刚关闭"用了 —— 开机后第一次打开会被误判成热重开')
+    assert re.search(r'\)\s*\?\s*\([^)]*\)\s*:\s*-1\.0\s*;', code), (
+        '「没关过」没有映射成 -1，热重开判据会把它当成"间隙为 0"')
+
+
+def test_step4_skips_on_warm_reopen():
+    code = _code_only(_step4())
+    assert re.search(r'const\s+bool\s+warm_reopen\s*=\s*\n?\s*since_close_ms\s*>=\s*0\.0', code)
+    assert 'if (warm_reopen) {' in code, '算出了 warm_reopen 却没拿去分支'
 
 
 # ---------------------------------------------------------------------------
@@ -149,15 +195,22 @@ def test_warm_reopen_does_not_treat_never_closed_as_zero_gap():
 def test_uptime_helper_fails_closed_to_unknown():
     """两条失败路径都必须落到 -1。
 
-    ★ 写法坑：两条路径的形态**不一样** ——
+    ★ 写法坑之一：两条路径的形态**不一样** ——
       打不开是 `if (fp == nullptr) { return -1.0; }`（提前 return），
       读失败是 `if (fscanf(...) != 1) { up = -1.0; }`（改值后落到函数末尾的 return）。
       只数 `return -1.0;` 会数成 1 条然后误报失败（本文件第一版就这么错的）。
+    ★ 写法坑之二（反向验证实测抓到的假绿）：
+      第二版写成 `assert 'up = -1.0;' in body` —— 被函数开头的
+      **初始化语句** `double up = -1.0;` 喂饱了；把失败分支改成
+      `up = 999999.0;`（读失败 = 认为已稳定）**断言照样绿**。
+      ⇒ 必须按 `if (...)` 分支整体匹配，不能只看有没有出现过这个赋值。
     """
-    body = _uptime_body()
-    assert 'return -1.0;' in body, 'fopen 失败路径没有返回 -1'
-    assert 'up = -1.0;' in body, 'fscanf 读失败路径没有把结果置成 -1'
-    assert '>= kBootSettleSec' in _step4(), (
+    code = _code_only(_uptime_body())
+    assert re.search(r'if\s*\(\s*fp\s*==\s*nullptr\s*\)\s*\{\s*return\s+-1\.0\s*;', code), (
+        'fopen 失败路径没有返回 -1')
+    assert re.search(r'if\s*\(\s*std::fscanf\([^;]*?\)\s*!=\s*1\s*\)\s*\{\s*up\s*=\s*-1\.0\s*;', code), (
+        'fscanf 读失败路径没有把结果置成 -1 ⇒ 读不到 /proc/uptime 会被当成"已稳定"')
+    assert re.search(r'uptime_sec\s*>=\s*kBootSettleSec', _code_only(_step4())), (
         '判据不是 `>= kBootSettleSec` ⇒ -1（未知）可能被当成"已稳定"')
 
 

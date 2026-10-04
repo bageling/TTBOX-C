@@ -75,11 +75,27 @@ def test_base_rule_has_transition():
         '.power-button 上没有 transition ⇒ 悬停/配色/忙态全是硬跳（"动画很生硬"的根源）')
 
 
-def test_transition_covers_the_properties_that_visually_change():
-    """去掉其中任意一条，对应那一种变化就又会变成硬跳。"""
+def _transition_value() -> str:
+    """取 `.power-button` 那条 `transition:` 声明的**值**（到分号为止）。
+
+    ★ 为什么不能直接 `assert 'box-shadow' in body`：规则体里**本来就有一条**
+      静态的 `box-shadow:` 声明 ⇒ 把 transition 列表里的 box-shadow 那一条删掉，
+      断言照样绿（假绿）。必须只在这个声明的值里查。
+      （反向验证抓到的同型假绿：core 侧 `kBootSettleSec` 被注释喂饱，
+        web 侧这里是被同规则里的静态声明喂饱。）
+    """
     body = _rule_body(_css(), BASE)
+    m = re.search(r'\btransition\s*:\s*([^;]*);', body, re.S)
+    assert m, '.power-button 上找不到 transition 声明'
+    return m.group(1)
+
+
+def test_transition_covers_the_properties_that_visually_change():
+    """去掉任意一条，对应那一种变化就又会变成硬跳。"""
+    value = _transition_value()
     for prop in ('transform', 'box-shadow', 'border-color', 'background'):
-        assert prop in body, 'transition 没覆盖 %s ⇒ 它仍会硬跳' % prop
+        assert re.search(r'(?<![\w-])%s(?![\w-])' % re.escape(prop), value), (
+            'transition 列表里没有 %s ⇒ 它仍会硬跳' % prop)
 
 
 # ---------------------------------------------------------------------------
