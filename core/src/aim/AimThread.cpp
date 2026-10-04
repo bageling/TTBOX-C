@@ -323,13 +323,14 @@ void AimThread::loop() {
             const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                 ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
-            // ---- V1.0.23：上半身收缩（业主拍板「只要人物上半身主体」）----
+            // ---- V1.0.24：上半身收缩（无条件生效；业主「只要人物上半身主体」）----
             // 控制链（裁剪判定 / 冻结 / 身高自校准 / 落点 / 框高遥测 / 拟人化目标
-            // 半径）全部换用收缩框 aim_box_src；落点配置 prof_ub 已做等效换算
-            // （offset 等比例量 ÷k）⇒ 开关切换时落点物理位置不变，A/B 可比。
-            // 关闭 / ratio 无效 ⇒ shrink 返回 false，两个变量就是原值原样
-            // ⇒ 以下整条链与改动前逐字节一致（见 test_upper_body）。
-            // 声明刻意放在 target_ok 块**外**：拟人化段（set_target_radius_px）也消费它。
+            // 半径）与**显示框**全部换用收缩框 aim_box_src；落点配置 prof_ub 已做
+            // 等效换算（相对框高的比例量 ÷k）⇒ 落点物理位置不变。
+            // 比例是算法常量（见 AimPointProfile.cpp），**不是配置项**。
+            // 框无效 ⇒ shrink 原样返回 ⇒ 走原框。
+            // 声明刻意放在 target_ok 块**外**：拟人化段（set_target_radius_px）与
+            // status 段（显示框）也消费它。
             DetectionBox aim_box_src = selected.box;
             AimPointProfile prof_ub = aim_point;
             shrink_to_upper_body(selected.box, aim_point, &aim_box_src, &prof_ub);
@@ -844,42 +845,17 @@ void AimThread::loop() {
             status_.has_target = selected.valid;
             status_.target_id = selected.valid ? selected.target_id : -1;
             status_.target_class_id = selected.valid ? selected.box.class_id : -1;
-            // 显示框使用同一目标的关联检测框并集，避免只显示头/躯干局部框。
-            // 控制链仍使用 selected.box，显示框扩展不会改变瞄准行为。
+            // ★ V1.0.24：显示框 = **控制链正在用的那个上半身框**，不再做多框并集。
+            //   旧实现把同一目标身上的所有框并起来（身体框 + 头框 → 画面上那个
+            //   "又大又含头"的框），业主看到的"框是全身加头部"就是它造成的 ——
+            //   显示与控制不是同一个几何，参考物失真。
+            //   现在两者同一来源：面板画的就是算法瞄的那块。
+            //   比例恒 = upper_body_ratio()，无条件生效。
             if (selected.valid) {
-                float display_x1 = selected.box.x1;
-                float display_y1 = selected.box.y1;
-                float display_x2 = selected.box.x2;
-                float display_y2 = selected.box.y2;
-                const float selected_cx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                const float selected_cy = (selected.box.y1 + selected.box.y2) * 0.5f;
-                const float selected_w = std::max(1.0f, selected.box.x2 - selected.box.x1);
-                const float selected_h = std::max(1.0f, selected.box.y2 - selected.box.y1);
-                for (const auto& candidate : task.detections) {
-                    if (&candidate == &selected.box) continue;
-                    const float candidate_cx = (candidate.x1 + candidate.x2) * 0.5f;
-                    const float candidate_cy = (candidate.y1 + candidate.y2) * 0.5f;
-                    const bool vertical_overlap = candidate.y2 >= selected.box.y1 &&
-                                                  candidate.y1 <= selected.box.y2;
-                    const bool horizontal_near = std::fabs(candidate_cx - selected_cx) <=
-                                                 std::max(selected_w * 1.5f, 120.0f);
-                    const bool vertical_near = std::fabs(candidate_cy - selected_cy) <= selected_h * 0.75f;
-                    if (vertical_overlap && horizontal_near && vertical_near) {
-                        display_x1 = std::min(display_x1, candidate.x1);
-                        display_y1 = std::min(display_y1, candidate.y1);
-                        display_x2 = std::max(display_x2, candidate.x2);
-                        display_y2 = std::max(display_y2, candidate.y2);
-                    }
-                }
-                // ★ V1.0.23：显示框收缩到上半身（与控制框同一比例 ⇒ 所见即所控）。
-                //   并集在原始域做完（头框参与并集 ⇒ 框顶含头），再对并集结果整体收
-                //   底 —— 观感即「头到腰的上半身」。关闭/无效比例时 k=1 ⇒ 原样。
-                {
-                    const float k_disp = upper_body_shrink_ratio(aim_point);
-                    if (k_disp < 1.0f) {
-                        display_y2 = display_y1 + k_disp * (display_y2 - display_y1);
-                    }
-                }
+                float display_x1 = aim_box_src.x1;
+                float display_y1 = aim_box_src.y1;
+                float display_x2 = aim_box_src.x2;
+                float display_y2 = aim_box_src.y2;
                 // 显示框 One-Euro 平滑：检测框上边缘 y1 帧间跳变 ±18px（模型头顶边界），
                 // 平滑后预览框稳定、标定稳定检测（aim_pos_x/y + width/height 变化 <5%）可过。
                 // 目标切换时重建平滑状态（新目标坐标完全不同，避免旧轨迹拖尾）。

@@ -49,22 +49,20 @@ bool constrain_aim_point_to_head(const DetectionBox& box, const AimPointProfile&
 bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& dets,
                       DetectionBox* head);
 
-// V1.0.23：上半身收缩 —— 把控制链用的框与瞄准点配置**一起**映射到上半身域。
-//   开关关 / ratio 越界 (0.05, 1.0] 之外 / 框无效 ⇒ 返回 false，*out_box/*out_prof
-//   原样填入参（等价"未收缩"）—— fail-closed，坏配置回原行为而不是回崩溃。
-//   收缩时（k = upper_body_ratio）：
-//     · out_box = (x1, y1, x2, y1 + k·h)   —— x 不动（肩宽不受腿部影响）
-//     · out_prof.offset_y /= k             —— 落点物理位置不变（等效换算）
+// V1.0.24：上半身收缩（无条件生效；比例是算法常量，不进配置/面板）。
+//   把控制链用的框与瞄准点配置**一起**映射到上半身域：
+//     · out_box = (x1, y1, x2, y1 + k·h)      —— x 不动
+//     · out_prof.offset_y /= k                 —— 落点物理位置不变（等效换算）
 //     · out_prof.class_offsets 每项 offset_y /= k
-//     · out_prof.head_aim 的 head_offset_top_fraction / head_height_fraction /= k
-//     · out_prof.body_w_over_h /= k        —— 外推兜底在收缩域推出"完整上半身高"
-//   ★ 调用方把 out_box/out_prof 喂给整条控制链（clip 判定/冻结/自校准/落点/框高）；
-//     显示框另行用同一 k 收缩（见 AimThread status 段）。
+//     · out_prof.head_aim 两个 fraction /= k
+//     · out_prof.body_w_over_h /= k            —— 外推兜底在收缩域推出"完整上半身高"
+//   调用方把 out_box/out_prof 喂给整条控制链（clip 判定/冻结/自校准/落点/框高）；
+//   显示框直接用 out_box（不再做多框并集 —— 那正是"框看起来是全身加头"的来源）。
+//   框无效 ⇒ 原样返回（调用方走原框）。
 bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
                           DetectionBox* out_box, AimPointProfile* out_prof);
 
-// V1.0.23：上半身收缩的有效比例。开且有效返回 k；否则返回 1.0（= 不收缩）。
-//   供显示框等"只需要 k"的调用方复用，避免各自重写判定造成口径漂移。
-float upper_body_shrink_ratio(const AimPointProfile& prof);
+// 上半身占全身框高的比例（算法常量，见 AimPointProfile.cpp 的取值依据）。
+float upper_body_ratio();
 
 }  // namespace ttbox::core::aim

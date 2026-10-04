@@ -159,14 +159,19 @@ bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& 
     return found;
 }
 
-float upper_body_shrink_ratio(const AimPointProfile& prof) {
-    // 有效域 (0.05, 1.0]；越界（含 0/负/>1）一律当 1.0（不收缩）—— fail-closed。
-    if (!prof.upper_body_enabled) return 1.0f;
-    const float k = prof.upper_body_ratio;
-    if (!(k > 0.05f && k <= 1.0f)) return 1.0f;
-    return k;
-}
+// ★ V1.0.24：**上半身占全身框高的比例 —— 算法常量，不是配置项。**
+//   依据（人体比例）：头高 ≈ 0.13 身高、髋以下 ≈ 0.47、颈肩到髋 ≈ 0.40
+//   ⇒ 头顶到髋约 0.50~0.55。取 0.50 略偏保守：框短一点只是少含一点腰，
+//   绝不会切到胸口以上（切进胸口 = 落点被顶高，是最糟的方向）。
+//   ★ 刻意**不进配置、不进面板**（业主口径「不要给参考物」）—— 要调就改这一行。
+constexpr float kUpperBodyRatio = 0.5f;
 
+float upper_body_ratio() { return kUpperBodyRatio; }
+
+// 上半身收缩：把控制链用的框与瞄准点配置一起映射到上半身域（无条件生效）。
+//   out_box = (x1, y1, x2, y1 + k·h)          —— x 不动（肩宽不受腿部影响）
+//   out_prof 的「相对框高」比例量统一 ÷k        —— 落点物理位置不变（等效换算）
+//   框无效 ⇒ 原样返回，调用方走原框。
 bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
                           DetectionBox* out_box, AimPointProfile* out_prof) {
     if (!out_box || !out_prof) return false;
@@ -174,19 +179,13 @@ bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
     *out_prof = prof;
     const float w = box.x2 - box.x1;
     const float h = box.y2 - box.y1;
-    if (w <= 0.0f || h <= 0.0f) return false;  // 框无效：不收缩（调用方走原框）
-    const float k = upper_body_shrink_ratio(prof);
-    if (k >= 1.0f) return false;               // 关闭 / ratio 无效：原样返回
-    // ① 框：x 不动（肩宽不受腿部影响），y2 收到 y1 + k·h。
+    if (w <= 0.0f || h <= 0.0f) return false;
+    const float k = kUpperBodyRatio;
     out_box->y2 = box.y1 + k * h;
-    // ② 落点等效换算：所有"相对框高"的比例量统一除以 k，
-    //    使 ty = y1 + (oy/k)·(k·h) = y1 + oy·h —— 与不收缩时同一像素。
     out_prof->offset_y /= k;
     for (auto& c : out_prof->class_offsets) c.offset_y /= k;
     out_prof->head_aim.head_offset_top_fraction /= k;
     out_prof->head_aim.head_height_fraction /= k;
-    // ③ 外推兜底：body_w_over_h 是「宽/全身高」。收缩域要推「宽/上半身高」
-    //    = body_w_over_h / k（上半身矮、同宽 ⇒ 比值变大）。
     out_prof->body_w_over_h /= k;
     return true;
 }

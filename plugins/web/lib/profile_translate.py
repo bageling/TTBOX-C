@@ -361,13 +361,6 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     # 平铺键，与 clip_bottom_extrapolate / offset_x 同层。
     if ctrl.get('aim_at_head_box') is not None:
         mouse['aim_at_head_box'] = bool(ctrl['aim_at_head_box'])
-    # V1.0.23 只瞄上半身：面板勾上后控制链换上半身虚拟框（落点做等效换算，位置不变）。
-    # 平铺键，与 aim_at_head_box 同层；ratio 面板暂不暴露（默认 0.5 = 头顶到髋），
-    # 需要改比例走配置（口径同 head_aim 的精细量）。
-    if ctrl.get('upper_body_enabled') is not None:
-        mouse['upper_body_enabled'] = bool(ctrl['upper_body_enabled'])
-    if ctrl.get('upper_body_ratio') is not None:
-        mouse['upper_body_ratio'] = float(ctrl['upper_body_ratio'])
 
     # 6) 推理参数
     inference: dict = {}
@@ -586,8 +579,6 @@ def profile_to_web(prof: dict) -> dict:
         'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
         'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
         'aim_at_head_box': mouse.get('aim_at_head_box', False),
-        'upper_body_enabled': mouse.get('upper_body_enabled', False),
-        'upper_body_ratio': mouse.get('upper_body_ratio', 0.5),
         # personal_motion 改由 CTRL_BLOCKS 表驱动搬运（键名规则一致：前缀_字段），
         # 这里不再手写（手写与表并存会互相覆盖，且容易漏同步）。
     }

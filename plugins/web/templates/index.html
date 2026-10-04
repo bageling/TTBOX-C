@@ -293,15 +293,6 @@
                     <div class="field-hint">训练场「单个目标只有大框(身体)＋小框(头)」时勾上：落点自动取小框正中心，按几何配对识别（小框被大框包住、面积明显更小、在大框上半部），不依赖类别号。模型只出一个身体框时勾了也没影响，会自动退回身体框落点。</div>
                   </div>
                 </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>只瞄上半身</strong>
-                    <label class="switch"><input id="controller_upper_body_enabled" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">把瞄准区域从「全身」收成「上半身」（默认取全身框高的 50%，即头顶到髋）。落点位置保持不变，但瞄准框不再包含腿部与下半身：走位时的框抖动不进 PID，近身时脚先出画面也不会把落点顶到头顶。走远、目标很小时全身框本来就在上半身，效果差别不大；近身与走动时改善明显。</div>
-                  </div>
-                </article>
               </div>
             </section>
 

@@ -125,9 +125,6 @@ const CONTROLLER_DEFAULTS = {
   pull_curve_min_distance: 80,
   selector_lost_grace_ms: 78,
   aim_at_head_box: false,
-  // V1.0.23 只瞄上半身（默认关；ratio 面板不暴露，精细量走配置）
-  upper_body_enabled: false,
-  upper_body_ratio: 0.5,
 };
 // ---------------------------------------------------------------------------
 // BB 对标模块表（2026-09-24 面板收敛）
