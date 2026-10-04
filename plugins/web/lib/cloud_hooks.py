@@ -98,10 +98,19 @@ def _ensure_heartbeat_worker() -> None:
         if current is not None and current.running():
             return
         worker = HeartbeatWorker(
-            _CLOUD_CLIENT, _CLOUD_SESSION,
+            # ★ 这三个都是本模块的 **lazy 转发函数**（经 hub.call 取入口的对象），
+            #   必须**调用**它们拿实例，不能把函数本身当参数/值传过去。
+            #   漏括号的后果（2026-10-04 板端 journalctl 实测）：
+            #     · session 收到函数 ⇒ worker 里 self._session.load() 抛
+            #       「'function' object has no attribute 'load'」⇒ **心跳线程一启动就死**，
+            #       /api/license 的 cloud.heartbeat 永远 online=false、last_ok_at=0；
+            #     · client_version / machine_code 收到函数 ⇒ 日志与版本号全错。
+            #   入口的 _CLOUD_CLIENT/_CLOUD_SESSION 是**模块级单例**（ttbox-web.py:645/647），
+            #   所以每次调用拿到的是同一个对象，心跳与 /api/license 读同一份会话。
+            _CLOUD_CLIENT(), _CLOUD_SESSION(),
             on_expired=_cloud_deactivate_callback,
-            client_version=kAppVersion,
-            machine_code=_machine_code,
+            client_version=kAppVersion(),
+            machine_code=_machine_code(),
         )
         # ★ 走 hub.set_ 而不是 setattr(hub.entry(), ...)：hub 绑定的是入口的
         #   __dict__（dict），不是模块对象 ⇒ setattr 对 dict 会 AttributeError。

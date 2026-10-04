@@ -97,17 +97,44 @@ class _FakeWorker:
     def start(self):
         self._running = True
 
+    # ★ 构造参数必须是"值"，不能是"函数"：漏一次括号，心跳线程就死在
+    #   self._session.load()（板端 journalctl 实测 'function' object has no
+    #   attribute 'load'）。_FakeWorker 只是记录 ⇒ 光靠它抓不到，靠下面的断言钉住。
+    def assert_args_are_values(self):
+        """★ 该是"值"的参数不能是转发函数本身（漏一次括号就出事）。
+
+        只查 client / session（位置参数）与 client_version / machine_code。
+        ★ `on_expired` **本来就是回调**，必须是函数 —— 不查它（第一版把它也查了，
+        结果抓到 on_expired 是函数就报错，属于断言写过头）。
+        """
+        import inspect
+        targets = [('client', v) for v in self.args]
+        targets += [(k, self.kw.get(k)) for k in ('client_version', 'machine_code')]
+        for name, val in targets:
+            if val is None:
+                continue
+            assert not inspect.isfunction(val), (
+                'HeartbeatWorker 的 %s 收到了转发函数本身（漏了括号）: %r —— '
+                'cloud_hooks 的 _CLOUD_CLIENT/_CLOUD_SESSION/kAppVersion/'
+                '_machine_code 都是 lazy 转发，必须调用它们拿实例/值' % (name, val))
+
 
 def _fake_entry():
     return types.SimpleNamespace(
         _HEARTBEAT=None,
         _HEARTBEAT_START_LOCK=threading.Lock(),
-        _CLOUD_CLIENT='CLIENT',
-        _CLOUD_SESSION='SESSION',
+        # ★ 这四个在**入口里是 cloud_hooks 的转发函数**（ttbox-web.py:99 把
+        #   kAppVersion 从 lib import 进来；_CLOUD_CLIENT/_CLOUD_SESSION 是
+        #   cloud_hooks 转发取入口的**模块级单例**），不是字符串常量。
+        #   所以这里必须 stub 成**可调用**的转发函数 —— 旧版本 stub 成字符串，
+        #   而当时的实现也恰好"直接传不调用"，两边共谋 ⇒ 传函数当对象的 bug
+        #   一路漏到板端（心跳线程一启动就死，2026-10-04 修）。
+        _CLOUD_CLIENT=lambda *a, **k: 'CLIENT',
+        _CLOUD_SESSION=lambda *a, **k: 'SESSION',
         _cloud_deactivate_callback=lambda: None,
         _invalidate_activation_cache=lambda: None,
-        kAppVersion='V1.0.18',
-        _machine_code='MACHINE',
+        kAppVersion=lambda *a, **k: 'V1.0.18',
+        _machine_code=lambda *a, **k: 'MACHINE',
         _ACTIVATION_CACHE={'ts': 1.0},
         ipc_request=lambda *a, **k: {'ok': True},
         HeartbeatWorker=_FakeWorker,
@@ -135,6 +162,12 @@ def test_ensure_heartbeat_worker_actually_runs(wired_cloud_hooks):
     assert isinstance(ns._HEARTBEAT, _FakeWorker), (
         '_HEARTBEAT 没被写进入口模块（应经 hub.setattr）')
     assert ns._HEARTBEAT.running() is True
+    # ★ 真正咬住"漏括号"这个 bug：构造参数必须是值，不是转发函数本身。
+    ns._HEARTBEAT.assert_args_are_values()
+    assert ns._HEARTBEAT.args[0] == 'CLIENT', 'client 应对应 _CLOUD_CLIENT() 的返回值'
+    assert ns._HEARTBEAT.args[1] == 'SESSION', 'session 应对应 _CLOUD_SESSION() 的返回值'
+    assert ns._HEARTBEAT.kw['client_version'] == 'V1.0.18'
+    assert ns._HEARTBEAT.kw['machine_code'] == 'MACHINE'
     # 幂等：第二次不应再建一个
     first = ns._HEARTBEAT
     mod._ensure_heartbeat_worker()
