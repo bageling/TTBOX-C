@@ -323,17 +323,15 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
 
                 const float cx = static_cast<float>(cfg.roi_w) * cfg.center_x;
                 const float cy = static_cast<float>(cfg.roi_h) * cfg.center_y;
-                // ★ FOV 半径基准 = 全帧短边（固定屏幕范围，不随截图缩放）。
-                //   之前用 search_radius_px（= capture 半宽）⇒ 圈跟截图绑死缩放，
-                //   圈占画面比例恒不变，前端等比缩放后看着"圈没变化"。
-                //   现对齐 DecodeNMS::apply_fov_filter 的 `fov.radius × min(fw,fh)`：
-                //   圆心=全帧中心，半径=全帧短边 × fov_range（固定，不随 capture 变）。
-                //   search_radius_px 仍用于"贴边剔除"（collect_candidates 的 crop_half），
-                //   不再参与 FOV 半径。
-                const float base_radius = std::min(cfg.roi_w, cfg.roi_h);
+                // 半径基准优先用 search_radius_px（= 截取尺寸内划最大圆的半径，
+                // 由 AimThread 从 capture.width/height 填）；未填时回退旧口径
+                // min(roi_w, roi_h)/2（整帧），保证未接线的调用方行为不变。
+                const float base_radius = cfg.search_radius_px > 0.0f
+                    ? cfg.search_radius_px
+                    : std::min(cfg.roi_w, cfg.roi_h) * 0.5f;
                 const float radius = base_radius * cfg.fov_range;
                 const float radius_sq = radius * radius;
-                last_fov_radius_px_ = radius;  // ★ 供预览画同一个圆（画=约束）
+                last_fov_radius_px_ = radius;  // ★ V1.0.31：供预览画同一个圆
 
                 // ByteTrack：每帧先对现有轨迹做卡尔曼预测（写入 pred_cx/pred_cy 供关联参考）
                 for (auto& t : tracks_) kalman_predict(t, cfg);

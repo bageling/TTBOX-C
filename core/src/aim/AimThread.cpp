@@ -185,11 +185,13 @@ void AimThread::loop() {
                 // ★ 此前 scfg.class_filter 从未被赋值 ⇒ 瞄准侧类别过滤一直是关的，
                 //   全靠推理侧把非本类别框丢掉。多档位必须把这个字段接上。
                 if (ap) scfg.class_filter = ap->class_filter;
-                // ★ search_radius_px = 裁剪区半宽（capture 中心裁，板端 640×640 ⇒ 320px），
-                //   **只用于贴边剔除**（TargetSelector 的 crop_half）。
-                //   FOV 半径基准已改为**全帧短边**（TargetSelector 里 base_radius = min(roi_w,roi_h)），
-                //   对齐 DecodeNMS 的 `fov.radius × min(fw,fh)` —— 圈是固定屏幕范围，不随截图缩放。
-                //   框坐标与 capture 是同一套 1:1 像素（中心裁剪不缩放），故半宽可直接用。
+                // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
+                // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
+                // 之前用整帧 task.frame_width/height（2560×1440）⇒ min/2 = 720px，
+                // 比检测区半宽（320px）还大 ⇒ 圆从未真正约束过选靶。
+                // 框坐标与 capture 是同一套 1:1 像素（中心裁剪不缩放，见 fov_map_no_roi_full_frame
+                // / fov_map_with_roi 用例），故半径可直接用；capture 为 0（全帧）时留 0，
+                // TargetSelector 会回退旧口径。
                 {
                     const auto& cap = frame_profile->capture;
                     if (cap.width > 0 && cap.height > 0) {

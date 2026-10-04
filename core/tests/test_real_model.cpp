@@ -347,13 +347,8 @@ TEST(real_target_selector_semantics) {
     // 目标跑出 FOV → selector 立即 invalid（安全红线：不允许凭旧坐标移动）。
     // "短暂消失保持 target_id"的宽限由上层 AimStateMachine LOST_GRACE 实现；
     // TargetSelector 层只在完全空检测帧做 track 保活计数。
-    // ★ FOV 半径 = ROI 短边 256 × fov_range。fov_range=0.5 ⇒ 128px；
-    //   det(40,40) 的瞄准点 (40,16) 距准星 (128,128) ≈ 142 > 128 ⇒ FOV 外。
-    aim::TargetSelector sel_gone;
-    aim::TargetSelectorConfig cfg_gone = cfg;
-    cfg_gone.fov_range = 0.5f;
-    std::vector<DetectionBox> gone = {det(40, 40, 0.95f)};
-    auto s3 = sel_gone.select(gone, cfg_gone, 40);
+    std::vector<DetectionBox> gone = {det(40, 40, 0.95f)};  // 瞄准点(40,16)在 FOV 外
+    auto s3 = sel.select(gone, cfg, 40);
     CHECK(!s3.valid);  // FOV 外立即失效
     std::printf("  FOV 外立即失效 OK\n");
 
@@ -392,8 +387,8 @@ TEST(real_target_selector_semantics) {
     aim::TargetSelector sel2;
     aim::TargetSelectorConfig cfg2;
     cfg2.roi_w = 256; cfg2.roi_h = 256;
-    cfg2.fov_range = 0.2f;  // 半径 = 256 × 0.2 = 51.2px
-    std::vector<DetectionBox> far_only = {det(128, 250, 0.99f)};  // 瞄准点(128,226) 距准星 98px
+    cfg2.fov_range = 0.2f;  // 半径 = 256*0.5*0.2 ≈ 25px
+    std::vector<DetectionBox> far_only = {det(128, 250, 0.99f)};  // 距中心 122px
     auto s5 = sel2.select(far_only, cfg2, 0);
     CHECK(!s5.valid);  // FOV 外
     std::printf("  FOV 过滤 OK\n");
@@ -513,7 +508,7 @@ TEST(real_target_selector_semantics) {
     aim::TargetSelector sel2;
     aim::TargetSelectorConfig cfg2;
     cfg2.roi_w = 256; cfg2.roi_h = 256;
-    cfg2.fov_range = 0.2f;   // 半径 = 256 × 0.2 = 51.2px；(128,250) 瞄准点距准星 98px ⇒ FOV 外
+    cfg2.fov_range = 0.2f;   // 半径 ≈ 25px；(128,250) 距中心 122px ⇒ FOV 外
     const auto s2 = sel2.select({det(128, 250, 0.99f)}, cfg2, 0);
     CHECK(!s2.valid);
 }

@@ -228,7 +228,7 @@ TEST(selector_switch_cooldown_blocks_multi_candidate) {
 // ---- 切靶滞后（对齐 BB target_switch_hysteresis）----
 // 新目标必须比刚失去的锁定目标明显更近才允许切；滞后置 0 时行为与加入前一致。
 TEST(selector_switch_hysteresis_blocks_far_candidate) {
-    // ★ 两个候选都必须落在 FOV 半径内（中心 320,240，半径 480），否则会被
+    // ★ 两个候选都必须落在 FOV 半径内（中心 320,240，半径 240），否则会被
     //   collect_candidates 过滤掉 ⇒ 只剩单候选，守卫按设计不拦（那不是"切换"）。
     const std::vector<DetectionBox> first = {box(340, 240, 60, 120), box(520, 240, 60, 120)};
     // A(340,240) 距中心 20px；随后 A 瞬移到 (150,180)，剩下的候选都比它远

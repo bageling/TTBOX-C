@@ -48,7 +48,7 @@ private:
 
 // 目标框：画面中心偏左上（ref=640,360 时 err_x<0 err_y<0）。
 // 位置需同时满足：误差距离 > min_distance(80) 触发拉枪，
-// 且误差距离 < FOV 半径（min(1280,720)*1.0=720）不被 TargetSelector 过滤。
+// 且误差距离 < FOV 半径（min(1280,720)*0.5*1.0=320）不被 TargetSelector 过滤。
 // 中心 (500,200)：err=(-140,-160)，距离≈213 → 两者都满足。
 ttbox::core::DetectionBox make_far_box() {
     ttbox::core::DetectionBox b;

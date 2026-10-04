@@ -44,19 +44,15 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
-#   V1.0.32 相对 V1.0.31（2026-10-04）：**FOV 圈固定屏幕范围，不再随截图尺寸缩放**。
-#                       · 起因：业主报「圈不随截图大小变动，不管 capture 320 还是 640，FOV 圈都没变化」。
-#                       · 根因：旧链路 search_radius_px = min(capture.w,h)/2（随截图缩放）
-#                         → TargetSelector base_radius = search_radius_px → radius = base×fov_range，
-#                         圈和截图绑死等比缩放，前端 object-fit:contain 撑满后视觉上「圈不变」。
-#                       · 修：base_radius 改取 min(roi_w, roi_h)（全帧短边），与
-#                         DecodeNMS::apply_fov_filter 的 r_px = fov_radius×min(fw,fh) 口径对齐。
-#                         search_radius_px 语义收窄为「只用于贴边剔除（collect_candidates 的
-#                         crop_half）」，不再参与 FOV 半径。
-#                       · last_fov_radius_px_ = radius，保证预览「画的圆 = 约束的圆」。
-#                       · 护栏：test_target_selector / test_mouse / test_real_model /
-#                         test_selector_gating / test_selector_stress / test_pull_curve_aimthread
-#                         断言同步更新；test_preview_and_targeting_v31.py 8 条全绿。
+#   V1.0.33 相对 V1.0.31（2026-10-05）：**回退 V1.0.32 的 FOV 基准改动**。
+#                       · V1.0.32 曾把 FOV 半径基准从「截图半宽 search_radius_px」改成「全帧短边
+#                         min(roi_w,roi_h)」想对齐 DecodeNMS，结果圈放大 4.5 倍（板端 fov.radius=0.195
+#                         时 62px→281px，几乎填满 640 截图）、选靶范围同步放宽 4.5 倍 ⇒ 业主反馈
+#                         「圈调不动/主页本来就有瞄准范围滑块，不该定死」⇒ 整体 revert。
+#                       · 恢复：base_radius = search_radius_px（截图半宽，随截图缩放、由面板
+#                         「瞄准范围」滑块经 fov_range 正常控制）；search_radius_px 未填时回退
+#                         min(roi_w,roi_h)/2。与 DecodeNMS 的「整帧短边」口径差异是既有的、另行处理。
+#                       · 版本号跳过 V1.0.32（已发布，本版等价 V1.0.31 + 更高版本号）。
 #   V1.0.31 相对 V1.0.30（2026-10-04）：**预览按业界标准三层 + 选靶不再选中球 + FOV 真约束**。
 #                       · 依据：GitHub 调研（sunone_aimbot，1.6k star，debug/overlay 窗口）。
 #                         它的画法是三层：① show_boxes **全部检测框** ② 选中的框
@@ -233,7 +229,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.32 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.33 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
