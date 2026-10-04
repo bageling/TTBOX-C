@@ -35,7 +35,12 @@ namespace ttbox::core::aim {
 
 // 目标选择配置（由 MouseProfile + ROI 尺寸派生，运行时组装）
 struct TargetSelectorConfig {
-    float fov_range = 1.0f;          // 0~1；搜索半径 = min(roi_w, roi_h) / 2 × fov_range
+    float fov_range = 1.0f;          // 0~1；搜索半径 = 基准半径 × fov_range（基准=截取区最大圆半径）
+    // ★ V1.0.31 几何兜底：**高宽比下限**，低于它判为「球/道具/烟雾」不参与选靶。
+    //   实测（2026-10-04 板端训练场）：球 h/w=0.88，人 h/w=1.68~3.55 ⇒ 界取 1.15。
+    //   这是**兜底**，主判据仍是 class_filter（业界 sunone 默认 [0]=player）。
+    //   设 <=0 关闭该兜底。
+    float min_aspect_h_over_w = 1.15f;
     float confidence = 0.25f;        // 置信度阈值
     std::vector<int> class_filter;   // 空 = 全部保留
     uint32_t roi_w = 0;              // ROI/crop 宽（DetectionBox 所在坐标系）
@@ -247,12 +252,21 @@ public:
     // V1.0.11：累计「量测被判坏 ⇒ 沿用上一帧」的帧数（遥测用，看门控在不在工作）。
     uint64_t selector_holds_total() const { return selector_holds_total_; }
 
+    // ★ V1.0.31：本帧实际使用的 FOV 半径（像素）。预览用它画那个圆，
+    //   免得"画出来的圆"和"真正约束选靶的圆"对不上（这是调试画面最常见的骗人点）。
+    float last_fov_radius_px() const { return last_fov_radius_px_; }
+
 private:
     // 从检测框列表匹配候选（过滤 + 距离排序）
     struct Candidate {
         DetectionBox box;
         float cx, cy, dist_sq;
         int priority = 0;  // 类别优先级（0=普通 1=优先 2=高优先）
+        // ★ V1.0.31 相对几何判据：0=不像圆/方块（优先）1=像（后排）。
+        //   只在「同一位置有多个框、且其中明显更竖长」时才置 1（见 TargetSelector.cpp）。
+        //   用相对比较而非绝对 h/w 阈值：绝对阈值会误杀远处/小目标的正常人框
+        //   （2026-10-04 本机回归：绝对阈值让 3 个既有测试集体变红）。
+        int prefer_humanoid = 0;
     };
     // 计算类别优先级：命中 high 列表=2，命中普通列表=1，否则=0
     int class_priority(const TargetSelectorConfig& cfg, int class_id) const {
@@ -264,6 +278,9 @@ private:
     std::vector<Candidate> collect_candidates(const std::vector<DetectionBox>& dets,
                                                   const TargetSelectorConfig& cfg, float cx, float cy,
                                                   float radius_sq) const;
+    // ★ V1.0.31 相对几何判据（Candidate 是 private 类型，故必须是成员函数）
+    bool looks_like_round_object(const std::vector<Candidate>& cands,
+                                  size_t self) const;
 
         // ---- ByteTrack 辅助（第4项）----
         // 用卡尔曼匀速模型预测轨迹下一帧中心（写入 pred_cx/pred_cy），关联参考点。
@@ -275,6 +292,9 @@ private:
         void trim_tracks(const TargetSelectorConfig& cfg);
 
         std::vector<TrackEntry> tracks_;
+                    // ★ V1.0.31：本帧实际使用的 FOV 半径（像素）。预览画圆时直接取它，
+                    //   保证"画出来的圆"与"真正约束选靶的圆"永远是同一个。
+                    float last_fov_radius_px_ = 0.0f;
                     int active_track_ = -1;          // 当前激活锁定 track id
                     TargetSelection::Reason last_reason_ = TargetSelection::kNone;
                     uint32_t next_id_ = 1;

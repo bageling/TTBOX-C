@@ -44,18 +44,30 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
-#   V1.0.30 相对 V1.0.28（2026-10-04）：补上漏网的**字符串常量型**锚点（升级仍失败）。
-#                       · V1.0.28 修了 4 个对象型锚点，但漏了 `kAppVersion` ——
-#                         它在 lib/settings.py 是**字符串**（'2026.08.03.1'），
-#                         入口 import 进来后仍是 str ⇒ `hub.call` 调用它 ⇒
-#                         TypeError: 'str' object is not callable ⇒ web 启动即崩
-#                         ⇒ 健康检查失败 ⇒ 自动回切 ⇒ 依然升不上去。
-#                       · 同时修**审计器自己的错判**：imported 锚点原先"扫 lib 找第一个 def"，
-#                         而那通常是**转发函数**不是真实定义处 ⇒ 把 str 误判成 function
-#                         ⇒ 判据放行了 hub.call。现在按**入口 import 语句**追到确切模块。
-#                       · 审计器扫源码时同时剥 `#` 注释与**三引号 docstring**
-#                         （讲事故的 docstring 里写了 hub.call(...) 示例 ⇒ 连续两轮假阳性）。
-#                       · 现状：全仓「对象型 + hub.call」**违规 0 处**。
+#   V1.0.31 相对 V1.0.30（2026-10-04）：**预览按业界标准三层 + 选靶不再选中球 + FOV 真约束**。
+#                       · 依据：GitHub 调研（sunone_aimbot，1.6k star，debug/overlay 窗口）。
+#                         它的画法是三层：① show_boxes **全部检测框** ② 选中的框
+#                         ③ show_target_line 中心→目标连线 + FOV 圆；框是**模型原框**，不改几何。
+#                       · 起因：业主 20:12 看到"框罩在头盔、大小不随远近变"⇒ 板端实测选中的那个
+#                         框是 35×31、h/w=0.88 —— 按 sunone 类别表（6=hideout_target_balls）
+#                         那是**训练场的球**；板端 class_filter=[0..6] 全选 ⇒ 挑中了它。
+#                       · ① 预览三层：细=全部检测框、粗=选中框、红线=中心→落点、蓝圈=FOV。
+#                         圆半径**直接取选靶本帧实际用的值**（经 AimThread::fov_radius_px 转发），
+#                         避免"画出来的圆 ≠ 真正约束的圆"这种调试期骗人。
+#                       · ② 选靶几何兜底：**相对**判据 —— 同位置群内"明显更竖长(≥1.5×)"的才算人，
+#                         圆/方块物后排且排在 priority 之前。★ 不用绝对阈值：绝对阈值在远处/
+#                         小目标上不成立，本机回归当场打回 3 个既有测试（test_target_selector/
+#                         test_pipeline/test_selector_clip_guard 集体变红）⇒ 相对判据零扰动。
+#                       · ③ FOV 曾形同虚设：fov.radius 被多乘 2（把半径当直径算）⇒ 板端 0.5
+#                         算成 1.0 ⇒ 半径 320 = 640 画面半宽 ⇒ 圆等于全屏 ⇒ 零约束。
+#                         现在 fov.radius 就是"相对画面半宽的比例"（0.5 ⇒ 半径 160px）。
+#                       · ④ **裁框整体退役**（业主 17:56 定调「框完整，只偏移落点」，即业界
+#                         body_y_offset 的做法：框画完整，落点在框内由 offset_y 定位，0.24≈胸口）。
+#                         V1.0.24~30 的上半身裁剪（垂直砍半 + 收窄到肩宽）全部删除。
+#                       · 护栏：core/tests/test_preview_and_targeting_v31.py（8 条源码级，
+#                         **反向验证 6/6 全红**）；5 条选靶用例并入 test_target_selector.cpp
+#                         （新建独立 target 时链接失败，collect2 不给详情，故并入既有文件）。
+
 #   V1.0.30 相对 V1.0.28（2026-10-04）：补上漏网的**字符串常量型**锚点（升级仍失败）。
 #                       · V1.0.28 修了 4 个对象型锚点，但漏了 `kAppVersion` ——
 #                         它在 lib/settings.py 是**字符串**（'2026.08.03.1'），
@@ -208,7 +220,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.30 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.31 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -842,10 +854,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
-  # V1.0.23：只瞄上半身（收缩 + 落点等效换算 + AimThread 端到端）
-  add_executable(test_upper_body tests/test_upper_body.cpp)
-  target_link_libraries(test_upper_body PRIVATE ttbox_core)
-  add_test(NAME test_upper_body COMMAND test_upper_body)
 
   # P_PID 对照测试（与参考实现输出逐点一致）
   add_executable(test_pid1 tests/test_pid1.cpp)

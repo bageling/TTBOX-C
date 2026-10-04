@@ -194,6 +194,65 @@ void PreviewModule::resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h,
     fit_preview_output(roi->w, roi->h, max_w, max_h, out_width, out_height);
 }
 
+bool PreviewModule::to_crop_coords(float x, float y, uint32_t origin_x, uint32_t origin_y,
+                                  uint32_t width, uint32_t height, int* ox, int* oy) {
+    if (width == 0 || height == 0) return false;
+    const int ix = static_cast<int>(x) - static_cast<int>(origin_x);
+    const int iy = static_cast<int>(y) - static_cast<int>(origin_y);
+    if (ix < 0 || iy < 0 || ix >= static_cast<int>(width) || iy >= static_cast<int>(height)) {
+        return false;
+    }
+    *ox = ix;
+    *oy = iy;
+    return true;
+}
+
+// ① 全部检测框（细框）。弱化色（半透明感的橙），只为看清"AI 此刻检出了哪些候选"，
+//    不抢选中框的戏。画法对照 sunone_aimbot 的 `show_boxes`（它是全部候选都画）。
+void PreviewModule::draw_detections_list(uint8_t* crop, uint32_t width, uint32_t height,
+                                        uint32_t stride,
+                                        const std::vector<DetectionBox>& boxes,
+                                        uint32_t origin_x, uint32_t origin_y) const {
+    if (crop == nullptr || boxes.empty() || width == 0 || height == 0 || stride < width * 3) return;
+    cv::Mat image(static_cast<int>(height), static_cast<int>(width), CV_8UC3, crop, stride);
+    const cv::Scalar weak(0, 165, 255);  // BGR 橙：醒目但不抢戏
+    for (const auto& b : boxes) {
+        int x1, y1, x2, y2;
+        if (!to_crop_coords(b.x1, b.y1, origin_x, origin_y, width, height, &x1, &y1)) continue;
+        if (!to_crop_coords(b.x2, b.y2, origin_x, origin_y, width, height, &x2, &y2)) continue;
+        if (x2 <= x1 || y2 <= y1) continue;
+        cv::rectangle(image, cv::Point(x1, y1), cv::Point(x2, y2), weak, 1, cv::LINE_8);
+    }
+}
+
+// ③ 中心→落点 连线 + FOV 圆。
+//    画法来源（2026-10-04 GitHub 调研）：
+//      sunone_aimbot      show_target_line：中心到当前目标的连线
+//      VIper / 各类 aimbot cv2.circle(frame, (center,center), fov_r, ...)：圆心=截取区中心
+//    我们的准星/参考点 = 裁剪区中心（CoordinateTransform::reference_point），
+//    与业界的"截取区中心"是同一个点 ⇒ 圆心也用它。
+void PreviewModule::draw_guides(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
+                               const AimGuides& guides, uint32_t origin_x,
+                               uint32_t origin_y) const {
+    if (crop == nullptr || width == 0 || height == 0 || stride < width * 3) return;
+    cv::Mat image(static_cast<int>(height), static_cast<int>(width), CV_8UC3, crop, stride);
+    // 圆心 = 裁剪区中心（准星位置）
+    const int ccx = static_cast<int>(width / 2);
+    const int ccy = static_cast<int>(height / 2);
+    if (guides.fov_radius > 1.0f) {
+        cv::circle(image, cv::Point(ccx, ccy), static_cast<int>(guides.fov_radius),
+                   cv::Scalar(255, 200, 0), 1, cv::LINE_8);  // BGR 蓝：与"框"区分
+    }
+    if (guides.has_aim_point) {
+        int ax, ay;
+        if (to_crop_coords(guides.aim_x, guides.aim_y, origin_x, origin_y, width, height, &ax, &ay)) {
+            cv::line(image, cv::Point(ccx, ccy), cv::Point(ax, ay),
+                     cv::Scalar(0, 0, 255), 1, cv::LINE_8);  // BGR 红：中心→落点
+            cv::circle(image, cv::Point(ax, ay), 3, cv::Scalar(0, 0, 255), 1, cv::LINE_8);
+        }
+    }
+}
+
 void PreviewModule::draw_aim_box(uint8_t* crop, uint32_t width, uint32_t height,
                                  uint32_t stride,
                                  const DetectionBox& box,
@@ -473,19 +532,25 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
                     source_row, crop_stride);
     }
 
-    // ★ V1.0.25：预览只画**实际瞄准的那一个框**（业主定口径：预览 = 瞄准框）。
-    //   没有选中目标 ⇒ 不画（不再"丢失后保留 3 帧旧框"——那是画出已经不瞄的框）。
-    //   也不再二次平滑：传进来的框已由 AimThread 的 One-Euro 平滑过。
+    // ★★ V1.0.31 预览三层（对照 sunone_aimbot 的 overlay/debug 窗口）：
+    //   ① 全部检测框（细）② 选中的框（粗）③ 中心→落点连线 + FOV 圆。
+    //   **框一律用模型给的原框**，不裁不缩（V1.0.24~30 的裁框已整体退役）。
     if (params_.draw_detections) {
+        std::vector<DetectionBox> all;
         DetectionBox aim_box;
         bool has_aim = false;
+        AimGuides guides;
         {
             std::lock_guard<std::mutex> lock(provider_mutex_);
+            if (detections_provider_) all = detections_provider_();
             if (aim_box_provider_) has_aim = aim_box_provider_(&aim_box);
+            if (guides_provider_) guides = guides_provider_();
         }
+        draw_detections_list(crop, roi.w, roi.h, crop_stride, all, roi.x, roi.y);
         if (has_aim) {
             draw_aim_box(crop, roi.w, roi.h, crop_stride, aim_box, roi.x, roi.y);
         }
+        draw_guides(crop, roi.w, roi.h, crop_stride, guides, roi.x, roi.y);
     }
 
     // ★ M2.03：受限态水印叠加。水印是**附加绘制**，任何情况下都不影响后续编码与帧输出

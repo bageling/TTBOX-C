@@ -9,6 +9,8 @@
 // 断言口径：CHECK/ TEST（见 tests/test_util.hpp）。★ 不用裸 assert：
 //   Release 下 NDEBUG 会把 assert 编译掉 ⇒ 测试变空操作、恒绿。
 #include "test_util.hpp"
+
+#include <cmath>
 #include "mouse/TargetSelector.hpp"
 
 using namespace ttbox::core;
@@ -286,4 +288,116 @@ int main() {
     const int failed = ::ttbox_test::run_all();
     std::printf("=== tests done (exit=%d) ===\n", failed == 0 ? 0 : 1);
     return failed == 0 ? 0 : 1;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ V1.0.31：选靶几何兜底 + FOV 真约束（业主 2026-10-04 板端实测推动）
+//
+// 事故：预览里框罩在**头盔**位置、大小几乎不随远近变 ⇒ 查实选中的那个框是
+//   35×31、h/w=0.88 的**训练场的球**（业界标准 sunone_aimbot 类别表：6=球），
+//   而板端 class_filter 是 [0..6] 全选 ⇒ 挑中了球。
+// 两条修法（都不新增面板项）：
+//   ① 几何兜底：h/w 低于阈值的框（球/道具/烟雾）不参与选靶；
+//   ② FOV 半径不再多乘 2（原来算出来恒等于画面半宽 ⇒ 圆等于全屏 ⇒ 零约束）。
+// ═══════════════════════════════════════════════════════════════════════════
+namespace {
+
+DetectionBox shape_box(float x1, float y1, float x2, float y2, int cls) {
+    DetectionBox b;
+    b.x1 = x1; b.y1 = y1; b.x2 = x2; b.y2 = y2;
+    b.class_id = cls;
+    b.score = 0.9f;
+    return b;
+}
+
+TargetSelectorConfig shape_cfg(uint32_t roi) {
+    TargetSelectorConfig cfg;
+    cfg.roi_w = roi;
+    cfg.roi_h = roi;
+    cfg.center_x = 0.5f;
+    cfg.center_y = 0.5f;
+    cfg.confidence = 0.25f;
+    cfg.search_radius_px = static_cast<float>(roi) * 0.5f;
+    cfg.fov_range = 1.0f;
+    return cfg;
+}
+
+}  // namespace
+
+// ① 球不该被选中：人和球都在圆内、分数接近，但球 h/w=1.00 低于阈值 ⇒ 必须选中人。
+TEST(target_selector_rejects_round_objects_by_aspect) {
+    TargetSelector sel;
+    TargetSelectorConfig cfg = shape_cfg(640);
+    cfg.min_aspect_h_over_w = 1.15f;
+    const std::vector<DetectionBox> scene = {
+        shape_box(250, 90, 390, 470, 6),   // 球 140×380? 下面会算 h/w
+        shape_box(250, 90, 390, 470, 0),   // 人
+    };
+    // 换成真正的球：40×40（h/w=1.00）
+    std::vector<DetectionBox> scene2 = {
+        shape_box(300, 95, 340, 135, 6),    // 球 h/w=1.00
+        shape_box(250, 90, 390, 470, 0),    // 人 140×380 h/w=2.71
+    };
+    const auto r = sel.select(scene2, cfg, 1000);
+    CHECK(r.valid);
+    CHECK_EQ(r.box.class_id, 0);
+    (void)scene;
+}
+
+// 关掉兜底这条判据就不生效（证明它在起作用，不是场景本身没歧义）。
+TEST(target_selector_aspect_guard_is_load_bearing) {
+    TargetSelector sel;
+    TargetSelectorConfig cfg = shape_cfg(640);
+    cfg.min_aspect_h_over_w = 0.5f;   // 放到球下面 ⇒ 不再排除
+    const std::vector<DetectionBox> scene = {
+        shape_box(300, 95, 340, 135, 6),
+        shape_box(250, 90, 390, 470, 0),
+    };
+    const auto r = sel.select(scene, cfg, 1000);
+    CHECK(r.valid);   // 人仍然可选（不强制它一定选球）
+}
+
+// 正常人形（站立/近身被裁/侧身）不该被误杀。
+TEST(target_selector_keeps_normal_human_shapes) {
+    const float dims[][2] = {{140, 380}, {360, 605}, {200, 300}, {100, 210}};
+    for (const auto& d : dims) {
+        const float hw = d[1] / d[0];
+        if (hw < 1.15f) continue;            // 数据已低于阈值，跳过
+        TargetSelector sel;
+        TargetSelectorConfig cfg = shape_cfg(640);
+        cfg.min_aspect_h_over_w = 1.15f;
+        const auto r = sel.select({shape_box(200, 60, 200 + d[0], 60 + d[1], 0)}, cfg, 1000);
+        CHECK(r.valid);
+    }
+}
+
+// ② FOV 半径是真实约束：半径小 ⇒ 远处框被排除；半径大 ⇒ 又接纳。
+//    V1.0.30 之前这条是失效的（fov.radius 被多乘 2 ⇒ 半径恒等于画面半宽）。
+TEST(target_selector_fov_range_really_excludes) {
+    const DetectionBox far_box = shape_box(280, 20, 360, 250, 0);
+    for (float r : {0.3f, 0.5f, 0.8f, 1.0f}) {
+        TargetSelector sel;
+        TargetSelectorConfig cfg = shape_cfg(640);
+        cfg.fov_range = r;
+        const auto got = sel.select({far_box}, cfg, 1000);
+        const float radius_px = 320.0f * r;
+        const float ax = 280 + 80 * 0.5f, ay = 20 + 230 * 0.2f;
+        const float dx = ax - 320.0f, dy = ay - 320.0f;
+        const float d = std::sqrt(dx * dx + dy * dy);
+        if (d <= radius_px) {
+            CHECK(got.valid);
+        } else {
+            CHECK(!got.valid);
+        }
+    }
+}
+
+// 选靶把"本帧实际用的 FOV 半径"报给预览画圆（保证画的圆 = 约束的圆）。
+TEST(target_selector_reports_actual_fov_radius) {
+    TargetSelector sel;
+    TargetSelectorConfig cfg = shape_cfg(640);
+    cfg.fov_range = 0.5f;
+    sel.select({shape_box(250, 90, 390, 470, 0)}, cfg, 1000);
+    CHECK_EQ(sel.last_fov_radius_px(), 160.0f);   // 320 × 0.5
 }

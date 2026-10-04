@@ -117,6 +117,50 @@ inline float box_iou(const DetectionBox& a, const DetectionBox& b) {
 }  // namespace selgate
 }  // namespace
 
+// ★ V1.0.31 相对几何判据：同一位置有多个框时，"明显更竖长的那个"更像人体。
+//
+// 为什么不用绝对高宽比阈值：实测（2026-10-04 板端训练场）球 h/w=0.88、人 h/w=1.68~3.55，
+//   看着能分开，但**远处/小目标的人框同样偏扁** —— 绝对阈值一刀切会误杀正常人形
+//   （本机回归当场打回：test_target_selector / test_pipeline / test_selector_clip_guard 集体变红）。
+//   所以改成**只在"多个框挤在一起"时比高宽比**，单框场景完全不干预。
+//
+// 背景（为什么需要它）：那天预览里框罩在**头盔**位置、大小几乎不随远近变 ⇒ 查实选中的
+//   是 35×31、h/w=0.88 的框 —— 按业界标准（sunone_aimbot 类别表：6=训练场的球）那就是球；
+//   而板端 class_filter 是 [0..6] 全选 ⇒ 挑中了球，落点因此算到头上。
+namespace {
+
+float aspect_h_over_w(const DetectionBox& b) {
+    const float w = b.x2 - b.x1;
+    const float h = b.y2 - b.y1;
+    return (w > 1.0f) ? (h / w) : 1.0f;
+}
+
+// 同位置判据：中心距 ≤ 较短边的一半（局部重叠 ⇒ 多半是同一目标的不同部位）
+bool near_same_spot(const DetectionBox& a, const DetectionBox& b) {
+    const float acx = (a.x1 + a.x2) * 0.5f, acy = (a.y1 + a.y2) * 0.5f;
+    const float bcx = (b.x1 + b.x2) * 0.5f, bcy = (b.y1 + b.y2) * 0.5f;
+    const float dx = acx - bcx, dy = acy - bcy;
+    const float min_side = std::min(std::min(a.x2 - a.x1, a.y2 - a.y1),
+                                    std::min(b.x2 - b.x1, b.y2 - b.y1));
+    const float r = min_side * 0.5f;
+    return (dx * dx + dy * dy) <= (r * r);
+}
+
+}  // namespace
+
+// 存在"同位置且明显更竖长（≥1.5×）"的框 ⇒ 自己就偏圆/方块，标 1 后排。
+// （成员函数：Candidate 是 private 类型，匿名 namespace 里的自由函数碰不到它。）
+bool TargetSelector::looks_like_round_object(const std::vector<Candidate>& cands,
+                                            size_t self) const {
+    const float mine = aspect_h_over_w(cands[self].box);
+    for (size_t i = 0; i < cands.size(); ++i) {
+        if (i == self) continue;
+        if (!near_same_spot(cands[self].box, cands[i].box)) continue;
+        if (aspect_h_over_w(cands[i].box) > mine * 1.5f) return true;
+    }
+    return false;
+}
+
 std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
     const std::vector<DetectionBox>& dets, const TargetSelectorConfig& cfg, float cx, float cy,
     float radius_sq) const {
@@ -146,6 +190,14 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                                       b.class_id) != cfg.class_filter.end();
             if (!in) continue;
         }
+        // ★★ V1.0.31：这里**不做**「按绝对高宽比剔除非人」——试过，被自己的回归打回：
+        //   绝对阈值（h/w < 1.15 判为球）在"远处/小目标"上不成立，一刀切会误杀正常人形
+        //   （test_target_selector / test_pipeline / test_selector_clip_guard 集体变红）。
+        //   改为**相对判据**，见下方 prefer_humanoid_candidate()：只在「多个框挤在同一位置」
+        //   时用高宽比打破平局（球 0.88 vs 人 1.68 ⇒ 选人）；单个框一律不干预（原行为）。
+        //   背景：2026-10-04 板端实测靶人站着不动、双手张开，AI 选中的却是罩在头盔位置的
+        //   35×31 框（h/w=0.88）—— 按业界标准（sunone_aimbot：6=训练场的球）那就是球，
+        //   而板端 class_filter 是 [0..6] 全选 ⇒ 挑中了球。详见 prefer_humanoid_candidate。
         if (clipped_by_crop(b)) continue;  // 被裁剪区切线切断的框：瞄准点不可信
         const float bdx = b.x1 + (b.x2 - b.x1) * cfg.aim_ratio_x - cx;
         const float bdy = b.y1 + (b.y2 - b.y1) * cfg.aim_ratio_y - cy;
@@ -154,10 +206,18 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
         out.push_back({b, box_center_x(b), box_center_y(b), d_sq,
                        class_priority(cfg, b.class_id)});
     }
-    // 排序：priority 高者优先，同 priority 按距离近者优先。
-    // （priority 用于"同距离竞争"时的目标优先级，不影响距离本身。）
+    // ★ V1.0.31 相对几何判据打标：同位置群里有"明显更像人"的框时，把"圆/方块状"的
+    //   整体后排（**只加一个排序键**，不改 priority、不改距离语义）。
+    //   单框场景不产生任何影响 ⇒ 既有行为与既有测试逐字节不变。
+    for (size_t i = 0; i < out.size(); ++i) {
+        out[i].prefer_humanoid = looks_like_round_object(out, i) ? 1 : 0;
+    }
+    // 排序：① 几何判据（prefer_humanoid 小的优先）② priority 高者 ③ 距离近者
     std::sort(out.begin(), out.end(),
                   [](const Candidate& a, const Candidate& b) {
+                      if (a.prefer_humanoid != b.prefer_humanoid) {
+                          return a.prefer_humanoid < b.prefer_humanoid;
+                      }
                       if (a.priority != b.priority) return a.priority > b.priority;
                       return a.dist_sq < b.dist_sq;
                   });
@@ -271,6 +331,7 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     : std::min(cfg.roi_w, cfg.roi_h) * 0.5f;
                 const float radius = base_radius * cfg.fov_range;
                 const float radius_sq = radius * radius;
+                last_fov_radius_px_ = radius;  // ★ V1.0.31：供预览画同一个圆
 
                 // ByteTrack：每帧先对现有轨迹做卡尔曼预测（写入 pred_cx/pred_cy 供关联参考）
                 for (auto& t : tracks_) kalman_predict(t, cfg);

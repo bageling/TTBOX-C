@@ -159,66 +159,21 @@ bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& 
     return found;
 }
 
-// ★ V1.0.24：**上半身占全身框高的比例 —— 算法常量，不是配置项。**
-//   依据（人体比例）：头高 ≈ 0.13 身高、髋以下 ≈ 0.47、颈肩到髋 ≈ 0.40
-//   ⇒ 头顶到髋约 0.50~0.55。取 0.50 略偏保守：框短一点只是少含一点腰，
-//   绝不会切到胸口以上（切进胸口 = 落点被顶高，是最糟的方向）。
-//   ★ 刻意**不进配置、不进面板**（业主口径「不要给参考物」）—— 要调就改这一行。
-constexpr float kUpperBodyRatio = 0.5f;
-
-float upper_body_ratio() { return kUpperBodyRatio; }
-
-// ★★ V1.0.26（2026-10-04，业主给的完整定义）：
-//     「上半身」= **从胯到头 + 不要胳膊** —— 垂直砍到身高 50%（Y 轴偏移 0.5），
-//     水平收窄到**肩宽**（张开的胳膊要排除在外）。
-//     我前一版只做了垂直、水平原样不动 ⇒ 框里一直含着两侧胳膊，那是错的。
+// ★★ V1.0.31（2026-10-04）：**框裁小这件事整体退役**。
 //
-// 肩宽系数：人体测量「肩宽 ≈ 0.23 × 身高」（肩峰宽 / 身高，成年男性约 0.22~0.24）。
-// 只**收窄**、绝不放宽（框本来比肩窄时说明检测框没含胳膊，放宽会凭空引入背景）。
-// ★ 收窄是**对称**的（以框中线为基准）⇒ 落点 x = x1 + offset_x·w 里 offset_x=0.5
-//   （或任何比例）都落在中线上 ⇒ **落点横向完全不受收窄影响**，只动框的"显示/量测"
-//   几何。这条性质是本改动敢不改落点公式的依据（见 test_upper_body.cpp 的落点等效断言）。
-constexpr float kShoulderWidthOverHeight = 0.23f;
-
-// 上半身收缩：把控制链用的框与瞄准点配置一起映射到上半身域（无条件生效）。
-//   垂直：y2 = y1 + 0.5·h              （头顶 → 胯）
-//   水平：收窄到肩宽（min(原宽, 0.23·h)），以中线对称
-//   等效：相对框高的比例量统一 ÷k       —— 落点纵向物理位置不变
-//   框无效 ⇒ 原样返回，调用方走原框。
-bool shrink_to_upper_body(const DetectionBox& box, const AimPointProfile& prof,
-                          DetectionBox* out_box, AimPointProfile* out_prof) {
-    if (!out_box || !out_prof) return false;
-    *out_box = box;
-    *out_prof = prof;
-    const float w = box.x2 - box.x1;
-    const float h = box.y2 - box.y1;
-    if (w <= 0.0f || h <= 0.0f) return false;
-    const float k = kUpperBodyRatio;
-
-    // ---- 水平：收窄到肩宽（去掉两侧胳膊），中线不动 ----
-    // ★ 用**原始框高** h 算肩宽（不是垂直截断后的 0.5h）：肩宽是身体的横向尺度，
-    //   对应完整身高的横向尺度；用 0.5h 会把肩宽砍掉一半、收得过窄。
-    // ★ 近身（框底被画面切掉）时 h 是残缺的 ⇒ 肩宽算得偏小 ⇒ 框会比理想更窄。
-    //   这是**保守方向**（宁可窄一点，也不能把胳膊放进来），且因为收窄对称，
-    //   不影响落点，故不引入反推身高的复杂度。
-    const float shoulder_w = kShoulderWidthOverHeight * h;
-    if (shoulder_w > 0.0f && shoulder_w < w) {
-        const float cx = (box.x1 + box.x2) * 0.5f;
-        const float half = shoulder_w * 0.5f;
-        out_box->x1 = cx - half;
-        out_box->x2 = cx + half;
-    }
-
-    // ---- 垂直：砍到身高 50%（头顶 → 胯）----
-    out_box->y2 = box.y1 + k * h;
-
-    // ---- 落点纵向等效换算（横向不用换算：对称收窄不动中线）----
-    out_prof->offset_y /= k;
-    for (auto& c : out_prof->class_offsets) c.offset_y /= k;
-    out_prof->head_aim.head_offset_top_fraction /= k;
-    out_prof->head_aim.head_height_fraction /= k;
-    out_prof->body_w_over_h /= k;
-    return true;
-}
+// 业主定调：「框完整，只偏移落点」+「框的大小不该成为问题，落点才是目的」。
+// 调研对照（GitHub 上流传最广的 sunone_aimbot，类别定义是事实标准）：
+//   class 0 = player（人）/ 1,7 = head / 2 = weapon / 4 = dead_body
+//   class 5 = 训练场人形靶 / **6 = 训练场的球**
+//   它的落点做法是 `body_y_offset` —— **在身体框内做 y 偏移**，不是把框裁小：
+//   框画完整（能看到目标全貌、调试时不误导），落点才落在胸口。
+//
+// 为什么不裁（V1.0.24~V1.0.30 三版裁框踩到的坑）：
+//   ① 近身时框底被 640×640 画面切掉 ⇒ 可见框高残缺 ⇒ 肩宽算小 ⇒ 框越收越窄；
+//   ② 落点被「等效换算」强行拉住 ⇒ 画面上看着"框不随远近变化"（实测宽高几乎不变）；
+//   ③ 框不再等于「目标在哪」⇒ 预览失去调试价值。
+//
+// 落点公式**不变**：ty = 框顶 + offset_y × 框高，offset_y 默认 0.24（身体框 24% ≈ 胸口）。
+// 排除「非人目标」改由**几何 + 类别筛选**在选靶层做（见 TargetSelector 的几何兜底）。
 
 }  // namespace ttbox::core::aim

@@ -173,7 +173,13 @@ void AimThread::loop() {
                 // FOV：**全局基准半径 × 本档倍率**。倍率 1.0 ⇒ 等于总览滑块原值。
                 // 拆开是因为总览半径是全局的、倍率是按档的（面板「热键 FOV 缩放」文案
                 // 就是"在总览 FOV 半径上再乘这个倍率"）。
-                scfg.fov_range = (frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f) *
+                // ★★ V1.0.31 修 FOV 形同虚设：原来多乘了一个 2.0
+                //   （把"半径"当"直径"算了）⇒ 板端 fov.radius=0.5 算成 1.0
+                //   ⇒ 半径 = 320（= 640 画面的半宽）⇒ 圆等于整个画面
+                //   ⇒ **任何框都在圆内，FOV 从来没有约束作用**（业主调 FOV 基本没用）。
+                //   现在 fov.radius 就是**相对画面半宽的比例**：0.5 ⇒ 半径 160（真排除远处）。
+                //   对照业界（VIper/各类 aimbot）：FOV 半径是用户自定值，通常**小于**半画。
+                scfg.fov_range = (frame_profile->fov.enabled ? frame_profile->fov.radius : 1.0f) *
                                  (ap ? ap->fov_scale : 1.0f);
                 // 本档目标类别（瞄准侧窄化）。推理侧收的是**全档并集**，见 web_body_to_profile。
                 // ★ 此前 scfg.class_filter 从未被赋值 ⇒ 瞄准侧类别过滤一直是关的，
@@ -323,17 +329,11 @@ void AimThread::loop() {
             const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                 ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
             const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
-            // ---- V1.0.24：上半身收缩（无条件生效；业主「只要人物上半身主体」）----
-            // 控制链（裁剪判定 / 冻结 / 身高自校准 / 落点 / 框高遥测 / 拟人化目标
-            // 半径）与**显示框**全部换用收缩框 aim_box_src；落点配置 prof_ub 已做
-            // 等效换算（相对框高的比例量 ÷k）⇒ 落点物理位置不变。
-            // 比例是算法常量（见 AimPointProfile.cpp），**不是配置项**。
-            // 框无效 ⇒ shrink 原样返回 ⇒ 走原框。
-            // 声明刻意放在 target_ok 块**外**：拟人化段（set_target_radius_px）与
-            // status 段（显示框）也消费它。
-            DetectionBox aim_box_src = selected.box;
-            AimPointProfile prof_ub = aim_point;
-            shrink_to_upper_body(selected.box, aim_point, &aim_box_src, &prof_ub);
+            // ★ V1.0.31：框裁小已退役（业主口径「框完整，只偏移落点」）。
+            //   控制链与显示框都用**模型给的原框**；落点在框内由 offset_y 定位。
+            //   排除「非人目标」（球/武器/烟雾）改由选靶层做：类别筛选 + 几何兜底。
+            const DetectionBox& aim_box_src = selected.box;
+            const AimPointProfile& prof_ub = aim_point;
             if (target_ok) {
                 // ---- V1.0.09：框底被裁剪区下边界截断时的身高反推比（按目标自校准）----
                 // V1.0.10 起降级为**兜底**：只在「目标一出现就被截、没有可冻结的框」时使用。
@@ -343,8 +343,8 @@ void AimThread::loop() {
                 DetectionBox frozen_box;
                 bool have_frozen = false;
                 {
-                    // ★ V1.0.23：贴边判定换到收缩框域 —— 上半身框底（髋）比全身框底
-                    //   （脚）高得多，近身时大幅少触发冻结/外推（这正是本特性的收益）。
+                    // ★ V1.0.31：框不再裁剪，这里判的就是**模型给的原框**。
+                    //   近身时框底会被 640×640 画面切掉 ⇒ 触发外推/冻结（既有行为）。
                     const bool box_bottom_clipped =
                         crop_bottom_px_ > 0.0f &&
                         aim_box_src.y2 >= crop_bottom_px_ - prof_ub.clip_bottom_margin_px;

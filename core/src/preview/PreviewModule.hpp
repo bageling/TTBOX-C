@@ -44,16 +44,43 @@ public:
     bool running() const { return running_.load(); }
     bool snapshot(std::vector<uint8_t>* jpeg_out) const;
 
-    // ★★ V1.0.25（2026-10-04，业主定口径）：**预览画的就是实际瞄准的那一个框**。
-    //   旧实现画的是本帧**全部**检测框（红=class0 / 绿=class1 加粗、假装是"头" / 黄=其余），
-    //   两个框叠在一起看着像"又大又含头" —— 那是**候选框集合**，不是瞄准框。
-    //   预览与控制必须是同一个几何，否则画面在骗人（业主原话：「预览和实际瞄准框应该一致」）。
-    //   ⇒ provider 只给**一个**框；返回 false = 本帧没有选中目标 ⇒ 画面上不画框
-    //     （旧逻辑会在丢失后继续保留 3 帧旧框 = 画出已经不瞄的框，同样是骗人）。
+    // ★★ V1.0.31（2026-10-04）：预览按**业界标准三层**绘制（对照 GitHub sunone_aimbot，
+    //   1.6k star，其 overlay/debug 窗口就是这三层 + 每样一个开关）：
+    //   ① **全部检测框**（细框）—— 看得到 AI 此刻检出了哪些候选、各在哪；
+    //   ② **选中的那个框**（粗框）—— 控制链真正在用的那个；
+    //   ③ **中心 → 落点的连线**（sunone 的 `show_target_line`）+ FOV 圆
+    //      （sunone 的 `circle_capture` / 各类 aimbot 的 `cv2.circle`）。
+    //   为什么推翻 V1.0.25 的「只画瞄准框」：那个口径**看不见其它候选** ⇒
+    //   业主根本判断不了「它为什么选了这个」⇒ 2026-10-04 业主看到框罩在头盔上
+    //   （实际选中了训练场的球）却无从判断，正是这个原因。**调试画面必须透明。**
+    //   ★ 框的几何一律用**模型给的原框**，不裁不缩（业界一致；落点在框内由 offset_y 定位）。
     using AimBoxProvider = std::function<bool(DetectionBox*)>;
     void set_aim_box_provider(AimBoxProvider provider) {
         std::lock_guard<std::mutex> lock(provider_mutex_);
         aim_box_provider_ = std::move(provider);
+    }
+
+    // ① 全部检测框（本帧 AI 检出的每一个候选，原框）
+    using DetectionsProvider = std::function<std::vector<DetectionBox>()>;
+    void set_detections_provider(DetectionsProvider provider) {
+        std::lock_guard<std::mutex> lock(provider_mutex_);
+        detections_provider_ = std::move(provider);
+    }
+
+    // ③ 辅助线：中心→落点 的连线端点，以及 FOV 圆半径（像素）。
+    //   aim_point 给的是**落点**（ty = 框顶 + offset_y×框高），与 sunone 的
+    //   `show_target_line` 同义。fov_radius <= 0 表示不画圆。
+    struct AimGuides {
+        bool has_aim_point = false;
+        float aim_x = 0.0f;
+        float aim_y = 0.0f;
+        float fov_radius = 0.0f;   // 像素；<=0 不画
+        bool fov_circle_crop = false;  // true = 圆心在裁剪区中心（默认）
+    };
+    using GuidesProvider = std::function<AimGuides()>;
+    void set_guides_provider(GuidesProvider provider) {
+        std::lock_guard<std::mutex> lock(provider_mutex_);
+        guides_provider_ = std::move(provider);
     }
 
     struct Metrics {
@@ -78,6 +105,16 @@ private:
     //   alpha=0.35 的低通只会更滞后、离控制链更远。
     void draw_aim_box(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
                       const DetectionBox& box, uint32_t origin_x, uint32_t origin_y) const;
+    // ① 全部检测框（细框，弱化色，只为看清候选分布，不抢戏）
+    void draw_detections_list(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
+                              const std::vector<DetectionBox>& boxes,
+                              uint32_t origin_x, uint32_t origin_y) const;
+    // ③ 中心→落点 连线 + FOV 圆（画法对照 sunone_aimbot / 各类 aimbot 的 cv2.circle）
+    void draw_guides(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
+                     const AimGuides& guides, uint32_t origin_x, uint32_t origin_y) const;
+    // 把像素坐标平移到"裁剪区坐标系"（框是全帧坐标，预览只画裁剪区那块）
+    static bool to_crop_coords(float x, float y, uint32_t origin_x, uint32_t origin_y,
+                              uint32_t width, uint32_t height, int* ox, int* oy);
     // ★ M2.03：受限态水印绘制（内嵌 5×7 ASCII 位图字体；纯数组写入，**never block 帧输出**）。
     void draw_watermark(uint8_t* crop, uint32_t width, uint32_t height,
                         uint32_t stride) const;
@@ -93,6 +130,8 @@ private:
 
     mutable std::mutex provider_mutex_;
     AimBoxProvider aim_box_provider_;
+    DetectionsProvider detections_provider_;
+    GuidesProvider guides_provider_;
 
     // 预览线程独占，按尺寸复用，避免每帧重复申请 640×640×3 临时缓冲。
     std::vector<uint8_t> crop_buffer_;

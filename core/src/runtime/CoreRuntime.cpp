@@ -252,6 +252,27 @@ bool CoreRuntime::start(std::string* error) {
                     out->score = 0.0f;  // Status 无"选中目标置信度"字段，不编造
                     return true;
                 });
+                // ★★ V1.0.31 预览三层（对照 GitHub sunone_aimbot 2026-10-04 调研）：
+                //   ① 全部检测框（细）—— 看得见 AI 此刻检出了哪些候选、各在哪；
+                //   ③ 中心→落点连线 + FOV 圆 —— 看得见准星往哪走、范围约束多大。
+                //   圆半径直接取**选靶本帧真正用的那个值**（`last_fov_radius_px()`），
+                //   不是自己重算 —— 否则"画的圆"和"约束的圆"会对不上（调试画面最常见的骗人方式）。
+                preview_->set_detections_provider([this]() {
+                    return aim_thread_.status().detection_boxes;
+                });
+                preview_->set_guides_provider([this]() {
+                    PreviewModule::AimGuides g;
+                    const auto st = aim_thread_.status();
+                    g.has_aim_point = st.has_target;
+                    // 落点：用 control_trace 的 target_point（控制链真正在追的那个点）。
+                    // 退化时用 target_* 框内比例兜底。
+                    g.aim_x = (st.has_target && st.target_x2 > st.target_x1)
+                        ? (st.target_x1 + st.target_x2) * 0.5f : 0.0f;
+                    g.aim_y = (st.has_target && st.target_y2 > st.target_y1)
+                        ? st.target_y1 + (st.target_y2 - st.target_y1) * 0.24f : 0.0f;
+                    g.fov_radius = aim_thread_.fov_radius_px();
+                    return g;
+                });
             }
             TTBOX_LOG_INFO("Preview 已启动: center crop " +
                            std::to_string(preview_params.crop_width) + "x" +
