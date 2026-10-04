@@ -136,7 +136,9 @@ def _fake_entry():
         _CLOUD_SESSION=object(),
         _cloud_deactivate_callback=lambda: None,
         _invalidate_activation_cache=lambda: None,
-        kAppVersion=lambda *a, **k: 'V1.0.18',
+        # ★ 真实类型是**字符串**（lib/settings.py:56 = '2026.08.03.1'）⇒ 用 hub.get 取。
+        #   曾 stub 成 lambda（假设它是函数）⇒ 判据放行 hub.call ⇒ 板端 web 启动即崩。
+        kAppVersion='V1.0.18',
         _machine_code=lambda *a, **k: 'MACHINE',
         _ACTIVATION_CACHE={'ts': 1.0},
         ipc_request=lambda *a, **k: {'ok': True},

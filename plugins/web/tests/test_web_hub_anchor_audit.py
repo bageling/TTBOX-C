@@ -54,23 +54,51 @@ def all_anchors() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for p in list(LIB.glob('*.py')) + list((WEB / 'api').glob('*.py')):
         txt = p.read_text(encoding='utf-8')
-        # ★ 必须剥注释：注释里写的 `hub.call('_CLOUD_CLIENT')` 示例（讲事故用的）
-        #   会被当成真违规 —— 今天就因此假阳性过一轮，白查一轮。
+        # ★ 必须剥注释：① `#` 行内注释 ② **三引号 docstring**。
+        #   讲事故时我们会在 docstring 里写 `hub.call('_CLOUD_CLIENT')` 这类示例，
+        #   不剥就会被当成真违规 —— 今天因此**连续两轮假阳性**（一次剥 # 不够，
+        #   第二次才发现 docstring 也要剥）。别再写第三轮。
         txt = re.sub(r'#[^\n]*', '', txt)
+        txt = re.sub(r'"""(?:.|\n)*?"""', '', txt)
+        txt = re.sub(r"'''(?:.|\n)*?'''", '', txt)
         for m in re.finditer(r"hub\.(call|get)\(\s*'([A-Za-z_][A-Za-z0-9_]*)'", txt):
             out.setdefault(m.group(2), []).append('%s:%s' % (p.name, m.group(1)))
     return out
 
 
 def resolve_imported(name: str) -> tuple[str, str]:
-    """对 imported 的锚点，追到它在 lib 里到底是函数还是对象。"""
-    for p in LIB.glob('*.py'):
-        txt = p.read_text(encoding='utf-8')
-        if re.search(r'^def\s+%s\s*\(' % re.escape(name), txt, re.M):
-            return 'function', '%s def' % p.name
-        if re.search(r'^%s\s*=\s*' % re.escape(name), txt, re.M):
-            return 'object', '%s 赋值' % p.name
-    return 'unknown', 'lib 里也找不到'
+    """对 imported 的锚点，追到**入口 import 语句指定的那个模块**，看它是函数还是对象。
+
+    ★ 曾经的错法：扫 lib/ 找"第一个含 def <name> 的文件" —— 那经常是**转发函数**
+      （cloud_hooks.page_ctx/core_state 都定义了同名转发），于是把
+      `settings.kAppVersion`（**字符串常量** '2026.08.03.1'）误判成 function
+      ⇒ 判据放行了 `hub.call('kAppVersion')` ⇒ 板端 web 启动即崩
+      （'str' object is not callable，2026-10-04 现场）。
+    ★ 正确：先从入口源码解析出这个名字是从**哪个 lib 模块** import 的，只看那个模块。
+    """
+    src = entry_text()
+    target = None
+    for m in re.finditer(r'from\s+plugins\.web\.lib\.(\w+)\s+import\s+\(([^)]*)\)', src, re.S):
+        if re.search(r'\b%s\b' % re.escape(name), m.group(2)):
+            target = m.group(1)
+            break
+    if target is None:
+        for m in re.finditer(r'from\s+plugins\.web\.lib\.(\w+)\s+import\s+([^\n(]*\b%s\b[^\n(]*)' % re.escape(name), src):
+            target = m.group(1)
+            break
+    if target is None:
+        return 'unknown', '入口 import 语句里找不到它来自哪个模块'
+    f = LIB / (target + '.py')
+    if not f.exists():
+        return 'unknown', '模块 %s 不存在' % target
+    txt = f.read_text(encoding='utf-8')
+    m = re.search(r'^def\s+%s\s*\(' % re.escape(name), txt, re.M)
+    if m:
+        return 'function', '%s: def' % target
+    m = re.search(r'^%s\s*=\s*(.*)$' % re.escape(name), txt, re.M)
+    if m:
+        return 'object', '%s: %s' % (target, m.group(1)[:40])
+    return 'unknown', '%s 里找不到定义' % target
 
 
 def main() -> int:

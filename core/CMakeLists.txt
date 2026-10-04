@@ -44,6 +44,30 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.29 相对 V1.0.28（2026-10-04）：补上漏网的**字符串常量型**锚点（升级仍失败）。
+#                       · V1.0.28 修了 4 个对象型锚点，但漏了 `kAppVersion` ——
+#                         它在 lib/settings.py 是**字符串**（'2026.08.03.1'），
+#                         入口 import 进来后仍是 str ⇒ `hub.call` 调用它 ⇒
+#                         TypeError: 'str' object is not callable ⇒ web 启动即崩
+#                         ⇒ 健康检查失败 ⇒ 自动回切 ⇒ 依然升不上去。
+#                       · 同时修**审计器自己的错判**：imported 锚点原先"扫 lib 找第一个 def"，
+#                         而那通常是**转发函数**不是真实定义处 ⇒ 把 str 误判成 function
+#                         ⇒ 判据放行了 hub.call。现在按**入口 import 语句**追到确切模块。
+#                       · 审计器扫源码时同时剥 `#` 注释与**三引号 docstring**
+#                         （讲事故的 docstring 里写了 hub.call(...) 示例 ⇒ 连续两轮假阳性）。
+#                       · 现状：全仓「对象型 + hub.call」**违规 0 处**。
+#   V1.0.29 相对 V1.0.28（2026-10-04）：补上漏网的**字符串常量型**锚点（升级仍失败）。
+#                       · V1.0.28 修了 4 个对象型锚点，但漏了 `kAppVersion` ——
+#                         它在 lib/settings.py 是**字符串**（'2026.08.03.1'），
+#                         入口 import 进来后仍是 str ⇒ `hub.call` 调用它 ⇒
+#                         TypeError: 'str' object is not callable ⇒ web 启动即崩
+#                         ⇒ 健康检查失败 ⇒ 自动回切 ⇒ 依然升不上去。
+#                       · 同时修**审计器自己的错判**：imported 锚点原先"扫 lib 找第一个 def"，
+#                         而那通常是**转发函数**不是真实定义处 ⇒ 把 str 误判成 function
+#                         ⇒ 判据放行了 hub.call。现在按**入口 import 语句**追到确切模块。
+#                       · 审计器扫源码时同时剥 `#` 注释与**三引号 docstring**
+#                         （讲事故的 docstring 里写了 hub.call(...) 示例 ⇒ 连续两轮假阳性）。
+#                       · 现状：全仓「对象型 + hub.call」**违规 0 处**。
 #   V1.0.28 相对 V1.0.27（2026-10-04）：**修 hub 转发语义用错 ⇒ 升级死锁**（业主报"升不上去"）。
 #                       · 事故：web 换写法(S9/S10)后，入口的 `_CLOUD_CLIENT`/`_CLOUD_SESSION`/
 #                         `_ACTIVATION_CACHE`/`_HEARTBEAT_START_LOCK` 这些**对象型**锚点被
@@ -184,7 +208,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.28 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.29 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

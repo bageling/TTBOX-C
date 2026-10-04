@@ -95,8 +95,16 @@ def ipc_request(*args, **kwargs):
 
 
 def kAppVersion(*args, **kwargs):
-    """入口的 kAppVersion —— 调用时取（monkeypatch 锚点，转发须**原样透传**）。"""
-    return hub.call('kAppVersion', *args, **kwargs)
+    """入口的 kAppVersion —— 取值（**字符串常量** settings.py:56），勿用 hub.call。
+
+    ★ 事故（2026-10-04 19:0x 板端）：`hub.call('kAppVersion')` 去调用一个字符串
+      ⇒ TypeError: 'str' object is not callable ⇒ web 启动即崩 ⇒ 健康检查失败
+      ⇒ 安装脚本自动回切 ⇒ 升级死锁。
+    ★ 我第一次修心跳时把"对象型锚点"只改了 4 个，漏了这个**字符串常量**型；
+      而且审计器一度把它误判成 function（错在"imported 锚点去找第一个 def"，
+      找到的是转发函数而非真正的定义处）—— 两处都靠板端日志才暴露。
+    """
+    return hub.get('kAppVersion')
 
 def _cloud_deactivate_callback() -> None:
     """云端 403（到期/禁用）⇒ 快路径：IPC ACTIVATE_CLOUD{deactivate:true} 让 core 立即锁定。
