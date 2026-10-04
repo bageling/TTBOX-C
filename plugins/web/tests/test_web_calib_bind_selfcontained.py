@@ -15,7 +15,11 @@
 import re
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[3]
+# ★ 根锚用 paths.discover_root（门禁⑩ 禁parents[N]）：从本文件逐级向上找
+#   同时含全部 _ROOT_ANCHORS 的目录，找不到就炸—— 不静默指错根。
+from plugins.web.lib.paths import discover_root
+
+REPO = Path(discover_root(__file__))
 CALIB = REPO / 'plugins' / 'web' / 'static' / 'panel' / 'calib-bind.js'
 # ★ 2026-10-03 改名：00-shared.js → 10-flow.js（流程编排层）
 SHARED = REPO / 'plugins' / 'web' / 'static' / 'panel' / '10-flow.js'

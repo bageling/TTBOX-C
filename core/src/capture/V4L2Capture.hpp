@@ -114,6 +114,12 @@ public:
 
     V4L2Capture();
     ~V4L2Capture();
+    // ★ 本类**不要派生**：析构里调虚函数 stop() / close()
+    //   （cppcheck virtualCallInConstructor 告警，见 IHidCapture 的 open/start/stop/close）。
+    //   C++ 规定：派生类析构期间动态派发已停止到基类⇒ 派生类的 stop()/close()
+    //   **不会**被执行 ⇒ 派生类自己 open 的 dma-buf fd / mmap 会在析构里泄漏
+    //   （采集设备泄漏 = 设备节点占死，板端表现为重启后 /dev/video0 打不开）。
+    //   ⇒ 真要派生时，改成"基类析构只清基类资源，派生资源由派生类析构自己清"。
     V4L2Capture(const V4L2Capture&) = delete;
     V4L2Capture& operator=(const V4L2Capture&) = delete;
 

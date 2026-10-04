@@ -24,6 +24,12 @@ namespace ttbox::core {
 class HidRuntime : public IHidRuntime {
 public:
     HidRuntime() = default;
+    // ★ 本类**不要派生**：析构里调虚函数 stop()（cppcheck virtualCallInConstructor 告警）。
+    //   C++ 规定：派生类析构期间动态派发已停止到基类 ⇒ 派生类的 stop() **不会**被执行，
+    //   派生类自己打开的句柄会在析构里泄漏。
+    //   ⇒ 真要派生时，改成"基类析构只清基类资源，派生资源由派生类析构自己清"。
+    //   同类问题另见 capture/V4L2Capture.hpp（stop/close）。
+    //   （对比：output/LocalHidBackend 标了 final ⇒ 天然免疫。）
     ~HidRuntime() override { stop(); }
 
     // 指定 HID 包根目录（默认 TTBOX_PROJECT_ROOT/hid）

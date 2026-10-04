@@ -18,6 +18,19 @@
 
 namespace ttbox::core {
 
+// ---- 进程级 shutdown 标志（S 拆分前提）--------------------------------
+// ★ 为什么从 Application.cpp 的匿名命名空间提到这里：
+//   原来 `g_shutdown_requested` + `shutdown_flag()` 定义在 Application.cpp 的
+//   **匿名命名空间**里。Application.cpp 拆成 4 个编译单元后，`request_shutdown()`
+//   （写）与 `run()`（读）**分处不同 TU** —— 若标志仍留在匿名命名空间，
+//   两个 TU 各得一份独立静态副本 ⇒ **request_shutdown() 置的位 run() 永远读不到**
+//   ⇒ 关机信号静默丢失，进程只能被 SIGKILL。
+//   （这类"拆分后各拿一份静态状态"的错**不会编译报错、不会崩**，只是功能静默失效。）
+// 修法：声明进头文件（类外 inline 变量，C++17 起每个 TU 共享同一实体）。
+inline std::atomic<bool> g_shutdown_requested{false};
+
+inline std::atomic<bool>& shutdown_flag() { return g_shutdown_requested; }
+
 // Application — 应用主类："总入口"。
 // 职责：解析命令行/配置 → 授权校验 → 组装 CoreRuntime → 启动 IPC 服务
 //       → 事件循环（自动重试/心跳）→ 优雅退出。

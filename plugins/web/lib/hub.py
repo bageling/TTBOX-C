@@ -44,8 +44,15 @@ r"""hub.py — 入口模块的动态查找点（web 拆分专用，2026-10-02）
    但**消费点必须写裸名** ``with _CFG_WRITE_LOCK:`` —— 测试用 exec + 命名空间注锁，
    写成 ``hub.get('_CFG_WRITE_LOCK')`` 就注不进去了。
 
-绑定用 ``sys.modules[__name__]`` 而非直接引用模块对象：测试给动态模块起的名字是
-``ttbox_web_brand_<pid>_<n>``，只有经 ``__name__`` 才能拿到那个真实实例。
+绑定用**模块全局命名空间本身**（入口传 ``globals()``）而非模块对象：入口可能被
+``importlib.util.spec_from_file_location`` 以动态模块名（``ttbox_web_brand_<pid>_<n>``）
+加载，那条路径**不进 ``sys.modules``** ⇒ ``sys.modules[__name__]`` 会KeyError，
+而那个场景里没有可靠途径拿到"模块对象"（``__dict__`` 只读）。
+dict 就是模块全局的确切语义，所以 ``get``/``set_`` 统一按字典存取。
+
+★ 由此推出一条硬约定（2026-10-04 定）：**``entry()`` 返回 dict，不是模块对象**。
+  想给入口全局赋值必须走 :func:`set_`；写 ``setattr(hub.entry(), ...)`` 会
+  AttributeError（上一轮板端崩溃那三处 hub 转发函数误用正是同一族错误）。
 """
 from __future__ import annotations
 
@@ -54,27 +61,56 @@ from typing import Any
 _entry: Any = None  # 入口模块对象
 
 
-def bind(entry_module: Any) -> None:
-    """由入口模块在末尾调用，把自己登记进来。"""
+def bind(entry_ns: Any) -> None:
+    """由入口模块在末尾调用，把自己登记进来。
+
+    ★ 2026-10-04：``entry_ns`` 是入口模块的 ``__dict__``（入口传``globals()``），
+      不再要求是"模块对象"。
+      为什么改：入口可能被 ``importlib.util.spec_from_file_location`` 以动态模块名
+      （``ttbox_web_brand_<pid>_<n>``）加载 —— 那条路径**不把模块放进 sys.modules**，
+      于是 ``sys.modules[__name__]`` 直接 KeyError。而"拿到模块对象"在那个场景里
+      根本没有可靠途径（``__dict__`` 只读、``sys.modules`` 里没有）。
+    ★ 保留 dict 而非模块对象的代价：hub 自己不能用 ``getattr``。这是**故意的** ——
+      dict 存取就是模块全局的确切语义，比 getattr 更直白，也不会被模块的
+      ``__getattr__``（PEP 562）劫持。
+    """
     global _entry
-    _entry = entry_module
+    _entry = entry_ns
 
 
 def entry() -> Any:
-    """取入口模块对象（未绑定时抛错，不静默返回 None）。"""
+    """取入口模块的全局命名空间（未绑定时抛错，不静默返回 None）。"""
     if _entry is None:
         raise RuntimeError(
             "hub 未绑定：lib 模块不得在 import 期调用 hub —— "
-            "请确认 ttbox-web.py 末尾执行了 hub.bind(sys.modules[__name__])"
+            "请确认 ttbox-web.py 末尾执行了 hub.bind(globals())"
+            "（★ 不要写 hub.bind(sys.modules[__name__])：经 "
+            "importlib.util.spec_from_file_location 以动态模块名加载的入口"
+            "不在 sys.modules 里，那样写会直接 KeyError）"
         )
     return _entry
 
 
 def get(name: str) -> Any:
-    """按名取入口模块的全局（取不到就抛 AttributeError，不静默兜底）。"""
-    return getattr(entry(), name)
+    """按名取入口模块的全局（取不到就抛 KeyError，不静默兜底）。"""
+    ns = entry()
+    try:
+        return ns[name] if isinstance(ns, dict) else getattr(ns, name)
+    except (KeyError, AttributeError):
+        raise AttributeError(
+            "入口模块没有全局 %r（lib 侧转发目标缺失）" % name
+        ) from None
 
 
 def call(name: str, *args: Any, **kwargs: Any) -> Any:
     """按名调用入口模块的函数。"""
     return get(name)(*args, **kwargs)
+
+
+def set_(name: str, value: Any) -> None:
+    """写入口模块的全局（转发函数**不是**被转发的对象本身时必须走这个，见文件头约定 3）。"""
+    ns = entry()
+    if isinstance(ns, dict):
+        ns[name] = value
+    else:
+        setattr(ns, name, value)

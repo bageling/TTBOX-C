@@ -1113,9 +1113,20 @@ register_blueprints(app)
 
 
 # ---- 把自己登记为 lib 层的动态查找点（必须在任何 lib 代码调用 hub 之前执行）----
-# 用 sys.modules[__name__] 而非直接引用：测试给动态模块起的名字是 ttbox_web_<tag>_<n>，
-# 只有经 __name__ 才能拿到那个真实实例（见 plugins/web/lib/hub.py）。
-hub.bind(sys.modules[__name__])
+# ★ 2026-10-04 修正：原来写 `hub.bind(sys.modules[__name__])`，会在
+#   `importlib.util.spec_from_file_location(...) + exec_module()` 加载方式下
+#   直接 `KeyError`（framework/tests/test_web_plugin.py 两条用例红）。
+#   根因：那条加载路径**不把模块放进 sys.modules**（只有 import 才放）。
+#
+# ★ 踩过的三条错路（别再改回去，每条都实测报红过）：
+#   hub.bind(sys.modules[__name__]) —— 动态加载直接 KeyError。
+#   hub.bind(globals()) 配 hub 用 getattr —— getattr(dict, name) 全 AttributeError，
+#                            168 条用例当场报红。
+#   types.ModuleType(...) 后赋 __dict__ —— `__dict__` 是只读属性，
+#                                     AttributeError: readonly attribute。
+#   ⇒ 正解：绑定**模块全局命名空间本身**（globals()），并让 hub 侧按 dict 存取。
+#     dict 就是模块全局的确切语义，也不会被模块 __getattr__（PEP 562）劫持。
+hub.bind(globals())
 
 
 if __name__ == '__main__':

@@ -440,13 +440,20 @@ def check_crosslang():
     m = re.search(r'WEB_PORT="\$\{TTBOX_WEB_PORT:-(\d+)\}"', read("scripts/ttbox_release_install.sh"))
     port_inst = int(m.group(1)) if m else None
     web_py = read("plugins/web/bin/ttbox-web.py")
+    # ★ 2026-10-03（S9/S10 后）：LISTEN_PORT 已搬进 lib/settings.py，入口只import。
+    #   判据跟着搬 —— 原来只 grep 入口文件，重构后必然 FAIL（假红）。
+    #   ★ 但不能只查 settings：还要确认**入口确实 import 了它**，
+    #     否则「settings 里定义了、入口没用」同样是真源漂移（判据只查一半是半个守卫）。
+    settings_py = read("plugins/web/lib/settings.py")
+    derived = "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" in settings_py
+    imported = re.search(r'^\s*LISTEN_PORT,\s*$', web_py, re.M) is not None
+    if not (derived and imported):
+        bad("⑤ LISTEN_PORT 未派生自 paths.py::WEB_PORT_DEFAULT（派生=%s 入口import=%s）"
+            % (derived, imported))
     if port_py is None or port_wifi != port_py or port_inst != port_py:
         bad("⑤ web 端口跨语言异值：paths.py=%r wifi_manager.py=%r release_install.sh=%r"
             % (port_py, port_wifi, port_inst))
-    if "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" not in web_py:
-        bad("⑤ ttbox-web.py::LISTEN_PORT 未派生自 paths.py::WEB_PORT_DEFAULT（端口真源漂移）")
-    if port_py is not None and port_py == port_wifi == port_inst \
-            and "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" in web_py:
+    if port_py is not None and port_py == port_wifi == port_inst and derived and imported:
         ok("⑤ 跨语言同值：socket×3 / web 端口 %d / usb-proxy socket 全部一致" % port_py)
 
     # EDID 重协商 attempts：单一真源 = 2（★ 2026-09-28 由 12 下调；V-09 的"单一真源"约束不变，

@@ -103,7 +103,10 @@ def _ensure_heartbeat_worker() -> None:
             client_version=kAppVersion,
             machine_code=_machine_code,
         )
-        setattr(hub.entry(), '_HEARTBEAT', worker)
+        # ★ 走 hub.set_ 而不是 setattr(hub.entry(), ...)：hub 绑定的是入口的
+        #   __dict__（dict），不是模块对象 ⇒ setattr 对 dict 会 AttributeError。
+        #   这正是上一轮板端崩溃那类"把转发对象当对象用"的同族错误。
+        hub.set_('_HEARTBEAT', worker)
         worker.start()
 
 

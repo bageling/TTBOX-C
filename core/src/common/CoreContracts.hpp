@@ -39,6 +39,9 @@ inline Detection to_detection(const DetectionBox& box, uint64_t frame_number = 0
             frame_number, timestamp_us};
 }
 
+// ★ 2026-10-04 代码体检：本函数**生产代码零引用**（全仓只有这一定义处），
+//   两个测试也没用它。属预留便捷函数，保留不删（删除是业主的决定）。
+//   记在这里是为了下次「为什么找不到调用点」时不必再查一遍。
 inline DetectionBox to_detection_box(const Detection& detection) {
     return {detection.x1, detection.y1, detection.x2, detection.y2,
             detection.confidence, detection.class_id};

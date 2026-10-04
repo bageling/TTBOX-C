@@ -42,7 +42,11 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+# ★ 根锚用 paths.discover_root（门禁⑩ 禁parents[N]）：从本文件逐级向上找
+#   同时含全部 _ROOT_ANCHORS 的目录，找不到就炸—— 不静默指错根。
+from plugins.web.lib.paths import discover_root
+
+REPO = Path(discover_root(__file__))
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 

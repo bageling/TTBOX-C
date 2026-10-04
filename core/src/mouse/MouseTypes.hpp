@@ -19,6 +19,8 @@ enum class AimState : int {
     kLostGrace = 3,  // 目标丢失宽限期（默认 78ms）
 };
 
+// ★ 2026-10-04 代码体检：本函数**生产代码零引用**（全仓只有这一定义处）。
+//   属预留便捷函数，保留不删（删除是业主的决定）；标注以免下次重复排查。
 inline const char* aim_state_name(AimState s) {
     switch (s) {
         case AimState::kSelecting: return "SELECTING";
@@ -515,6 +517,8 @@ struct MouseProfile {
 // 则用平铺老 key 合成第 0 档）。下面几个查询仍各自做一次兜底，防手工构造的 profile 越界。
 
 // 生效档数。数组意外为空时按 1 算（= 用默认档）。
+// ★ 2026-10-04 代码体检：本函数**生产代码零引用**（全仓只有这一定义处）。
+//   属预留便捷函数，保留不删（删除是业主的决定）；标注以免下次重复排查。
 inline size_t aim_profile_count(const MouseProfile& p) {
     return p.aim_profiles.empty() ? 1u : p.aim_profiles.size();
 }

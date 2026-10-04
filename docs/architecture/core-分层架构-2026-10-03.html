@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagram Preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      color: #1f2937;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 16px;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 35%),
+        #f5f7fb;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .action-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+    }
+    .quota-hint {
+      font-size: 13px;
+      color: #4b5563;
+      margin: 0;
+      text-align: center;
+    }
+    .action-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      color: #111827;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      cursor: pointer;
+    }
+    .feedback-button {
+      background: #16a34a;
+      border-color: #15803d;
+      color: #ffffff;
+    }
+    .primary-download {
+      background: #2563eb;
+      border-color: #1d4ed8;
+      color: #ffffff;
+    }
+    .export-select {
+      min-height: 42px;
+      padding: 0 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #111827;
+      font-size: 14px;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 16px;
+      width: 100%;
+    }
+    .tab-button {
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      color: #374151;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .tab-button:hover {
+      background: #f3f4f6;
+    }
+    .tab-button.active {
+      background: #3b82f6;
+      color: #ffffff;
+      border-color: #3b82f6;
+    }
+    .canvas {
+      width: min(100%, 1600px);
+      min-width: 0;
+      padding: 24px;
+      border-radius: 20px;
+      background: #ffffff;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .view-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .view-button {
+      padding: 6px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #374151;
+      cursor: pointer;
+    }
+    .view-button[aria-pressed="true"] {
+      border-color: #3b82f6;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+    .view-status {
+      color: #6b7280;
+      font-size: 12px;
+    }
+    .diagram-viewport {
+      width: 100%;
+      height: clamp(240px, 66vh, 900px);
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    .diagram-frame {
+      width: 100%;
+      margin: 0 auto;
+    }
+    .tab-content {
+      display: none;
+      width: 100%;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .diagram-frame > svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      max-width: none;
+    }
+    .deep-edit-panel {
+      display: flex;
+      gap: 12px;
+      width: min(96vw, 1600px);
+      align-items: center;
+    }
+    .deep-edit-panel input {
+      flex: 1;
+      min-height: 42px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      font-size: 14px;
+      color: #111827;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    .deep-edit-panel input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    .deep-edit-submit {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #ffffff;
+      white-space: nowrap;
+    }
+    .deep-edit-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .deep-edit-error {
+      width: min(96vw, 1600px);
+      margin: 0;
+      font-size: 13px;
+      color: #dc2626;
+      display: none;
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-dialog {
+      width: min(92vw, 420px);
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+    }
+    .modal-dialog h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #111827;
+    }
+    .modal-desc {
+      margin: 0;
+      font-size: 13px;
+      color: #4b5563;
+    }
+    .modal-dialog input {
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .modal-dialog input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    .modal-status {
+      margin: 0;
+      font-size: 13px;
+      min-height: 18px;
+    }
+    .modal-status.ok {
+      color: #16a34a;
+    }
+    .modal-status.err {
+      color: #dc2626;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .modal-actions button {
+      flex: 1;
+      min-height: 36px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      color: #111827;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .modal-actions button.primary {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #ffffff;
+    }
+    .modal-link {
+      font-size: 13px;
+      color: #3b82f6;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="actions">
+    <div class="action-buttons">
+      <a class="action-button feedback-button" href="https://pptx.chenxitech.site/feedback?session_id=7f1e0794-27c9-4381-9979-98d2c865c818&amp;run_id=7af0434c-f548-4fa6-867a-2525bc7caa0a" target="_blank" rel="noopener noreferrer">💡 提交反馈领免费 API Key</a>
+      <button class="action-button primary-download" id="download-visio-button" type="button">下载 Visio (.vsdx)</button>
+      <select class="export-select" id="ppt-format" aria-label="选择 PPT 格式或 SVG">
+        <optgroup label="PPT 格式">
+          <option value="pptx-native">PPT：可编辑形状</option>
+          <option value="pptx-svg">PPT：嵌入 SVG</option>
+          <option value="pptx">PPT：兼容格式</option>
+        </optgroup>
+        <optgroup label="其他格式">
+          <option value="svg">SVG 原图</option>
+        </optgroup>
+      </select>
+      <button class="action-button" id="download-other-button" type="button">下载所选格式</button>
+      <button class="action-button" id="api-key-config-button" type="button">🔑 编辑额度 Key</button>
+    </div>
+    <p class="quota-hint">🎁 提交反馈并完成邮箱验证，可免费领取更多额度</p>
+    <p class="modal-status" id="download-status" role="status" aria-live="polite"></p>
+  </div>
+  <div class="canvas">
+    
+    <div class="view-controls" role="group" aria-label="图示缩放">
+      <button class="view-button" type="button" data-view="width" aria-pressed="true" title="适应宽度并保留可读字号，超宽图可横向滚动">适宽</button>
+      <button class="view-button" type="button" data-view="all" aria-pressed="false">全图</button>
+      <button class="view-button" type="button" data-view="actual" aria-pressed="false">原尺寸</button>
+      <span class="view-status" aria-live="polite"></span>
+    </div>
+    <div class="diagram-viewport" tabindex="0" role="region" aria-label="图示，可滚动查看"><div class="diagram-frame"><?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.8.1-HEAD" preserveAspectRatio="xMinYMin meet" viewBox="0 0 1478 3417" width="1774" height="4101"><svg class="d2-1712173055 d2-svg" width="1478" height="3417" viewBox="-11 -11 1478 3417"><rect x="-11" y="-11" width="1478" height="3417" rx="0" fill="#FFFFFF" class=" fill-N7" stroke-width="0" /><style type="text/css"><![CDATA[
+.d2-1712173055 .text {
+	font-family: "d2-1712173055-font-regular";
+}
+@font-face {
+	font-family: d2-1712173055-font-regular;
+	src: url("data:application/font-woff;base64,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");
+}
+.d2-1712173055 .text-bold {
+	font-family: "d2-1712173055-font-bold";
+}
+@font-face {
+	font-family: d2-1712173055-font-bold;
+	src: url("data:application/font-woff;base64,d09GRgABAAAAABTEAAoAAAAAHtgAAguFAAAAAAAAAAAAAAAAAAAAAAAAAABPUy8yAAAA9AAAAGAAAABgXxHXrmNtYXAAAAFUAAAAxQAAARYG6ygJZ2x5ZgAAAhwAAA2IAAAScAzmecBoZWFkAAAPpAAAADYAAAA2G38e1GhoZWEAAA/cAAAAJAAAACQKfwX+aG10eAAAEAAAAADTAAAA/IFaCsVsb2NhAAAQ1AAAAIAAAACAk3aYEG1heHAAABFUAAAAIAAAACAAVwD3bmFtZQAAEXQAAAMvAAAIKgjwVkFwb3N0AAAUpAAAACAAAAAg/9EAMgADAioCvAAFAAACigJYAAAASwKKAlgAAAFeADIBKQAAAgsHAwMEAwICBGAAAvcAAAADAAAAAAAAAABBREJPACAAIP//Au7/BgAAA9gBESAAAZ8AAAAAAfAClAAAACAAA3icfM25LnQBHMbh53wzH2bmWIaxb8cytjH2ZSyNRCSiEZVWKRrRqd2SpbPcCTfiLxkajbzF2/ySB4mcBKl8UkQmk29+Td2SZQ2Hjp06d+naraesEvGrWHHgyIkzF67cfBfxoaykII3PeIvXeInneIyHuI+792rT/HuJfQ3b9n6MVWvWbdi05Z+cvP9atGpTUFSSatehU5eybj0qevXpN2DQkGEjRo0Zl5kwacq0qhmz5sxbULOobtcOXwAAAP//AwAaaScEAAAAeJyEWHlwG9d5/97DcpcEwQPH4iIOAkvsAiABElgswAMkSBEEDxE8JZKyeCgcWaIlimIkKqQiyspMLKu1ocgxFZm24iMaeZp47NYeJzOKG6XTTO1UjSbu1HbT6TT1EY/qxK3Npkzqg1x03vIQxHamfxCPs9j3nb/f73sPkAd9AHgSXwYVFEAJ6IAFELUurUcUBI6JibEYZ1LFBKRl+rBOfv664KN8Pspfvuz8+sQESo/jy+vT+9OTk3+caGiQn/nxa/JFdPI1AJz9AgC34gwUgBZAz4gCzwscTav0op4TOOZO6aMlRWVFlMbyxe1Xbn/X+3Mv6orHQzNi5Jh8HmfW565eBQBQQRoAx3EGtGAFN4lNDBuNrIFmWGWhOZUYjkoRnuO0YlhZ0+8mp5sD3nBr8kT7RFs0FI6kBk/HGwdxxp5KVA6WUEW7W1r3+NAFP8eXyyMjlR4ABMHsKq7By1AGkOfmeSkSjYpho4nhec5N06zBKIajMRONxgYeGdx7cSBx0NVjiXFVnZVDHd6EuWdA0/2dY9NP9ovucZM9PL7r4GyFZfQAYEgD4G6cATWwOdHTnCCGoyRuEvCNg4/39106ELDVDgaDg7U2nElemp19vH3eO9rTs88DJL40APpIqSfpD+tiRZZj0+iq/NkHH+DM4hOL6wBbeSTxMjj/rzw205A4SdTSNDq279t7hx8bbj9UnrbU+rsPjO438JrpT9xf3Uwm4ho3OmYnD86q1bML8tuu4EYceC/OQKHSC1aURC2n5bTppfcvX34fZ778cn0OlcorWzHDezgDKuVdbXoJZ9bnNm1M4wxoNp6LelGl51QMm16ifnbt9d9+79lunJH/gArlNXkB6Q/+xVb+H+AM5G3scbHpJYRxZn1lEbZ84ZdwhuRNLBqNJjEajelFLUdKEOMYhhMEzoFZNv29B9Q6NaXWqg8/9zBToKKksf6xCEXlMzgj/6utyeFosiH3+tyn5b19zquff37V2ddb/umWD9JL/YYPk8jzEslfJXBGI8umn3ihmaKKM2TJK8IZ+SePRb5Rf2d9DrV9K7pY/28AgJX+PIiXoWQH0hQwCxtQVhqFhkbO7959fmTjs7Wnp7W1p0cz8OSRo9/p7b1y5MiTA+fmJidnZiYn54hdEluNUlNDDktojmO3efFex6lUaq6tv2OhOZ7EGWG0t3uy+tdoYEr0kxpu2BjEGSgGUy7TCGGJFSU2Lv1x24lkQrr8/Nn+7vrGxvpunPGM9HSMmeQvP/4YHQjV1PCkVlx2FavxMviVLIWYkSBPivCCEMT/C5Qmk+KJRobmc+E93JA3GBAr97rifMMDydpZ/+7yZoEP1Pn3NKTqZzQ1wfsdvNvutOsqiqtT1dGRSJV/zFLmtDkcWrd5T1t0tBYQWACwHmeAIZlwkovltLdfRV+8iksXF9cJPAFBZ3YV9yraQmKUtKJW4YfyD416zj18uT4Wi3/rm5or19G4vHSgu/sAOiZfu34FUPZzACziDBQBiKocvKl++vp3e0pMJVSxuTh95W9wRv576VA0ekhCNQr2iwFU5TgDrh37cixwqg2tZFQXTj8RoItpSq1Xp86m1Ho1xRQxgYtzP27OL8qj6KL8RpyR3xQPRyKHRRSS3wxNSdLhMAqtzyEvn66oSPPyPwEiXMVVOENqIupVomnTVYzQblOXGabwRy9crys0FVGFrDry9A9+eL1FYyqmCo2FjagXNZ4xRpzOiPGM/BP5xnmr6HCI1vMKZvzZVfQ2WgMLcAAmNxHOmKKZjKA0mdVyJJcYkR1FR3+a7HtoCXM+Z3OFVH20fuLQgppytudbPPqeuFMznOgZKXEJZvYr9oqZE/KHoo07YdIPqyvtZpPiryW7io34Jhg2FU7gGE4rsswOEnFuMiBQm6vVTmlOLlH2pDs+Uh2fGOGjQ1U+g1fjKpfwzRe7rfamr3bvPZ1YSHU/HPiFrljBRUV2Fd1Ea2DdqaF3JdRE08jSdryl42vJYLutjSuXEokac1Bf7xnSNJ4aGJxrdJgm7N0tzWm25EB5GcEbBiG7itbwTdBD+VatSNQmQRJzqrRFit+PHm+YiPhqLfTSgpqyprBZ0OkrDVy0WvPo6f5TTTZz9w/WW0NWbsFg+YWuuLW9sw2wEvv7aA3MOyYA4RfjIiyMmWhaJUaIF+RsP7GrdbqhfayawvKv1KmQFA3x40+9KlS5o5qmuYH+uUTiaFLvKYiKrn1WB6r3SdUkFwRmADSHb5GV8Cu2g9NkPGnv27Wroq/VGSktK7Jqyhz79qGzx/LKpKGIhp7Oy3PxjpPyNwFU4M4GMIPWoBoaoEupDC9FYpIS++YSFcMmkeU2Rc0tkAKJBF4GmlblqKZ+U6XcvPLK7+vHa9v1ZeVmq69+XKpy/aiXKYiMxOxOndvXN/qV5GKXXRDsdkHwhZsFj2hxacoa37LWVsW9VJHXWRYupXTJynivV3O00G2o66pQlxj1uoZWsT+Ibvl9gs/r9fnlpQqLqVSlMlts9o3atJBmKxgFcRubrJbTKkVntC1LjG13uL9zyV5u85rxzRf3WSqPjsm3kSvqtZjkVyCbhRgA/Bq/hXloBAAGmuCRbdsOfHN7dsZERs8JDNtyiXr6uT//y2dnE/imPPP6bflf/rr96+T97CrS4ZtQotR1W+MICP62u2FJW5DH0DqNR7N/N+bWf2XSIXQsjyH7AFR2tKbolFYkekG6e08mzPbaQjicCkkteldXqG/3kr3cU0M+qtFKszNQ6XWHttKrkV/ZXLbqhNbAkOsjt04Laqo8vV0otJJwBO6p0wbeFez8//PUmDieTB5PJGaSyZlEIBgMBAOBTa42zg0OnGqcTze3dBPKkrBash3YiNZADw4A093oFPjxgonV35UZkr69U7hvKj4RLY9b83r56FCl3+C9gb8fsnJ/enLvQqLM0vttVLEtMkru6BJaA9099WX4u5mXdfOsTW0uspTaGg1oZTgcyss7R1G+sPweIGCzq+hZtAaC0te785XfmK/bxsh0dWDWQL8VOszvciecLoc9aHU0eB/YWzfs3GWNWOvq+PJG35SGd45aykx6rVGv1lTU+dqGBPOIwSiYLcWFXF2wdWwD29rsKprBc+SEQGamxEmxmEjYniOMMNqb7NZ+fX6es2ssapM+pjkydOsY/dBDJ3/u99DUUVqzYSueXUWfoRUw7MCmdlMO/7G/c8lRbuONSwuFKmeX5ugYisjvSj6rHXXIpW2eKkCEByiLVjbncM5oe/XPLjeTiVmgV7dcvIZWfudJC0La8zu5dEu/8ApaAdeOfTkW7s7Gy4uP19BqmmKKCmLnagtKGIopYKr/ZP7FAFPEUEwhU4VW7ng6eL6Lu6OsHZ47cukbXMrrTXFvKP5I01fRysYMFnIcMqa7foqXLz1TpTaqqXxdvnv5sSefqdGYNFSBoUBA+JM+tpJlK9m+7H8OsFUsW2kcIHY12Sa0jlagLBcHsdg9pSjGC0ZXiZXR5Xu8auavLrcX6tRUvrYgfvFFU23vz2hqFuVV2K3oN++4Ux6unXtHLmzau3km9GRX0cf4AhRu8kuKbNJA2Lq/bFyPjCj/0Nmzh8ifxWsyeS1mr9ns1bxw7drzz1+79sIJz/jw8KjbPTo8PK7ct1IA6J/xGdI/5Q4hRaMxIpapR+YjHe7p+Xl0fL/aZlhfmydxIMJC9CG+ADbyfhOWIjlnDBIOTU4AIuvpP5sK+dwxc1/1ZDIxLjWMRsxx4zf2pM8+EKgOCdbesBje3ygdPx5V5S0Su8bsKnoXXwDfTh5xUjh6j5ecS+d/pY9xSXvKW11r62obavby7pijq2qyfvJ0TIy1txzVhL1jtgqhwuYzTlXzLo/Deh9fuX8wlDJSpemmhsFKkhMGPQD6DJ+BAsIAvUimHTmK6SWXpCe14NjnHs5DlMZaHJb/46Mfdnai/MPOfoc1WibPLN+PHpQvzi6THEzZVfQePgPOHTkQKRH0LpZjtqv03z3T/C570huqr62yeey7dGjqt4UuPra/tuWIJuIZs3rCoZpwsc6PWhbnS/zDydTBiBKrL7uK/l3BgRcAuWlmy4nqruZuDn96c+AZaBrpLaJBXetyVVc7GmfaOk+1JkYd6dKYjavnVJZO+8DR+gnksbt314WiYb/8Zsujx+eXOwPOEV2ZZ7irnJu4f9cE8Y+gCgDdwWcUnjfhmEtyscUq5lnanYrLv0GvxVo9pdSR7z81uHhf69fOPEbESqWcTT9SMCNAZHs63D1R5P6OoNp5huAFBdeISRysTwQ8NZHRhuEjYVewufZ+m+CrsPvjGk+NO+5lbfWaql6xvstM2TrC0V7/RG+w3UhZehLhviB6MFDjCVR4hCr5HcFr89i1esnurwYEjdlV+BReImdzUw6rrvCiyPOiqJEEryR5BYnkXgm3kAuFyD06Jols5R9vTU1tPP8l/gOq2njuYivx3/1yfDybhUb4ED5FT2NGOUWQyw6CouwBFMVvkHdNelFVdOvAredUh9aeIt+5YRx9gqMkFuW3AWlD0P/h5ZenX355/MbUjRtTNzZnFryNVrbu8y1LaEUuBZR9CdfBIH6L7Nfm5OIJBj2eYBDX+TnO7+c4P/wPAAAA//8DABa/6GAAAQAAAAILhTgCui1fDzz1AAED6AAAAADYXaCEAAAAAN1mLzb+N/7ECG0D8QABAAMAAgAAAAAAAAABAAAD2P7vAAAImP43/jcIbQABAAAAAAAAAAAAAAAAAAAAP3icBMAxSgNBFMbx//sWgpI1jhhjbILEFTE72TaCmWKagOADQS0sLPUSgt7APq21NrZewN7TuM3mp29u+AWlrtUjrhWNXnCVuF5p9IHbHNczrh6uFtca1yeN7nA94YqcKHKkNVeK3X8xZ6AFfe0yUyLbH5USZ+pR2T1jjZjqkmxDFqrINiEXD2QtyaqplMj2TrYfDuyNPV2wVJ+y2GIsMdA2pQKnCqwUmCgwUmBfgUMFzhWICswskuyaujimtkiyW3YUmNqQDN3XBgAA//8DAJ11IYsAAAAALAAsAFAAhACwANQA6AEYAS4BOgFUAWQBlgG4AeQCBgIsAmwCfgKcArgC8gMgA1gDigO2A+gEHARCBKoEzATYBPAFDAU+BWAFjAW8BdwGGAY+BmAGfAa0BuAHEAc8B1QHgAe+B+IIFAhUCG4IvAjSCN4I6gj0CQIJFgkiCTgAAQAAAD8AkAAMAGMABwABAAAAAAAAAAAAAAAAAAQAA3icnJTPbhtlFMV/TmzTCsECRVW6ib4FiyK1Y1MlVdusJqRWRkRx8LggJIQ0tie25fHMyDN2Gp6ANW/BW3TFQ/AciDW619euXRAFK4p1Zub+Od+5537AAX+yT6V6H/itnhqucFS/NrzHvfqF4X1a9T3DVR7VfjdcY1BbGK7zea1j+CPeVn8xfI/j6o+G73NYbRn+mKfVA8Of7Dv+MPwpx7xd4go852fDFQ7JDe9xwA+G93mA1axUeUDTcI3PODJc5wjoMqYkYUzKEMcNY4bMmRFTEBIzY8wNMQMcAT4Jpb5NiRQ5hv/4NiKkZEakFUeUOBJCEiIKRlbxJ83KuNaO0memSLr5lIyI6GnGhIgUR8aQjJSYidYpKcl5SYMGBX3lm1NS4FEwJsEjY8aQBm1aXNJlxJgCR0srCbOQjBtKbom0v7MIUaZPTEphrOakDJSnU36xZgdc4miTa+xm5cutCo9xfKvZwk1iHF/i6b/bYLbdd8UmYqF6ioY9EuV5qxMcqeLS1+cbxSUvcTvps83kwxoNlJ3MekyPuc5f5id5wiTFuUN8QnVQ6B7iONPngFAV+Y6ALhe0eU1Xn306dPC5okvAK81t08HxFW2uONeMQPHyW0sdc8X3OL4m0BipHZs+ork8vSE3dwt3cYacY0quWyAzlvOL8+OdJiw7lG25o1BX9HWPJFL2QFSRPYsYmitydcVUtVx5ozD9BuYI+VrqbN99l21Y2O6ttviOTHfYMTdOMrklow9N1XvPM7f65xExIKOnEX0ypjQoudOzXRMxJ8Fxrj6+0C0p8dc50udOXRIzVQYBqdaZketvZL4JjXt/y/fO7hLZvKnu6GR9ql26SOV0Y0avVb3Vt9BUjjcm0LCpZpYjE5bKy5OK9yXa2+IfqvsLvd0ynnBGRsLgbzfAUzyaHHPCKSPtIJVTFnY7NPWGaPKCUz39hFij5L58ozpJhRM8nnHCCS949p6OKybOuLg1l83ePuec0eb0P51iGd/mjFfrd//e9Vdl2tSzOJ6sn57vPMVH/8OtX/B4677s6C0gm7Owau+24oqIqXBxh5tauId4fwEAAP//AwD0t09RAAADAAAAAAAA/84AMgAAAAAAAAAAAAAAAAAAAAAAAAAA");
+}
+.d2-1712173055 .text-italic {
+	font-family: "d2-1712173055-font-italic";
+}
+@font-face {
+	font-family: d2-1712173055-font-italic;
+	src: url("data:application/font-woff;base64,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");
+}]]>
+.md p,.md ul,.md ol,.md dl,.md table,.md pre,.md details{margin-bottom:0!important;}.md li>p{margin-top:0!important;}.md li+li{margin-top:0!important;}.md ul,.md ol{padding-left:1.5em!important;}</style><style type="text/css"><![CDATA[.shape {
+  shape-rendering: geometricPrecision;
+  stroke-linejoin: round;
+}
+.connection {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.blend {
+  mix-blend-mode: multiply;
+  opacity: 0.5;
+}
+
+		.d2-1712173055 .fill-N7{fill:#FFFFFF;}
+		.d2-1712173055 .stroke-B2{stroke:#0D32B2;}.appendix text.text{fill:#0A0F25}.md{--color-fg-default:#0A0F25;--color-fg-muted:#676C7E;--color-fg-subtle:#9499AB;--color-canvas-default:#FFFFFF;--color-canvas-subtle:#EEF1F8;--color-border-default:#0D32B2;--color-border-muted:#0D32B2;--color-neutral-muted:#EEF1F8;--color-accent-fg:#0D32B2;--color-accent-emphasis:#0D32B2;--color-attention-subtle:#676C7E;--color-danger-fg:red;}.light-code{display: block}.dark-code{display: none}]]></style><g class="dGl0bGU="><g class="shape" ></g><text x="473.5" y="28" fill="#134570" class="text-bold" style="text-anchor:middle;font-size:28px"><tspan x="473.5" dy="0">TTBOX core 分层与一帧数据流向（RK3588 板端 C++ 引擎，171 文件</tspan><tspan x="473.5" dy="32"> / 30336 行）</tspan></text></g><g class="Ym9keQ=="><g class="shape" ><rect x="0" y="86" width="1456" height="3266" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="bm90ZQ=="><g class="shape" ></g><text x="204.5" y="3390" fill="#607289" class="text" style="text-anchor:middle;font-size:16px">实线：流程与交接  ·  虚线：完成事件或状态回报</text></g><g class="Ym9keS5waGFzZV9yYWls"><g class="shape" ><rect x="0" y="86" width="176" height="3266" stroke="#BDCBDE" fill="#F5F7FA" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMA=="><g class="shape" ><rect x="176" y="86" width="320" height="3266" stroke="#BDCBDE" fill="#EFF5FA" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMQ=="><g class="shape" ><rect x="496" y="86" width="320" height="3266" stroke="#BDCBDE" fill="#EFF5FA" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMg=="><g class="shape" ><rect x="816" y="86" width="320" height="3266" stroke="#BDCBDE" fill="#EFF5FA" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMw=="><g class="shape" ><rect x="1136" y="86" width="320" height="3266" stroke="#BDCBDE" fill="#EFF5FA" style="stroke-width:1;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLmhlYWRlcg=="><g class="shape" ><rect x="0" y="86" width="176" height="80" stroke="#D5DEEB" fill="#134570" style="stroke-width:1;" /></g><text x="88" y="131.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:16px">阶段</text></g><g class="Ym9keS5waGFzZV9yYWlsLnBoYXNlMA=="><g class="shape" ><rect x="0" y="166" width="176" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g><text x="88" y="195.5" fill="#134570" class="text-bold" style="text-anchor:middle;font-size:16px"><tspan x="88" dy="0">01  一、命令进</tspan><tspan x="88" dy="18.5">来</tspan></text></g><g class="Ym9keS5waGFzZV9yYWlsLnIw"><g class="shape" ><rect x="0" y="230" width="176" height="414" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIx"><g class="shape" ><rect x="0" y="644" width="176" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnBoYXNlMQ=="><g class="shape" ><rect x="0" y="798" width="176" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g><text x="88" y="827.5" fill="#134570" class="text-bold" style="text-anchor:middle;font-size:16px"><tspan x="88" dy="0">02  二、按五步</tspan><tspan x="88" dy="18.5">固定顺序装配</tspan></text></g><g class="Ym9keS5waGFzZV9yYWlsLmNoYW5uZWwy"><g class="shape" ><rect x="0" y="862" width="176" height="48" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIy"><g class="shape" ><rect x="0" y="910" width="176" height="178" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIz"><g class="shape" ><rect x="0" y="1088" width="176" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnI0"><g class="shape" ><rect x="0" y="1290" width="176" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnI1"><g class="shape" ><rect x="0" y="1492" width="176" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnI2"><g class="shape" ><rect x="0" y="1694" width="176" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnBoYXNlMg=="><g class="shape" ><rect x="0" y="1848" width="176" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g><text x="88" y="1877.5" fill="#134570" class="text-bold" style="text-anchor:middle;font-size:16px"><tspan x="88" dy="0">03  三、一帧数</tspan><tspan x="88" dy="18.5">据的实际流向</tspan></text></g><g class="Ym9keS5waGFzZV9yYWlsLnI3"><g class="shape" ><rect x="0" y="1912" width="176" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnI4"><g class="shape" ><rect x="0" y="2066" width="176" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnI5"><g class="shape" ><rect x="0" y="2268" width="176" height="130" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIxMA=="><g class="shape" ><rect x="0" y="2398" width="176" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnBoYXNlMw=="><g class="shape" ><rect x="0" y="2552" width="176" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g><text x="88" y="2581.5" fill="#134570" class="text-bold" style="text-anchor:middle;font-size:16px"><tspan x="88" dy="0">04  四、命令回</tspan><tspan x="88" dy="18.5">去</tspan></text></g><g class="Ym9keS5waGFzZV9yYWlsLmNoYW5uZWwxMQ=="><g class="shape" ><rect x="0" y="2616" width="176" height="60" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIxMQ=="><g class="shape" ><rect x="0" y="2676" width="176" height="226" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5waGFzZV9yYWlsLnIxMg=="><g class="shape" ><rect x="0" y="2902" width="176" height="450" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5oZWFkZXI="><g class="shape" ><rect x="176" y="86" width="320" height="80" stroke="#D5DEEB" fill="#134570" style="stroke-width:1;" /></g><text x="336" y="131.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:16px">控制面（面板命令入口）</text></g><g class="Ym9keS5sYW5lMC5waGFzZTA="><g class="shape" ><rect x="176" y="166" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMC5yMA=="><g class="shape" ><rect x="176" y="230" width="320" height="414" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMQ=="><g class="shape" ><rect x="176" y="644" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5waGFzZTE="><g class="shape" ><rect x="176" y="798" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMC5jaGFubmVsMg=="><g class="shape" ><rect x="176" y="862" width="320" height="48" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMg=="><g class="shape" ><rect x="176" y="910" width="320" height="178" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMw=="><g class="shape" ><rect x="176" y="1088" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yNA=="><g class="shape" ><rect x="176" y="1290" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yNQ=="><g class="shape" ><rect x="176" y="1492" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yNg=="><g class="shape" ><rect x="176" y="1694" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5waGFzZTI="><g class="shape" ><rect x="176" y="1848" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMC5yNw=="><g class="shape" ><rect x="176" y="1912" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yOA=="><g class="shape" ><rect x="176" y="2066" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yOQ=="><g class="shape" ><rect x="176" y="2268" width="320" height="130" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMTA="><g class="shape" ><rect x="176" y="2398" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5waGFzZTM="><g class="shape" ><rect x="176" y="2552" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMC5jaGFubmVsMTE="><g class="shape" ><rect x="176" y="2616" width="320" height="60" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMTE="><g class="shape" ><rect x="176" y="2676" width="320" height="226" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMTI="><g class="shape" ><rect x="176" y="2902" width="320" height="450" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5oZWFkZXI="><g class="shape" ><rect x="496" y="86" width="320" height="80" stroke="#D5DEEB" fill="#134570" style="stroke-width:1;" /></g><text x="656" y="131.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:16px">流程编排（core 中枢）</text></g><g class="Ym9keS5sYW5lMS5waGFzZTA="><g class="shape" ><rect x="496" y="166" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMS5yMA=="><g class="shape" ><rect x="496" y="230" width="320" height="414" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMQ=="><g class="shape" ><rect x="496" y="644" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5waGFzZTE="><g class="shape" ><rect x="496" y="798" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMS5jaGFubmVsMg=="><g class="shape" ><rect x="496" y="862" width="320" height="48" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMg=="><g class="shape" ><rect x="496" y="910" width="320" height="178" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMw=="><g class="shape" ><rect x="496" y="1088" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yNA=="><g class="shape" ><rect x="496" y="1290" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yNQ=="><g class="shape" ><rect x="496" y="1492" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yNg=="><g class="shape" ><rect x="496" y="1694" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5waGFzZTI="><g class="shape" ><rect x="496" y="1848" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMS5yNw=="><g class="shape" ><rect x="496" y="1912" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yOA=="><g class="shape" ><rect x="496" y="2066" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yOQ=="><g class="shape" ><rect x="496" y="2268" width="320" height="130" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMTA="><g class="shape" ><rect x="496" y="2398" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5waGFzZTM="><g class="shape" ><rect x="496" y="2552" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMS5jaGFubmVsMTE="><g class="shape" ><rect x="496" y="2616" width="320" height="60" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMTE="><g class="shape" ><rect x="496" y="2676" width="320" height="226" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMS5yMTI="><g class="shape" ><rect x="496" y="2902" width="320" height="450" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5oZWFkZXI="><g class="shape" ><rect x="816" y="86" width="320" height="80" stroke="#D5DEEB" fill="#134570" style="stroke-width:1;" /></g><text x="976" y="131.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:16px">数据面（三条并行分支）</text></g><g class="Ym9keS5sYW5lMi5waGFzZTA="><g class="shape" ><rect x="816" y="166" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMi5yMA=="><g class="shape" ><rect x="816" y="230" width="320" height="414" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMQ=="><g class="shape" ><rect x="816" y="644" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5waGFzZTE="><g class="shape" ><rect x="816" y="798" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMi5jaGFubmVsMg=="><g class="shape" ><rect x="816" y="862" width="320" height="48" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMg=="><g class="shape" ><rect x="816" y="910" width="320" height="178" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMw=="><g class="shape" ><rect x="816" y="1088" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yNA=="><g class="shape" ><rect x="816" y="1290" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yNQ=="><g class="shape" ><rect x="816" y="1492" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yNg=="><g class="shape" ><rect x="816" y="1694" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5waGFzZTI="><g class="shape" ><rect x="816" y="1848" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMi5yNw=="><g class="shape" ><rect x="816" y="1912" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yOA=="><g class="shape" ><rect x="816" y="2066" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yOQ=="><g class="shape" ><rect x="816" y="2268" width="320" height="130" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMTA="><g class="shape" ><rect x="816" y="2398" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5waGFzZTM="><g class="shape" ><rect x="816" y="2552" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMi5jaGFubmVsMTE="><g class="shape" ><rect x="816" y="2616" width="320" height="60" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMTE="><g class="shape" ><rect x="816" y="2676" width="320" height="226" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMi5yMTI="><g class="shape" ><rect x="816" y="2902" width="320" height="450" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5oZWFkZXI="><g class="shape" ><rect x="1136" y="86" width="320" height="80" stroke="#D5DEEB" fill="#134570" style="stroke-width:1;" /></g><text x="1296" y="131.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:16px">输出面（注入鼠标）</text></g><g class="Ym9keS5sYW5lMy5waGFzZTA="><g class="shape" ><rect x="1136" y="166" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMy5yMA=="><g class="shape" ><rect x="1136" y="230" width="320" height="414" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMQ=="><g class="shape" ><rect x="1136" y="644" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5waGFzZTE="><g class="shape" ><rect x="1136" y="798" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMy5jaGFubmVsMg=="><g class="shape" ><rect x="1136" y="862" width="320" height="48" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMg=="><g class="shape" ><rect x="1136" y="910" width="320" height="178" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMw=="><g class="shape" ><rect x="1136" y="1088" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yNA=="><g class="shape" ><rect x="1136" y="1290" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yNQ=="><g class="shape" ><rect x="1136" y="1492" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yNg=="><g class="shape" ><rect x="1136" y="1694" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5waGFzZTI="><g class="shape" ><rect x="1136" y="1848" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMy5yNw=="><g class="shape" ><rect x="1136" y="1912" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yOA=="><g class="shape" ><rect x="1136" y="2066" width="320" height="202" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yOQ=="><g class="shape" ><rect x="1136" y="2268" width="320" height="130" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMTA="><g class="shape" ><rect x="1136" y="2398" width="320" height="154" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5waGFzZTM="><g class="shape" ><rect x="1136" y="2552" width="320" height="64" stroke="#BDCBDE" fill="#DFE8F5" style="stroke-width:1;" /></g></g><g class="Ym9keS5sYW5lMy5jaGFubmVsMTE="><g class="shape" ><rect x="1136" y="2616" width="320" height="60" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMTE="><g class="shape" ><rect x="1136" y="2676" width="320" height="226" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMy5yMTI="><g class="shape" ><rect x="1136" y="2902" width="320" height="450" stroke="transparent" fill="transparent" style="stroke-width:2;" /></g></g><g class="Ym9keS5sYW5lMC5yMC5zdGVwX3N0ZXBfN2Q5ZmY4Njc1YzMz terminal"><g class="shape" ><rect x="218" y="259" width="236" height="356" rx="24" stroke="#134570" fill="#134570" style="stroke-width:2;" /></g><text x="336" y="371.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="336" dy="0">开始</tspan><tspan x="336" dy="18.555556">IPC 服务端：面</tspan><tspan x="336" dy="18.555556">板通过 Unix 域套</tspan><tspan x="336" dy="18.555556">接字 /run/ttbox/</tspan><tspan x="336" dy="18.555556">core.sock 发命令</tspan><tspan x="336" dy="18.555556">，共16 条（状态查</tspan><tspan x="336" dy="18.555556">询/ 配置写入 / 运</tspan><tspan x="336" dy="18.555556">行控制 / 模型管理 </tspan><tspan x="336" dy="18.555556">/ 授权）</tspan></text></g><g class="Ym9keS5sYW5lMC5yMS5zdGVwX3N0ZXBfMTkzMGVlMDBiZjZh action"><g class="shape" ><rect x="218" y="673" width="236" height="96" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="336" y="709.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="336" dy="0">运行配置真源：配置分层合</tspan><tspan x="336" dy="19.666667">并后的结果，产出「功能门</tspan><tspan x="336" dy="19.666667"> gates + 数值参数」</tspan></text></g><g class="Ym9keS5sYW5lMC5jaGFubmVsMi50dXJu"><g class="shape" ><ellipse rx="1" ry="1" cx="336" cy="886" stroke="#134570" fill="#134570" class="shape" style="stroke-width:0;" /></g></g><g class="Ym9keS5sYW5lMC5jaGFubmVsMTEudHVybg=="><g class="shape" ><ellipse rx="1" ry="1" cx="336" cy="2646" stroke="#64748B" fill="#64748B" class="shape" style="stroke-width:0;" /></g></g><g class="Ym9keS5sYW5lMC5yMTEuc3RlcF9zdGVwXzFkOWViNjkxY2Q5Mg== action"><g class="shape" ><rect x="218" y="2705" width="236" height="168" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="336" y="2768.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="336" dy="0">IPC 服务端把状态变化</tspan><tspan x="336" dy="19.25">回给面板（面板的启动/停</tspan><tspan x="336" dy="19.25">止按钮即打在「运行控制」</tspan><tspan x="336" dy="19.25">命令上）</tspan></text></g><g class="Ym9keS5sYW5lMS5jaGFubmVsMi50dXJu"><g class="shape" ><ellipse rx="1" ry="1" cx="656" cy="886" stroke="#134570" fill="#134570" class="shape" style="stroke-width:0;" /></g></g><g class="Ym9keS5sYW5lMS5yMi5zdGVwX3N0ZXBfMDUxMjRlOWNlMjIz action"><g class="shape" ><rect x="538" y="939" width="236" height="120" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="656" y="987.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="656" dy="0">统一生命周期 </tspan><tspan x="656" dy="19.666667">CoreRuntime：线程全</tspan><tspan x="656" dy="19.666667">归它管，五步顺序是硬约束</tspan></text></g><g class="Ym9keS5sYW5lMS5yMTEuc3RlcF9zdGVwXzU0NzNkNTc5NDhmOA== action"><g class="shape" ><rect x="538" y="2705" width="236" height="168" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="656" y="2750.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="656" dy="0">跨层支撑：common 域日</tspan><tspan x="656" dy="18.833333">志分三个文件落盘 —— 全</tspan><tspan x="656" dy="18.833333">量流水 12 小时轮转 / 只</tspan><tspan x="656" dy="18.833333">收最高两级报错直写并刷盘</tspan><tspan x="656" dy="18.833333">永不被轮转吃掉 / 记客户</tspan><tspan x="656" dy="18.833333">操作</tspan></text></g><g class="Ym9keS5sYW5lMS5yMTIuc3RlcF9zdGVwX2JhZjU2ZGI1YzRiMg== terminal"><g class="shape" ><rect x="538" y="2931" width="236" height="392" rx="24" stroke="#134570" fill="#134570" style="stroke-width:2;" /></g><text x="656" y="3052.5" fill="white" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="656" dy="0">结束</tspan><tspan x="656" dy="18.5">其余支撑域：</tspan><tspan x="656" dy="18.5">config 配置分层</tspan><tspan x="656" dy="18.5">合并 / auth 本地</tspan><tspan x="656" dy="18.5">与云端授权校验 / </tspan><tspan x="656" dy="18.5">hid USB 设备层</tspan><tspan x="656" dy="18.5">（控制器名运行时解</tspan><tspan x="656" dy="18.5">析，不写死编号）/ </tspan><tspan x="656" dy="18.5">fan 风扇 PWM </tspan><tspan x="656" dy="18.5">控制</tspan></text></g><g class="Ym9keS5sYW5lMi5yMi5zdGVwX3N0ZXBfNzk3MDU3ZjBmNDg1 action"><g class="shape" ><rect x="858" y="939" width="236" height="120" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="978.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">① 采集：</tspan><tspan x="976" dy="19.25">V4L2Capture 从摄像</tspan><tspan x="976" dy="19.25">头取帧，DMA-BUF 零</tspan><tspan x="976" dy="19.25">拷贝缓冲区池</tspan></text></g><g class="Ym9keS5sYW5lMi5yMy5zdGVwX3N0ZXBfMThkM2QxMjE4ZGRl action"><g class="shape" ><rect x="858" y="1117" width="236" height="144" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="1159.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">② 推理：WorkerPool </tspan><tspan x="976" dy="19">多线程跑 NPU（Rknn </tspan><tspan x="976" dy="19">引擎加载并执行模型）——</tspan><tspan x="976" dy="19"> 仅当功能门允许推理，关</tspan><tspan x="976" dy="19">掉就不起</tspan></text></g><g class="Ym9keS5sYW5lMi5yNC5zdGVwX3N0ZXBfZmNiNzJkMmZjZGEy action"><g class="shape" ><rect x="858" y="1319" width="236" height="144" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="1361.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">③ 鼠标透传通道 Physic</tspan><tspan x="976" dy="19">alMouseReader 启动 </tspan><tspan x="976" dy="19">—— 红线段：与 AI 授</tspan><tspan x="976" dy="19">权无关，恒启动，失败只告</tspan><tspan x="976" dy="19">警不阻塞流水线</tspan></text></g><g class="Ym9keS5sYW5lMi5yNS5zdGVwX3N0ZXBfYTBjMjNiMWZhY2Jh action"><g class="shape" ><rect x="858" y="1521" width="236" height="144" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="1563.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">④ 瞄准线程 </tspan><tspan x="976" dy="19">AimThread：主循环做</tspan><tspan x="976" dy="19">坐标转换 + PID 控制 </tspan><tspan x="976" dy="19">—— 仅当功能门允许瞄准</tspan><tspan x="976" dy="19">，关掉就不起</tspan></text></g><g class="Ym9keS5sYW5lMi5yNi5zdGVwX3N0ZXBfMWRjZjlkNzUwYWVm action"><g class="shape" ><rect x="858" y="1723" width="236" height="96" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="1759.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">⑤ 受限预览 </tspan><tspan x="976" dy="19.666667">PreviewModule：帧</tspan><tspan x="976" dy="19.666667">率封顶值由上层算好传入</tspan></text></g><g class="Ym9keS5sYW5lMi5yNy5zdGVwX3N0ZXBfZDFjNWEyNmM3N2Y5 action"><g class="shape" ><rect x="858" y="1941" width="236" height="96" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="1977.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">采集分支把帧交给推理分支</tspan><tspan x="976" dy="19.666667">（RGA 硬件加速做色彩</tspan><tspan x="976" dy="19.666667">空间与缩放转换）</tspan></text></g><g class="Ym9keS5sYW5lMi5yOC5zdGVwX3N0ZXBfNWM2ODliYjI0Y2Jm action"><g class="shape" ><rect x="858" y="2095" width="236" height="144" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="976" y="2146.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="976" dy="0">推理分支把检测结果交给瞄</tspan><tspan x="976" dy="19.25">准分支（Pipeline 做前</tspan><tspan x="976" dy="19.25">后处理：预处理 / 后处理 </tspan><tspan x="976" dy="19.25">/ 选靶）</tspan></text></g><g class="Ym9keS5sYW5lMy5yOC5zdGVwX3N0ZXBfMDgzYzI1Mzc5MjI5 action"><g class="shape" ><rect x="1178" y="2095" width="236" height="144" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="1296" y="2137.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="1296" dy="0">输出抽象 </tspan><tspan x="1296" dy="19">IOutputBackend 两种</tspan><tspan x="1296" dy="19">物理设备协议实现：本地 </tspan><tspan x="1296" dy="19">USB HID 直出 / 外接</tspan><tspan x="1296" dy="19"> AI 盒兜底后端</tspan></text></g><g class="Ym9keS5sYW5lMy5yOS5zdGVwX3N0ZXBfOTJkYmI3MjUzNDQx action"><g class="shape" ><rect x="1178" y="2297" width="236" height="72" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="1296" y="2330.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="1296" dy="0">坐标变换域：像素坐标 ↔ </tspan><tspan x="1296" dy="20.5">设备计数</tspan></text></g><g class="Ym9keS5sYW5lMy5yMTAuc3RlcF9zdGVwXzU2ZDVhZjFmNjY5YQ== action"><g class="shape" ><rect x="1178" y="2427" width="236" height="96" rx="5" stroke="#1F6FB4" fill="white" style="stroke-width:1;" /></g><text x="1296" y="2463.5" fill="#18334F" class="text-bold" style="text-anchor:middle;font-size:18px"><tspan x="1296" dy="0">两个后端都必须绑「物理按</tspan><tspan x="1296" dy="19.666667">键源」，缺按键源就拒绝注</tspan><tspan x="1296" dy="19.666667">入（防误注入）</tspan></text></g><g class="Ym9keS5sYW5lMy5jaGFubmVsMTEudHVybg=="><g class="shape" ><ellipse rx="1" ry="1" cx="1296" cy="2646" stroke="#64748B" fill="#64748B" class="shape" style="stroke-width:0;" /></g></g><g class="Ym9keS5sYW5lMC4ocjAuc3RlcF9zdGVwXzdkOWZmODY3NWMzMyAtJmd0OyByMS5zdGVwX3N0ZXBfMTkzMGVlMDBiZjZhKVswXQ=="><marker id="mk-d2-1712173055-4166885076" markerWidth="10" markerHeight="12" refX="7" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="0,0 10,6 0,12" fill="#134570" class="connection" stroke-width="2" /> </marker><path d="M 336 617 L 336 669.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="336" y="649" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">读运行配置</text></g><g class="Ym9keS5sYW5lMC4ocjEuc3RlcF9zdGVwXzE5MzBlZTAwYmY2YSAtLSBjaGFubmVsMi50dXJuKVswXQ=="><path d="M 336 770.5 L 336 884" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" mask="url(#d2-1712173055)" /></g><g class="Ym9keS4obGFuZTAuY2hhbm5lbDIudHVybiAtLSBsYW5lMS5jaGFubmVsMi50dXJuKVswXQ=="><path d="M 338 886 L 654 886" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" mask="url(#d2-1712173055)" /><text x="496" y="891" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">按门决定启停</text></g><g class="Ym9keS5sYW5lMS4oY2hhbm5lbDIudHVybiAtJmd0OyByMi5zdGVwX3N0ZXBfMDUxMjRlOWNlMjIzKVswXQ=="><path d="M 656 888 L 656 935.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /></g><g class="Ym9keS4obGFuZTEucjIuc3RlcF9zdGVwXzA1MTI0ZTljZTIyMyAtJmd0OyBsYW5lMi5yMi5zdGVwX3N0ZXBfNzk3MDU3ZjBmNDg1KVswXQ=="><path d="M 775.5 999 L 854.5 999" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="816.5" y="997" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="816.5" dy="0">① 采集层起</tspan><tspan x="816.5" dy="16">帧</tspan></text></g><g class="Ym9keS5sYW5lMi4ocjIuc3RlcF9zdGVwXzc5NzA1N2YwZjQ4NSAtJmd0OyByMy5zdGVwX3N0ZXBfMThkM2QxMjE4ZGRlKVswXQ=="><path d="M 976 1060.5 L 976 1113.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976.5" y="1086" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="976.5" dy="0">② 拉起推理</tspan><tspan x="976.5" dy="16">线程</tspan></text></g><g class="Ym9keS5sYW5lMi4ocjMuc3RlcF9zdGVwXzE4ZDNkMTIxOGRkZSAtJmd0OyByNC5zdGVwX3N0ZXBfZmNiNzJkMmZjZGEyKVswXQ=="><path d="M 976 1262.5 L 976 1315.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976.5" y="1288" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="976.5" dy="0">③ 鼠标透传</tspan><tspan x="976.5" dy="16">通道</tspan></text></g><g class="Ym9keS5sYW5lMi4ocjQuc3RlcF9zdGVwX2ZjYjcyZDJmY2RhMiAtJmd0OyByNS5zdGVwX3N0ZXBfYTBjMjNiMWZhY2JhKVswXQ=="><path d="M 976 1464.5 L 976 1517.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976.5" y="1497" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">④ 瞄准线程</text></g><g class="Ym9keS5sYW5lMi4ocjUuc3RlcF9zdGVwX2EwYzIzYjFmYWNiYSAtJmd0OyByNi5zdGVwX3N0ZXBfMWRjZjlkNzUwYWVmKVswXQ=="><path d="M 976 1666.5 L 976 1719.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976" y="1699" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">⑤ 预览</text></g><g class="Ym9keS5sYW5lMi4ocjYuc3RlcF9zdGVwXzFkY2Y5ZDc1MGFlZiAtJmd0OyByNy5zdGVwX3N0ZXBfZDFjNWEyNmM3N2Y5KVswXQ=="><path d="M 976 1820.5 L 976 1937.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976" y="1878" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="976" dy="0">三、数据往下</tspan><tspan x="976" dy="16">走</tspan></text></g><g class="Ym9keS5sYW5lMi4ocjcuc3RlcF9zdGVwX2QxYzVhMjZjNzdmOSAtJmd0OyByOC5zdGVwX3N0ZXBfNWM2ODliYjI0Y2JmKVswXQ=="><path d="M 976 2038.5 L 976 2091.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="976" y="2064" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="976" dy="0">推理结果交瞄</tspan><tspan x="976" dy="16">准</tspan></text></g><g class="Ym9keS4obGFuZTIucjguc3RlcF9zdGVwXzVjNjg5YmIyNGNiZiAtJmd0OyBsYW5lMy5yOC5zdGVwX3N0ZXBfMDgzYzI1Mzc5MjI5KVswXQ=="><path d="M 1095.5 2167 L 1174.5 2167" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="1136.5" y="2172" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">算移动量</text></g><g class="Ym9keS5sYW5lMy4ocjguc3RlcF9zdGVwXzA4M2MyNTM3OTIyOSAtJmd0OyByOS5zdGVwX3N0ZXBfOTJkYmI3MjUzNDQxKVswXQ=="><path d="M 1296 2240.5 L 1296 2293.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="1296.5" y="2273" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">绑按键源</text></g><g class="Ym9keS5sYW5lMy4ocjkuc3RlcF9zdGVwXzkyZGJiNzI1MzQ0MSAtJmd0OyByMTAuc3RlcF9zdGVwXzU2ZDVhZjFmNjY5YSlbMF0="><path d="M 1296 2370.5 L 1296 2423.5" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="1296" y="2396" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="1296" dy="0">缺按键源则拒</tspan><tspan x="1296" dy="16">绝注入</tspan></text></g><g class="Ym9keS5sYW5lMy4ocjEwLnN0ZXBfc3RlcF81NmQ1YWYxZjY2OWEgLS0gY2hhbm5lbDExLnR1cm4pWzBd"><path d="M 1296 2524.5 L 1296 2644" stroke="#64748B" fill="none" class="connection" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" mask="url(#d2-1712173055)" /></g><g class="Ym9keS4obGFuZTMuY2hhbm5lbDExLnR1cm4gLS0gbGFuZTAuY2hhbm5lbDExLnR1cm4pWzBd"><path d="M 1294 2646 L 338 2646" stroke="#64748B" fill="none" class="connection" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" mask="url(#d2-1712173055)" /><text x="816" y="2644" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="816" dy="0">回到控制面应</tspan><tspan x="816" dy="16">答</tspan></text></g><g class="Ym9keS5sYW5lMC4oY2hhbm5lbDExLnR1cm4gLSZndDsgcjExLnN0ZXBfc3RlcF8xZDllYjY5MWNkOTIpWzBd"><marker id="mk-d2-1712173055-3567666233" markerWidth="10" markerHeight="12" refX="7" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="0,0 10,6 0,12" fill="#64748B" class="connection" stroke-width="2" /> </marker><path d="M 336 2648 L 336 2701.5" stroke="#64748B" fill="none" class="connection" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" marker-end="url(#mk-d2-1712173055-3567666233)" mask="url(#d2-1712173055)" /></g><g class="Ym9keS4obGFuZTAucjExLnN0ZXBfc3RlcF8xZDllYjY5MWNkOTIgLSZndDsgbGFuZTEucjExLnN0ZXBfc3RlcF81NDczZDU3OTQ4ZjgpWzBd"><path d="M 455.5 2789 L 534.5 2789" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="496" y="2787" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px"><tspan x="496" dy="0">统一日志与配</tspan><tspan x="496" dy="16">置</tspan></text></g><g class="Ym9keS5sYW5lMS4ocjExLnN0ZXBfc3RlcF81NDczZDU3OTQ4ZjggLSZndDsgcjEyLnN0ZXBfc3RlcF9iYWY1NmRiNWM0YjIpWzBd"><path d="M 656 2874.5 L 656 2927" stroke="#134570" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1712173055-4166885076)" mask="url(#d2-1712173055)" /><text x="656" y="2907" fill="#47617D" class="text-italic" style="text-anchor:middle;font-size:14px">配置分层合并</text></g><mask id="d2-1712173055" maskUnits="userSpaceOnUse" x="-11" y="-11" width="1478" height="3417">
+<rect x="-11" y="-11" width="1478" height="3417" fill="white"></rect>
+<rect x="292" y="635" width="88" height="18" fill="black"></rect>
+<rect x="444" y="877" width="104" height="18" fill="black"></rect>
+<rect x="775" y="983" width="83" height="32" fill="black"></rect>
+<rect x="935" y="1072" width="83" height="32" fill="black"></rect>
+<rect x="935" y="1274" width="83" height="32" fill="black"></rect>
+<rect x="935" y="1483" width="83" height="18" fill="black"></rect>
+<rect x="951" y="1685" width="50" height="18" fill="black"></rect>
+<rect x="924" y="1864" width="104" height="32" fill="black"></rect>
+<rect x="924" y="2050" width="104" height="32" fill="black"></rect>
+<rect x="1101" y="2158" width="71" height="18" fill="black"></rect>
+<rect x="1261" y="2259" width="71" height="18" fill="black"></rect>
+<rect x="1244" y="2382" width="104" height="32" fill="black"></rect>
+<rect x="764" y="2630" width="104" height="32" fill="black"></rect>
+<rect x="444" y="2773" width="104" height="32" fill="black"></rect>
+<rect x="604" y="2893" width="104" height="18" fill="black"></rect>
+</mask></svg></svg></div></div>
+  </div>
+  <div class="deep-edit-panel" id="deep-edit-panel">
+    <input type="text" id="deep-edit-input" placeholder="描述你想如何修改这张图…" />
+    <button class="action-button deep-edit-submit" id="deep-edit-submit" type="button">深度编辑</button>
+  </div>
+  <p class="deep-edit-error" id="deep-edit-error"></p>
+  <div class="modal-overlay" id="api-key-modal">
+    <div class="modal-dialog">
+      <h3>配置编辑额度 Key</h3>
+      <p class="modal-desc">填写邮件发给您的 ContextWeave Key（含 50 次额度）。浏览器本地保存，深度编辑时由服务端核对额度。</p>
+      <input type="password" id="api-key-input" placeholder="邮件中的 ContextWeave Key" autocomplete="off" />
+      <p class="modal-status" id="api-key-status"></p>
+      <div class="modal-actions">
+        <button id="api-key-save" class="primary" type="button">保存</button>
+        <button id="api-key-close" type="button">关闭</button>
+      </div>
+      <a class="modal-link" href="https://pptx.chenxitech.site/feedback?session_id=7f1e0794-27c9-4381-9979-98d2c865c818&amp;run_id=7af0434c-f548-4fa6-867a-2525bc7caa0a" target="_blank" rel="noopener noreferrer">没有 Key？提交反馈领取 →</a>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const visioButton = document.getElementById("download-visio-button");
+      const otherButton = document.getElementById("download-other-button");
+      const formatSelect = document.getElementById("ppt-format");
+      const downloadStatus = document.getElementById("download-status");
+      const exportEndpoint = "https://pptx.chenxitech.site/export-session/browser";
+      const sessionID = "7f1e0794-27c9-4381-9979-98d2c865c818";
+      const canvas = document.querySelector(".canvas");
+      if (!visioButton || !otherButton || !canvas) {
+        return;
+      }
+      
+      const tabButtons = document.querySelectorAll(".tab-button");
+      const tabContents = document.querySelectorAll(".tab-content");
+      const viewport = canvas.querySelector(".diagram-viewport");
+      const viewButtons = canvas.querySelectorAll(".view-button");
+      const viewStatus = canvas.querySelector(".view-status");
+      let viewMode = "width";
+
+      function activeFrame() {
+        const activeContent = canvas.querySelector(".tab-content.active");
+        return (activeContent || viewport).querySelector(".diagram-frame");
+      }
+
+      function updateView(resetScroll) {
+        const frame = activeFrame();
+        const svg = frame && frame.querySelector("svg");
+        if (!svg) return;
+        const box = svg.viewBox && svg.viewBox.baseVal;
+        const declaredWidth = Number((svg.getAttribute("width") || "").replace(/px$/, ""));
+        const declaredHeight = Number((svg.getAttribute("height") || "").replace(/px$/, ""));
+        const width = declaredWidth > 0 ? declaredWidth : box && box.width;
+        const height = declaredHeight > 0 ? declaredHeight : box && box.height;
+        if (!(width > 0 && height > 0)) return;
+
+        // Measure the unscaled SVG text. Keep the source SVG untouched so export
+        // and embedded tooltip code retain their original attributes and styles.
+        let minFontSize = Infinity;
+        svg.querySelectorAll("text, tspan").forEach(text => {
+          const size = parseFloat(window.getComputedStyle(text).fontSize);
+          if (size > 0 && text.textContent.trim()) minFontSize = Math.min(minFontSize, size);
+        });
+        const intrinsicScale = box && box.width > 0 && box.height > 0 ? Math.min(width / box.width, height / box.height) : 1;
+        const readableScale = Number.isFinite(minFontSize) ? Math.min(1, 12 / (minFontSize * intrinsicScale)) : 0.75;
+        // Reserve a scrollbar gutter so remeasuring cannot oscillate at the edge.
+        const availableWidth = Math.max(1, viewport.clientWidth - 18);
+        const availableHeight = Math.max(1, viewport.clientHeight - 18);
+        let scale = 1;
+        if (viewMode === "width") scale = Math.max(readableScale, Math.min(1, availableWidth / width));
+        if (viewMode === "all") scale = Math.min(1, availableWidth / width, availableHeight / height);
+        frame.style.width = (width * scale) + "px";
+        frame.style.height = (height * scale) + "px";
+        const scrollable = width * scale > availableWidth || height * scale > availableHeight;
+        viewStatus.textContent = Math.round(scale * 100) + "%" + (scrollable ? " · 可滚动查看" : "");
+        if (resetScroll) {
+          viewport.scrollLeft = 0;
+          viewport.scrollTop = 0;
+        }
+      }
+
+      viewButtons.forEach(button => {
+        button.addEventListener("click", () => {
+          viewMode = button.getAttribute("data-view");
+          viewButtons.forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+          updateView(true);
+        });
+      });
+      window.addEventListener("resize", () => updateView(false));
+      canvas.addEventListener("diagram-updated", () => updateView(true));
+      updateView(false);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => updateView(false));
+      
+      tabButtons.forEach(button => {
+        button.addEventListener("click", () => {
+          tabButtons.forEach(btn => btn.classList.remove("active"));
+          tabContents.forEach(content => content.classList.remove("active"));
+          
+          button.classList.add("active");
+          const targetId = button.getAttribute("data-target");
+          const targetContent = document.getElementById(targetId);
+          if (targetContent) {
+            targetContent.classList.add("active");
+          }
+          updateView(true);
+        });
+      });
+
+      function downloadSVG() {
+        let svg = null;
+        if (tabContents.length > 0) {
+          const activeContent = document.querySelector(".tab-content.active");
+          if (activeContent) {
+            svg = activeContent.querySelector("svg");
+          }
+        } else {
+          svg = canvas.querySelector("svg");
+        }
+        
+        if (!svg) {
+          downloadStatus.textContent = "当前页面未找到可导出的 SVG";
+          return;
+        }
+        const serializer = new XMLSerializer();
+        let svgSource = serializer.serializeToString(svg);
+        if (!svgSource.includes("xmlns=")) {
+          svgSource = svgSource.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+        }
+        if (!svgSource.includes("xmlns:xlink=")) {
+          svgSource = svgSource.replace("<svg", '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+        }
+        const blob = new Blob([svgSource], { type: "image/svg+xml;charset=utf-8" });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        
+        let dlName = "diagram-7f1e0794-27c9-4381-9979-98d2c865c818.svg";
+        if (tabContents.length > 0) {
+          const activeBtn = document.querySelector(".tab-button.active");
+          if (activeBtn) {
+            dlName = dlName.replace(".svg", "-" + activeBtn.textContent.trim() + ".svg");
+          }
+        }
+        link.download = dlName;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      }
+
+      function downloadSessionFormat(format, button) {
+        if (format === "svg") {
+          downloadSVG();
+          return;
+        }
+        if (!sessionID) {
+          downloadStatus.textContent = "当前页面缺少会话信息，无法导出 Office 文件";
+          return;
+        }
+        button.disabled = true;
+        downloadStatus.textContent = "正在生成文件…";
+        fetch(exportEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionID, format: format })
+        }).then(function (response) {
+          return response.json().then(function (data) {
+            if (!response.ok || data.status !== "ok") {
+              throw new Error((data.error && data.error.message) || data.detail || "导出失败");
+            }
+            return data;
+          });
+        }).then(function (data) {
+          if (!data.download_url) throw new Error("服务端未返回下载地址");
+          const link = document.createElement("a");
+          link.href = data.download_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          downloadStatus.textContent = "文件已生成，下载即将开始";
+        }).catch(function (error) {
+          downloadStatus.textContent = error.message || "导出失败，请稍后重试";
+        }).finally(function () {
+          button.disabled = false;
+        });
+      }
+
+      visioButton.addEventListener("click", function () {
+        downloadSessionFormat("vsdx-native", visioButton);
+      });
+      otherButton.addEventListener("click", function () {
+        downloadSessionFormat(formatSelect.value, otherButton);
+      });
+    })();
+  </script>
+  <script>
+    (function () {
+      var CW_SESSION_ID = "7f1e0794-27c9-4381-9979-98d2c865c818";
+      var CW_RUN_ID = "7af0434c-f548-4fa6-867a-2525bc7caa0a";
+      var API_KEY_STORAGE_KEY = "cw_quota_api_key";
+      var EDIT_ENDPOINT = "https://pptx.chenxitech.site/session/edit/browser";
+
+      var modal = document.getElementById("api-key-modal");
+      var openButton = document.getElementById("api-key-config-button");
+      var closeButton = document.getElementById("api-key-close");
+      var saveButton = document.getElementById("api-key-save");
+      var keyInput = document.getElementById("api-key-input");
+      var keyStatus = document.getElementById("api-key-status");
+      var editInput = document.getElementById("deep-edit-input");
+      var editButton = document.getElementById("deep-edit-submit");
+      var editError = document.getElementById("deep-edit-error");
+      if (!modal || !openButton || !editButton) {
+        return;
+      }
+
+      function setKeyStatus(message, ok) {
+        keyStatus.textContent = message;
+        keyStatus.className = "modal-status " + (ok ? "ok" : "err");
+      }
+
+      function openModal() {
+        var saved = localStorage.getItem(API_KEY_STORAGE_KEY);
+        if (saved) {
+          keyInput.value = saved;
+          setKeyStatus("已加载本地保存的 Key", true);
+        } else {
+          keyInput.value = "";
+          setKeyStatus("", true);
+        }
+        modal.style.display = "flex";
+      }
+
+      function closeModal() {
+        modal.style.display = "none";
+      }
+
+      function showEditError(message) {
+        editError.textContent = message;
+        editError.style.display = "block";
+      }
+
+      function hideEditError() {
+        editError.textContent = "";
+        editError.style.display = "none";
+      }
+
+      // 页面加载时若已保存 Key，则回填（password 输入框自动掩码显示）
+      var existingKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+      if (existingKey) {
+        keyInput.value = existingKey;
+      }
+
+      openButton.addEventListener("click", openModal);
+      closeButton.addEventListener("click", closeModal);
+      modal.addEventListener("click", function (event) {
+        if (event.target === modal) {
+          closeModal();
+        }
+      });
+
+      saveButton.addEventListener("click", function () {
+        var key = keyInput.value.trim();
+        if (!key) {
+          setKeyStatus("请输入 Key", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        setKeyStatus("已保存到浏览器本地", true);
+      });
+
+      editButton.addEventListener("click", function () {
+        var instruction = editInput.value.trim();
+        if (!instruction) {
+          showEditError("请先描述你想如何修改这张图");
+          return;
+        }
+        if (!CW_SESSION_ID) {
+          showEditError("当前页面缺少 session_id，无法进行深度编辑");
+          return;
+        }
+        var key = localStorage.getItem(API_KEY_STORAGE_KEY);
+        if (!key) {
+          openModal();
+          setKeyStatus("请填写并保存邮件中的额度 Key", false);
+          return;
+        }
+        hideEditError();
+        editButton.disabled = true;
+        editButton.textContent = "生成中…";
+        fetch(EDIT_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": key
+          },
+          body: JSON.stringify({ session_id: CW_SESSION_ID, instruction: instruction })
+        }).then(function (resp) {
+          return resp.json().then(function (data) {
+            if (!resp.ok) {
+              if (resp.status === 401 || resp.status === 403) {
+                throw new Error("额度 Key 无效，请核对邮件中的 ContextWeave Key");
+              }
+              if (resp.status === 402) {
+                throw new Error("编辑额度已用完，请通过页面上方的反馈入口领取更多额度");
+              }
+              var detail = (data && data.detail) ? data.detail : ("请求失败（HTTP " + resp.status + "）");
+              throw new Error(detail);
+            }
+            return data;
+          });
+        }).then(function (data) {
+          if (!data || !data.svg) {
+            throw new Error("响应中缺少 svg 内容");
+          }
+          var activeTab = document.querySelector(".tab-content.active");
+          var target = (activeTab || document.querySelector(".diagram-viewport")).querySelector(".diagram-frame");
+          target.innerHTML = data.svg;
+          document.querySelector(".canvas").dispatchEvent(new Event("diagram-updated"));
+          hideEditError();
+        }).catch(function (err) {
+          showEditError(err.message || "深度编辑失败，请稍后重试");
+        }).finally(function () {
+          editButton.disabled = false;
+          editButton.textContent = "深度编辑";
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

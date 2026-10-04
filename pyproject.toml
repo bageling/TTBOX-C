@@ -23,4 +23,8 @@ include = ["framework*", "plugins*", "ttbox_platform*", "ttbox_motion*"]
 [tool.pytest.ini_options]
 # 三套 Python 用例都是"正常入口"的一部分：裸 `python -m pytest` 即跑全量
 # （P6-2026-10-01：原先只列 2 套 ⇒ 裸入口漏跑 plugins/web/tests 的 482 条）。
-testpaths = ["framework/tests", "ttbox_platform/tests", "plugins/web/tests"]
+# ★ core/tests 也在内（2026-10-04）：那里放的是 **C++ 代码的结构守卫**
+#   （如 test_core_app_split_layout.py锁 Application 四 TU 的成员归属）。
+#   它们是 pytest 用例但不在 plugins/web 下，漏列就会"没人跑"——
+#   而没跑过的检查等于没有检查。
+testpaths = ["framework/tests", "ttbox_platform/tests", "plugins/web/tests", "core/tests"]

@@ -41,8 +41,22 @@ namespace {
 
 // 深合并：src 的键覆盖 dst；双方均为 object 时递归，否则整体替换。
 // 与 SET_CONFIG 的现有语义一致（runtime_profile 等嵌套对象按键合并）。
+//
+// ★ 2026-10-04 修正（cppcheck nullPointerRedundantCheck 报的"理论崩溃"）：
+//   原判据 `if (!dst || !dst->is_object() || !src.is_object()) { *dst = src; return; }`
+//   —— 短路求值下，`!dst` 为真时**下一行 `*dst = src` 立刻解引用空指针**。
+//   即"判空保护"本身是空指针崩溃的入口。
+//   实际无法触发：全部 3 个调用点都传栈上对象的地址（&merged / &base / &child），
+//   不存在 null。但**保护写成崩溃入口**本身就是坑 —— 后来者以为"这里判过空了"，
+//   实际判空后立刻崩。
+//   ⇒ 改为显式前置契约：dst 必须有效（nullptr 直接 return，不静默、也不假装合并）。
 void deep_merge(JsonValue* dst, const JsonValue& src) {
-    if (!dst || !dst->is_object() || !src.is_object()) {
+    if (dst == nullptr) {
+        // 只有一处能传 null：递归调用（&child，永不为 null）与两个栈上对象地址。
+        // 真传进来说明调用方有 bug —— 不静默兜底、不崩，直接返回让上层看出异常。
+        return;
+    }
+    if (!dst->is_object() || !src.is_object()) {
         *dst = src;
         return;
     }

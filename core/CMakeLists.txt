@@ -44,6 +44,16 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.20 相对 V1.0.19（2026-10-04）：
+#                       · core 结构：Application.cpp 按职责拆成 4 个编译单元
+#                         （2341 → 1086行，只搬定义不改逻辑，36 个成员逐字节一致）；
+#                         共享辅助与 shutdown 标志提到头文件（拆 TU 的硬前提）。
+#                       · core 体检（cppcheck 首跑）：修ConfigManager 空指针保护写成
+#                         崩溃入口、ModelRegistry 变量遮蔽、3 处析构调虚函数加防误改注释；
+#                         标注 5 处死函数 + 1 组假覆盖测试（ModelRuntimeState 已被
+#                         model_ready()取代，生产 0 引用）。
+#                       · web 层：修 hub 绑定在动态加载路径下 KeyError
+#                         （framework 两条用例自 S9/S10 起一直红，stash 验证过）。
 #   V1.0.19 相对 V1.0.18（2026-10-03）：
 #                       · web 层：轮询路径加签名守卫（静止 DOM 变更 -75%）、
 #                         连接状态三处误报修复（阈值/超时/首屏文案）。
@@ -51,7 +61,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.19 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.20 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -265,6 +275,15 @@ endif()
 if(TTBOX_CORE_HAS_RKNN OR WIN32)
   list(APPEND CORE_SOURCES
     src/app/Application.cpp
+    # ★ 2026-10-04（S1）：Application.cpp 按职责拆成 4 个 TU。
+    #   **必须与 Application.cpp 同条件编入** —— 三个新文件里的成员定义同样无条件引用
+    #   WorkerPool / RKNNEngine（build_runtime_params / switch_active_model_runtime 等），
+    #   少编一个就是链接期 undefined reference。
+    #   ApplicationRuntime.cpp 依赖 build_runtime_params/switch_active_model_runtime
+    #   等带 RKNN 面的成员；ApplicationLicense/Ipc 依赖 RuntimeProfile + IO。
+    src/app/ApplicationIpc.cpp
+    src/app/ApplicationLicense.cpp
+    src/app/ApplicationRuntime.cpp
     src/runtime/CoreRuntime.cpp
     src/runtime/HardwareRunner.cpp
   )
@@ -645,6 +664,16 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_aim_target_mailbox tests/test_aim_target_mailbox.cpp)
   target_link_libraries(test_aim_target_mailbox PRIVATE ttbox_core)
   add_test(NAME test_aim_target_mailbox COMMAND test_aim_target_mailbox)
+
+  # 选靶静默行为回归：FOV 半径/置信度/贴边剔除/轨迹宽限/reset/优先级（不需要硬件）
+  add_executable(test_target_selector tests/test_target_selector.cpp)
+  target_link_libraries(test_target_selector PRIVATE ttbox_core)
+  add_test(NAME test_target_selector COMMAND test_target_selector)
+
+  # 深合并语义 + 空指针契约（2026-10-04 体检后P1 修复的护栏；不需要硬件）
+  add_executable(test_config_deep_merge tests/test_config_deep_merge.cpp)
+  target_link_libraries(test_config_deep_merge PRIVATE ttbox_core)
+  add_test(NAME test_config_deep_merge COMMAND test_config_deep_merge)
 
   # 瞬时帧率计（滚动窗口）回归：面板"检测帧率缓慢爬升"是累计平均口径错，非性能问题
   add_executable(test_frame_rate_meter tests/test_frame_rate_meter.cpp)

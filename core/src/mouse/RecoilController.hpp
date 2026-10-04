@@ -76,6 +76,11 @@ public:
 
     // 开火键是否按住：语义与 update() 内判据**完全同源**（同一 hotkey_hit、
     // 同一 hotkey/hotkey2/hotkey_mode），供其它模块复用。
+    //
+    // ★ 2026-10-04 代码体检：**本函数生产零引用**，但**不是 bug**，别再顺着它查扳机。
+    //   真实判定在 update() 内部：AimThread.cpp:626 调 `recoil_.update(fire_bits, ...)`，
+    //   update() 自己调 hotkey_hit(bits, hotkey, hotkey2, hotkey_mode) —— 逻辑是通的。
+    //   本函数只是把同一判据暴露给外部的预留口（当前无人用）。
     static bool fire_hotkey_active(uint16_t bits, const RecoilConfig& cfg) {
         return hotkey_hit(bits, cfg.hotkey, cfg.hotkey2, cfg.hotkey_mode);
     }

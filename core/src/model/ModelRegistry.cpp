@@ -643,11 +643,16 @@ bool ModelRegistry::install(const std::string& model_id, std::string* error) {
         // 网络/IPC 可能在安装已完成后丢失响应，客户端随后重发同一请求。
         // 若 installed 与 staging manifest 的 checksum 完全相同，视为同一安装事务的
         // 幂等重放并返回成功；同 ID 不同内容仍严格拒绝，绝不静默覆盖。
-        std::string staging_manifest_text;
+        // ★ 2026-10-04 改名（cppcheck shadowVariable）：原先内层又声明了一个
+        //   `staging_manifest_text`，与 L611 的外层同名。
+        //   行为恰好正确（内层读的是同一个 sd + "/manifest.json"），但**读代码会看错作用域**——
+        //   将来外层改成别的路径，内层仍读旧路径，且编译器一声不吭。
+        //   改名为 existing_staging_text，与外层 staging_manifest_text 明确区分。
+        std::string existing_staging_text;
         std::string installed_manifest_text;
-        if (read_file(sd + "/manifest.json", &staging_manifest_text) &&
+        if (read_file(sd + "/manifest.json", &existing_staging_text) &&
             read_file(id + "/manifest.json", &installed_manifest_text)) {
-            const auto staging_parsed = json_parse(staging_manifest_text);
+            const auto staging_parsed = json_parse(existing_staging_text);
             const auto installed_parsed = json_parse(installed_manifest_text);
             if (staging_parsed.ok && installed_parsed.ok) {
                 const ModelManifest staging_manifest = ModelManifest::from_json(staging_parsed.value);
