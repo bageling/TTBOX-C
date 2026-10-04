@@ -30,7 +30,7 @@ DetectionBox make_box(float cx, float cy, float w, float h, float score = 0.9f,
     return b;
 }
 
-// 默认配置：ROI 640x640、fov_range=1.0⇒ 搜索半径 320、置信度 0.25。
+// 默认配置：ROI 640x640、fov_range=1.0 ⇒ FOV 半径 640（全帧短边）、置信度 0.25。
 TargetSelectorConfig base_cfg() {
     TargetSelectorConfig cfg;
     cfg.roi_w = 640;
@@ -101,19 +101,20 @@ TEST(target_selector_picks_single_confident_box) {
 // ---------- ROI 半径：搜索半径外必须丢 ----------
 
 TEST(target_selector_rejects_box_outside_fov_radius) {
-    // ★ 核心静默行为：FOV 半径=320px（ROI 640 的 fov_range=1.0 ⇒半宽）。
-    //   准星在 (320,320)，把框放到 x=600（距 280px）**之内**⇒ 应命中；
-    //   放到 x=900（距 580px）**之外** ⇒ 应被丢掉。
+    // ★ 核心静默行为：FOV 半径 = 全帧短边 × fov_range。ROI 640 ⇒ 短边 640。
+    //   这里 fov_range=0.5 ⇒ 半径 320px。准星在 (320,320)，把框放到 x=600（落点距 280）
+    //   **之内** ⇒ 应命中；放到 x=900（落点距 580）**之外** ⇒ 应被丢掉。
     TargetSelector sel;
-    const auto cfg = base_cfg();
+    auto cfg = base_cfg();
+    cfg.fov_range = 0.5f;   // 半径 320
     {
         std::vector<DetectionBox> dets{make_box(600.0f, 320.0f, 40.0f, 40.0f, 0.9f)};
-        CHECK(sel.select(dets, cfg, 0).valid);          // 距280 < 320
+        CHECK(sel.select(dets, cfg, 0).valid);          // 落点距 280 < 320
     }
     sel.reset();
     {
         std::vector<DetectionBox> dets{make_box(900.0f, 320.0f, 40.0f, 40.0f, 0.9f)};
-        CHECK(!sel.select(dets, cfg, 0).valid);         // 距 580 > 320
+        CHECK(!sel.select(dets, cfg, 0).valid);         // 落点距 580 > 320
     }
 }
 
@@ -374,6 +375,7 @@ TEST(target_selector_keeps_normal_human_shapes) {
 
 // ② FOV 半径是真实约束：半径小 ⇒ 远处框被排除；半径大 ⇒ 又接纳。
 //    V1.0.30 之前这条是失效的（fov.radius 被多乘 2 ⇒ 半径恒等于画面半宽）。
+//    ★ 半径基准 = 全帧短边（ROI 640 ⇒ 640px），不再用 capture 半宽。
 TEST(target_selector_fov_range_really_excludes) {
     const DetectionBox far_box = shape_box(280, 20, 360, 250, 0);
     for (float r : {0.3f, 0.5f, 0.8f, 1.0f}) {
@@ -381,7 +383,7 @@ TEST(target_selector_fov_range_really_excludes) {
         TargetSelectorConfig cfg = shape_cfg(640);
         cfg.fov_range = r;
         const auto got = sel.select({far_box}, cfg, 1000);
-        const float radius_px = 320.0f * r;
+        const float radius_px = 640.0f * r;
         const float ax = 280 + 80 * 0.5f, ay = 20 + 230 * 0.2f;
         const float dx = ax - 320.0f, dy = ay - 320.0f;
         const float d = std::sqrt(dx * dx + dy * dy);
@@ -399,5 +401,5 @@ TEST(target_selector_reports_actual_fov_radius) {
     TargetSelectorConfig cfg = shape_cfg(640);
     cfg.fov_range = 0.5f;
     sel.select({shape_box(250, 90, 390, 470, 0)}, cfg, 1000);
-    CHECK_EQ(sel.last_fov_radius_px(), 160.0f);   // 320 × 0.5
+    CHECK_EQ(sel.last_fov_radius_px(), 320.0f);   // 全帧短边 640 × 0.5
 }

@@ -27,7 +27,7 @@ namespace {
 
 TargetSelectorConfig make_cfg() {
     TargetSelectorConfig c;
-    c.fov_range = 1.0f;      // 搜索半径 = min(640,480)/2 = 240px，中心 (320,240)
+    c.fov_range = 1.0f;      // 搜索半径 = min(640,480) = 480px（全帧短边），中心 (320,240)
     c.confidence = 0.25f;
     c.roi_w = 640;
     c.roi_h = 480;
@@ -167,7 +167,7 @@ TEST(selector_continuity_for_same_box) {
 
 // (6) 切靶确认窗：丢锁后新目标要在同一处连续待够帧数才切
 // 布局：中心 (320,240)，锁定 A(320,240)；A 消失后场上剩「候选 + 480/230px 处的陪跑框」。
-// 候选都放在 A 的 track_lock 匹配半径（对角 134 + 8 = 142px）之外、FOV 半径 240 之内，
+// 候选都放在 A 的 track_lock 匹配半径（对角 134 + 8 = 142px）之外、FOV 半径 480 之内，
 // 且比陪跑框更近中心 ⇒ 每帧都会被选中 ⇒ 真正走到确认窗。
 TEST(selector_switch_confirm_window) {
     auto cfg = make_cfg();   // switch_confirm_frames 默认 4

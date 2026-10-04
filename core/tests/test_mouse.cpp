@@ -46,7 +46,7 @@ TEST(mouse_target_selector_fov_and_confidence) {
     dets.push_back(far);
     dets.push_back(near);
 
-    // fov_range=1：半径=160，两者都在；取最近（near）
+    // fov_range=1：半径=320（全帧短边），两者都在；取最近（near）
     auto s = sel.select(dets, cfg);
     CHECK(s.valid);
     CHECK_EQ(static_cast<int>(s.box.x1), 150);
@@ -56,7 +56,7 @@ TEST(mouse_target_selector_fov_and_confidence) {
     s = sel.select(dets, cfg);
     CHECK(!s.valid);
 
-    // fov_range=0.1：半径=16，far(中心距 155) 被过滤；near(距 0) 仍命中
+    // fov_range=0.1：半径=32，far(落点距 ~160) 被过滤；near(距 0) 仍命中
     cfg.confidence = 0.5f;
     cfg.fov_range = 0.1f;
     std::vector<DetectionBox> only_far = {far};
@@ -81,11 +81,11 @@ TEST(mouse_target_selector_class_filter) {
     CHECK(sel.select(dets, cfg).valid);
 }
 
-// 瞄准范围 = 截取尺寸内划最大的圆形（业主口径，2026-09-24）。
-// 框坐标是整帧坐标系（AimThread 传 task.frame_width/height），所以整帧尺寸算出来的
-// 半径 min(2560,1440)/2 = 720px 已经大于检测区半宽（capture 640 ⇒ 320px）——
-// 圆心到框的距离是拿 aim_ratio 算的，故这里把 aim_ratio 设 0.5 让几何直白。
-TEST(mouse_target_selector_aim_range_is_capture_inscribed_circle) {
+// ★ FOV 半径 = 全帧短边 × fov_range（固定屏幕范围，不随截图缩放）。
+//   框坐标是整帧坐标系（AimThread 传 task.frame_width/height），整帧 2560×1440 ⇒ 短边 1440。
+//   圆心 = 全帧中心 (1280,720)。落点由 aim_ratio 定位（这里 0.5 让几何直白）。
+//   fov_range=0.2 ⇒ 半径 288px：inner 落点距 282.8 在圆内、corner 落点距 339.4 在圆外。
+TEST(mouse_target_selector_fov_radius_is_full_frame_short_side) {
     aim::TargetSelector sel;
     aim::TargetSelectorConfig cfg;
     cfg.roi_w = 2560;  // 整帧（框坐标系）
@@ -94,20 +94,20 @@ TEST(mouse_target_selector_aim_range_is_capture_inscribed_circle) {
     cfg.center_y = 0.5f;   // FOV 中心 = (1280, 720)
     cfg.aim_ratio_x = 0.5f;
     cfg.aim_ratio_y = 0.5f;
-    cfg.fov_range = 1.0f;
+    cfg.fov_range = 0.2f;
     cfg.confidence = 0.3f;
-    cfg.search_radius_px = 320.0f;   // 截取尺寸 640×640 内划最大圆
+    cfg.search_radius_px = 320.0f;   // 裁剪区半宽（只用于贴边剔除，不影响 FOV 半径）
 
-    // inner 中心 (1480,920)：距中心 282.8px ⇒ 圆内
+    // inner 落点 (1480,920)：距中心 282.8px ⇒ 圆内
     DetectionBox inner;
     inner.x1 = 1470; inner.y1 = 910; inner.x2 = 1490; inner.y2 = 930;
     inner.score = 0.9f; inner.class_id = 0;
-    // corner 中心 (1520,960)：距中心 339.4px ⇒ 圆外（但在旧口径 720px 圆内）
+    // corner 落点 (1520,960)：距中心 339.4px ⇒ 圆外
     DetectionBox corner;
     corner.x1 = 1510; corner.y1 = 950; corner.x2 = 1530; corner.y2 = 970;
     corner.score = 0.9f; corner.class_id = 0;
 
-    // 只有角上那个 ⇒ 被圆滤掉（这一条就是本次修复的墓碑）
+    // 只有角上那个 ⇒ 被圆滤掉
     std::vector<DetectionBox> only_corner = {corner};
     CHECK(!sel.select(only_corner, cfg).valid);
 
@@ -119,14 +119,14 @@ TEST(mouse_target_selector_aim_range_is_capture_inscribed_circle) {
     CHECK(s.valid);
     CHECK_EQ(static_cast<int>(s.box.x1), 1470);
 
-    // 半径随 fov_range 缩放：0.5 ⇒ 160px，连 inner（282.8px）也出圈
-    cfg.fov_range = 0.5f;
+    // 半径随 fov_range 缩放：0.15 ⇒ 216px，连 inner（282.8px）也出圈
+    cfg.fov_range = 0.15f;
     std::vector<DetectionBox> only_inner = {inner};
     CHECK(!sel.select(only_inner, cfg).valid);
 
-    // search_radius_px = 0 ⇒ 回退旧口径 min(roi_w,roi_h)/2 = 720px：
-    // 角上那个又会被收（保证未接线的调用方行为不变）
-    cfg.fov_range = 1.0f;
+    // ★ search_radius_px 现在只用于贴边剔除，不再影响 FOV 半径。
+    //   置 0 后 FOV 半径仍是 1440 × fov_range（与 search_radius_px 无关）。
+    cfg.fov_range = 0.25f;   // 半径 360 > corner 落点距 339.4 ⇒ 收进圆内
     cfg.search_radius_px = 0.0f;
     aim::TargetSelector legacy;
     CHECK(legacy.select(only_corner, cfg).valid);
