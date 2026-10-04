@@ -239,8 +239,27 @@ bool V4L2Capture::open(std::string* error) {
         const uint32_t first_h = fmt.fmt.pix_mp.height;
 
         // ---- 4. 等待格式稳定（hdmirx 开机过渡）----
-        // 延迟 800ms 后重新读取格式，如果改变了说明驱动还在过渡中
-        std::this_thread::sleep_for(std::chrono::milliseconds(800));
+        // 延迟 800ms 后重新读取格式，如果改变了说明驱动还在过渡中。
+        //
+        // ★ 2026-10-04 性能修复：**只在冷打开时等**，热重开（stop→start，设备未断电）
+        //   跳过。实测该等待占start 总耗时 997ms 的 80%（见头文件注释）。
+        //   为什么可以跳：800ms 守的是"hdmirx 刚上电、格式还在变"；而 stop→start 期间
+        //   设备节点一直开着（我们只是 close 了 fd，驱动仍在工作），格式早已稳定。
+        //   判据 = 距上次 close 不足 5s ⇒ 热重开；否则（含从未打开过）按冷启动等满。
+        //   ★ 保守起见：跳过后仍会做 G_FMT 重读比对（下面 fmt2那段照旧执行），
+        //     一旦发现格式真的变了，仍走原有的重试逻辑 —— 只是不再"主动等"。
+        const double now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now().time_since_epoch())
+                                  .count();
+        const bool warm_reopen =
+            last_close_ms_ > 0.0 && (now_ms - last_close_ms_) < kWarmReopenWindowMs;
+        if (warm_reopen) {
+            TTBOX_LOG_INFO("V4L2 热重开（距上次关闭 "
+                           + std::to_string(static_cast<int>(now_ms - last_close_ms_))
+                           + " ms < 5s，跳过格式稳定等待）");
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(800));
+        }
 
         struct v4l2_format fmt2 {};
         fmt2.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -506,6 +525,8 @@ void V4L2Capture::stop() {
 }
 
 void V4L2Capture::close() {
+    // 本次 close 是否真的持有设备（决定要不要更新时间戳，见函数末尾注释）
+    const bool had_device = (fd_ >= 0) || !impl_->buffers.empty() || opened_;
     stop();
     // ★ 2026-09-23 修：原来是 `if (!opened_) return;`，而 opened_ 只在 open() **末尾**
     //   才置真 ⇒ open() 中途失败（QUERYBUF / mmap / EXPBUF / REQBUFS，见 :335/:364/:382
@@ -530,6 +551,16 @@ void V4L2Capture::close() {
         fd_ = -1;
     }
     opened_ = false;
+    // 记下关闭时刻：供下次 open() 判断是"热重开"（跳过 800ms 格式稳定等待）
+    // 还是"冷打开"（照旧等满）。见头文件 last_close_ms_ 注释。
+    // ★ 只在**真的持有过设备**时记录：open() 的重试循环里每轮开头都会调 close()，
+    //   那时若还没成功打开过设备就更新时间戳，会把"冷启动"误判成"热重开" ⇒
+    //   开机第一次反而跳过等待 ⇒ 可能拿到过渡中的格式。所以判据是 fd_ 曾 >= 0。
+    if (had_device) {
+        last_close_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+    }
     TTBOX_LOG_INFO("V4L2Capture close 完成（munmap + dma fd 已关闭）");
 }
 

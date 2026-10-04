@@ -201,6 +201,13 @@ public:
     void set_frame_size(uint32_t w, uint32_t h);
     void stop();
 
+    // ★ 2026-10-04：只停线程、**保留 worker 对象**（模型/NPU 上下文留着）。
+    //   与 stop() 的唯一区别是不清 workers_ ⇒ 下次 start_loops() 只需拉起线程，
+    //   省掉整个模型加载（板端实测可省 ~200ms）。
+    //   代价：NPU 三个核心与模型内存**常驻**。
+    //   ★ 用哪个由产品语义定："停止"若要彻底释放资源就用 stop()。
+    void stop_keep_workers();
+
     size_t worker_count() const { return workers_.size(); }
     const std::vector<std::unique_ptr<InferenceWorker>>& workers() const { return workers_; }
 

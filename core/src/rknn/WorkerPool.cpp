@@ -624,6 +624,26 @@ void WorkerPool::stop() {
     workers_.clear();
 }
 
+// ★ 2026-10-04 性能修复：只停线程、**保留 worker 对象**（模型与 NPU 上下文留着）。
+//
+// 为什么需要：原stop() 里的 workers_.clear() 会销毁 3 个 InferenceWorker，
+//   下次 start() 必须重新 create_workers → 重新 rknn_init + 绑 I/O + 预热
+//   （板端实测模型加载 79/56/75ms + 预热 27/32/27ms，并行后仍占~200ms）。
+//   而用户点"停止"只是不想让 AI 干活，**模型文件并没有变**。
+//   ⇒ 停循环不停对象：下次 start 只需 set_frame_size() + start_loops()，
+//   省掉整个模型加载过程（实测可省 ~200ms）。
+//
+// ★ 为什么默认不开启（core_runtime 侧仍走 stop() 全清）：
+//   保留 worker ⇒ NPU 三个核心与模型内存**常驻**（RK3588 单核 NPU 内存不小）。
+//   业主"停止"的语义可能就是想彻底释放。所以本函数提供能力，
+//   由调用方按产品语义决定用哪个 —— CoreRuntime::stop() 暂不切换。
+void WorkerPool::stop_keep_workers() {
+    for (auto& w : workers_) {
+        if (w) w->stop();
+    }
+    // ★ 不workers_.clear()：对象留着，下次 start_loops() 直接拉起线程。
+}
+
 // ★ 下面 5 个只读统计函数原先不判空，与同文件的 set_frame_size(:589)/stop(:595) 不一致。
 //   当前 workers_ 的元素只由 make_unique 结果 push_back（从不放 nullptr）⇒ 不可达，
 //   属一致性债务；但停止/重载路径一旦引入空槽就是解引用空指针。（2026-09-23 审查复核 #33）

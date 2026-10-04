@@ -44,6 +44,13 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.21 相对 V1.0.20（2026-10-04）：
+#                       · 启停性能：V4L2 打开的 800ms 格式稳定等待改为**只在冷打开时等**
+#                         （停→启时设备未断电、格式早已稳定）；实测 start997ms → ~200ms。
+#                       · WorkerPool 新增 stop_keep_workers()：停线程但保留 worker
+#                         （模型/NPU 上下文常驻，下次 start_loops 省掉模型加载 ~200ms）。
+#                         ★ 能力已备，CoreRuntime::stop()暂不切换（"停止"要否释放 NPU
+#                           由产品语义定，见 WorkerPool.hpp 注释）。
 #   V1.0.20 相对 V1.0.19（2026-10-04）：
 #                       · core 结构：Application.cpp 按职责拆成 4 个编译单元
 #                         （2341 → 1086行，只搬定义不改逻辑，36 个成员逐字节一致）；
@@ -61,7 +68,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.20 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.21 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
