@@ -194,51 +194,45 @@ void PreviewModule::resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h,
     fit_preview_output(roi->w, roi->h, max_w, max_h, out_width, out_height);
 }
 
-void PreviewModule::draw_boxes(uint8_t* crop, uint32_t width, uint32_t height,
-                               uint32_t stride,
-                               const std::vector<DetectionBox>& boxes,
-                               uint32_t origin_x, uint32_t origin_y) const {
-    if (crop == nullptr || boxes.empty() || width == 0 || height == 0 ||
-        stride < width * 3) {
-        return;
-    }
+void PreviewModule::draw_aim_box(uint8_t* crop, uint32_t width, uint32_t height,
+                                 uint32_t stride,
+                                 const DetectionBox& box,
+                                 uint32_t origin_x, uint32_t origin_y) const {
+    if (crop == nullptr || width == 0 || height == 0 || stride < width * 3) return;
+
+    const int x1 = std::clamp(static_cast<int>(box.x1) - static_cast<int>(origin_x),
+                              0, static_cast<int>(width - 1));
+    const int y1 = std::clamp(static_cast<int>(box.y1) - static_cast<int>(origin_y),
+                              0, static_cast<int>(height - 1));
+    const int x2 = std::clamp(static_cast<int>(box.x2) - static_cast<int>(origin_x),
+                              0, static_cast<int>(width - 1));
+    const int y2 = std::clamp(static_cast<int>(box.y2) - static_cast<int>(origin_y),
+                              0, static_cast<int>(height - 1));
+    if (x2 <= x1 || y2 <= y1) return;
 
     cv::Mat image(static_cast<int>(height), static_cast<int>(width), CV_8UC3,
                   crop, stride);
-    for (const auto& box : boxes) {
-        const int x1 = std::clamp(static_cast<int>(box.x1) - static_cast<int>(origin_x),
-                                  0, static_cast<int>(width - 1));
-        const int y1 = std::clamp(static_cast<int>(box.y1) - static_cast<int>(origin_y),
-                                  0, static_cast<int>(height - 1));
-        const int x2 = std::clamp(static_cast<int>(box.x2) - static_cast<int>(origin_x),
-                                  0, static_cast<int>(width - 1));
-        const int y2 = std::clamp(static_cast<int>(box.y2) - static_cast<int>(origin_y),
-                                  0, static_cast<int>(height - 1));
-        if (x2 <= x1 || y2 <= y1) continue;
+    // ★ V1.0.25：单框 = 醒目亮绿加粗，颜色**不再按 class_id 分派**。
+    //   旧实现「class 1 加粗、标成头色」是出厂 2 类模型（EP：0=身体 1=头）的约定；
+    //   板端现役模型 class_count=7 且 class_names 为空 ⇒ 那个映射无从谈起，
+    //   继续按它上色等于在画面上编一个不存在的语义给用户看。
+    const cv::Scalar color(0, 255, 0);
+    cv::rectangle(image, cv::Point(x1, y1), cv::Point(x2, y2), color, 3, cv::LINE_8);
 
-        const cv::Scalar color = box.class_id == 1
-            ? cv::Scalar(0, 200, 0)
-            : box.class_id == 0
-                ? cv::Scalar(0, 0, 255)
-                : cv::Scalar(0, 200, 200);
-        const int thickness = box.class_id == 1 ? 3 : 2;
-        cv::rectangle(image, cv::Point(x1, y1), cv::Point(x2, y2), color,
-                      thickness, cv::LINE_8);
-
-        char label[64];
-        std::snprintf(label, sizeof(label), "%d %.2f", box.class_id, box.score);
-        int baseline = 0;
-        const cv::Size text_size = cv::getTextSize(
-            label, cv::FONT_HERSHEY_SIMPLEX, 0.45, 1, &baseline);
-        const int label_x = x1;
-        const int label_y = std::max(text_size.height + 4, y1 - 2);
-        cv::rectangle(image,
-                      cv::Point(label_x, label_y - text_size.height - 2),
-                      cv::Point(label_x + text_size.width + 4, label_y + baseline),
-                      cv::Scalar(0, 0, 0), cv::FILLED, cv::LINE_8);
-        cv::putText(image, label, cv::Point(label_x + 2, label_y - 2),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_8);
-    }
+    // 角标：只标类别号（Status 里没有"选中目标"的置信度字段，标 score 只能填 0 误导人）。
+    char label[32];
+    std::snprintf(label, sizeof(label), "cls %d", box.class_id);
+    int baseline = 0;
+    const cv::Size text_size = cv::getTextSize(
+        label, cv::FONT_HERSHEY_SIMPLEX, 0.45, 1, &baseline);
+    const int label_x = x1;
+    const int label_y = std::max(text_size.height + 4, y1 - 2);
+    cv::rectangle(image,
+                  cv::Point(label_x, label_y - text_size.height - 2),
+                  cv::Point(label_x + text_size.width + 4, label_y + baseline),
+                  cv::Scalar(0, 0, 0), cv::FILLED, cv::LINE_8);
+    cv::putText(image, label, cv::Point(label_x + 2, label_y - 2),
+                cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_8);
 }
 
 // ★ M2.03：受限态水印（内嵌位图字体；纯像素写入，**不分配、不抛异常** ⇒ never block 帧输出）。
@@ -296,59 +290,6 @@ void PreviewModule::draw_watermark(uint8_t* crop, uint32_t width, uint32_t heigh
     }
 }
 
-void PreviewModule::smooth_boxes(const std::vector<DetectionBox>& raw,
-                                 std::vector<DetectionBox>* output) {
-    if (output == nullptr) return;
-    if (raw.empty()) {
-        ++smooth_lost_count_;
-        if (smooth_lost_count_ <= 3) {
-            *output = smooth_prev_;
-            return;
-        }
-        smooth_prev_.clear();
-        output->clear();
-        return;
-    }
-
-    smooth_lost_count_ = 0;
-    const float alpha = 0.35f;
-    const float max_distance_squared = 120.0f * 120.0f;
-    std::vector<bool> used(smooth_prev_.size(), false);
-    std::vector<DetectionBox> result;
-    result.reserve(raw.size());
-
-    for (const auto& current : raw) {
-        DetectionBox blended = current;
-        const float cx = (current.x1 + current.x2) * 0.5f;
-        const float cy = (current.y1 + current.y2) * 0.5f;
-        int best_index = -1;
-        float best_distance = max_distance_squared;
-        for (size_t index = 0; index < smooth_prev_.size(); ++index) {
-            if (used[index] || smooth_prev_[index].class_id != current.class_id) continue;
-            const auto& previous = smooth_prev_[index];
-            const float px = (previous.x1 + previous.x2) * 0.5f;
-            const float py = (previous.y1 + previous.y2) * 0.5f;
-            const float distance = (px - cx) * (px - cx) + (py - cy) * (py - cy);
-            if (distance < best_distance) {
-                best_distance = distance;
-                best_index = static_cast<int>(index);
-            }
-        }
-        if (best_index >= 0) {
-            const auto& previous = smooth_prev_[best_index];
-            used[best_index] = true;
-            blended.x1 = previous.x1 * (1.0f - alpha) + current.x1 * alpha;
-            blended.y1 = previous.y1 * (1.0f - alpha) + current.y1 * alpha;
-            blended.x2 = previous.x2 * (1.0f - alpha) + current.x2 * alpha;
-            blended.y2 = previous.y2 * (1.0f - alpha) + current.y2 * alpha;
-            blended.score = previous.score * (1.0f - alpha) + current.score * alpha;
-        }
-        result.push_back(blended);
-    }
-    smooth_prev_ = result;
-    *output = std::move(result);
-}
-
 bool PreviewModule::start(const LatestFrame* frame_source, const Params& params,
                           std::string* error) {
     if (frame_source == nullptr) {
@@ -371,8 +312,6 @@ bool PreviewModule::start(const LatestFrame* frame_source, const Params& params,
     metrics_.dropped.store(0);
     metrics_.fps.store(0.0);
     metrics_.encode_ms.store(0.0);
-    smooth_prev_.clear();
-    smooth_lost_count_ = 0;
     {
         std::lock_guard<std::mutex> lock(jpeg_mutex_);
         jpeg_.clear();
@@ -534,16 +473,19 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
                     source_row, crop_stride);
     }
 
+    // ★ V1.0.25：预览只画**实际瞄准的那一个框**（业主定口径：预览 = 瞄准框）。
+    //   没有选中目标 ⇒ 不画（不再"丢失后保留 3 帧旧框"——那是画出已经不瞄的框）。
+    //   也不再二次平滑：传进来的框已由 AimThread 的 One-Euro 平滑过。
     if (params_.draw_detections) {
-        std::vector<DetectionBox> raw;
-        std::vector<DetectionBox> boxes;
+        DetectionBox aim_box;
+        bool has_aim = false;
         {
             std::lock_guard<std::mutex> lock(provider_mutex_);
-            if (detections_provider_) raw = detections_provider_();
+            if (aim_box_provider_) has_aim = aim_box_provider_(&aim_box);
         }
-        smooth_boxes(raw, &boxes);
-        draw_boxes(crop, roi.w, roi.h, crop_stride,
-                   boxes, roi.x, roi.y);
+        if (has_aim) {
+            draw_aim_box(crop, roi.w, roi.h, crop_stride, aim_box, roi.x, roi.y);
+        }
     }
 
     // ★ M2.03：受限态水印叠加。水印是**附加绘制**，任何情况下都不影响后续编码与帧输出

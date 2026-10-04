@@ -44,6 +44,34 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.25 相对 V1.0.24（2026-10-04）：**预览 = 实际瞄准的框**（业主定口径：
+#                       「预览里本来应该要画的就是实际瞄准的框」）。
+#                       · 旧：预览喂 `status().detection_boxes` = 本帧**全部**检测框，
+#                         按 class 上色（红=0 / 绿=1 加粗 / 黄=其余），两个框叠在一起
+#                         看着像"又大又含头" —— 那是候选框集合，预览在骗人；
+#                         且「class 1 = 头」是出厂 2 类模型(EP)的老约定，现役 7 类模型
+#                         class_names 为空 ⇒ 那个映射是瞎猜。
+#                       · 新：PreviewModule 只画**一个**框（`set_aim_box_provider`），
+#                         数据源 = `target_*`（控制链这一帧真在用的框）；固定醒目亮绿、
+#                         不再按 class 分派颜色、角标只留类别号（Status 无该目标置信度）。
+#                       · 删除：多框平滑 `smooth_boxes`（框已 One-Euro，再平滑只会更滞后）
+#                         与"丢失后保留 3 帧旧框"（那是画出已经不瞄的框）。
+#                       · 护栏：`core/tests/test_preview_aim_box.py`（7 条源码级 ——
+#                         PreviewModule 依赖 opencv，**host 不编译**，本机 ctest 零覆盖）。
+#   V1.0.25 相对 V1.0.24（2026-10-04）：**预览 = 实际瞄准的框**（业主定口径：
+#                       「预览里本来应该要画的就是实际瞄准的框」）。
+#                       · 旧：预览喂 `status().detection_boxes` = 本帧**全部**检测框，
+#                         按 class 上色（红=0 / 绿=1 加粗 / 黄=其余），两个框叠在一起
+#                         看着像"又大又含头" —— 那是候选框集合，预览在骗人；
+#                         且「class 1 = 头」是出厂 2 类模型(EP)的老约定，现役 7 类模型
+#                         class_names 为空 ⇒ 那个映射是瞎猜。
+#                       · 新：PreviewModule 只画**一个**框（`set_aim_box_provider`），
+#                         数据源 = `target_*`（控制链这一帧真在用的框）；固定醒目亮绿、
+#                         不再按 class 分派颜色、角标只留类别号（Status 无该目标置信度）。
+#                       · 删除：多框平滑 `smooth_boxes`（框已 One-Euro，再平滑只会更滞后）
+#                         与"丢失后保留 3 帧旧框"（那是画出已经不瞄的框）。
+#                       · 护栏：`core/tests/test_preview_aim_box.py`（7 条源码级 ——
+#                         PreviewModule 依赖 opencv，**host 不编译**，本机 ctest 零覆盖）。
 #   V1.0.24 相对 V1.0.23（2026-10-04）：**去掉 V1.0.23 的开关/配置项**，
 #   改成无条件生效的算法校正（业主口径：「不要开关，要校正算法/数学/几何」）。
 #                       · core：控制链（贴边判定/冻结/身高自校准/落点/框高/拟人化
@@ -90,7 +118,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.24 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.25 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

@@ -228,8 +228,30 @@ bool CoreRuntime::start(std::string* error) {
             preview_.reset();
         } else {
             if (preview_params.draw_detections) {
-                preview_->set_detections_provider(
-                    [this]() { return aim_thread_.status().detection_boxes; });
+                // ★★ V1.0.25（业主 2026-10-04 定口径）：预览画的必须是**实际瞄准的框**。
+                //   旧实现喂 `status().detection_boxes`（本帧**全部**检测框），于是画面上
+                //   同时出现红框(class 0)与绿框(class 1 加粗)，两个框叠在一起看着像
+                //   "又大又含头" —— 那是候选框集合，不是瞄准框，预览在骗人。
+                //   现在只喂 `target_*`（AimThread 那一帧真正在控制链上用的框，
+                //   V1.0.24 起 = 上半身虚拟框、无并集），**所见即所控**。
+                //   没有选中目标 ⇒ 返回 false ⇒ 画面不画框（诚实：此刻确实没在瞄）。
+                //   `status()` 自带锁，返回值拷贝；只取 4 个 float + 1 个 int，
+                //   比旧路径（拷贝整个 detection_boxes vector）更省。
+                preview_->set_aim_box_provider([this](DetectionBox* out) -> bool {
+                    if (out == nullptr) return false;
+                    const auto st = aim_thread_.status();
+                    if (!st.has_target) return false;
+                    if (!(st.target_x2 > st.target_x1) || !(st.target_y2 > st.target_y1)) {
+                        return false;
+                    }
+                    out->x1 = st.target_x1;
+                    out->y1 = st.target_y1;
+                    out->x2 = st.target_x2;
+                    out->y2 = st.target_y2;
+                    out->class_id = st.target_class_id;
+                    out->score = 0.0f;  // Status 无"选中目标置信度"字段，不编造
+                    return true;
+                });
             }
             TTBOX_LOG_INFO("Preview 已启动: center crop " +
                            std::to_string(preview_params.crop_width) + "x" +
