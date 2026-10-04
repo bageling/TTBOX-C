@@ -5262,20 +5262,33 @@ function bindHomeEvents() {
   on("startButton", "click", () => runUiAction(async () => {
     const runtime = (state.data && state.data.state) || {};
     const shouldStop = runtime.running || runtime.status === "starting" || runtime.status === "reconnecting";
+    // ★ 2026-10-04 手感修复之一：**把"忙态"提到所有 await 之前**。
+    //   原来的顺序是「先 await 授权恢复（两次网络往返）→ 才切忙态」，
+    //   于是"授权恰好需要恢复"的那一次点击，前几百毫秒界面**零变化** ——
+    //   正是业主说的"首次点击会卡顿"。现在点下去第一件事就是切忙态。
+    showRuntimeControlBusy(true, shouldStop);
     if (!shouldStop && needsLicenseRecovery(state.data)) {
       await refreshLicenseStatus();
       await refreshAll();
     }
     const path = shouldStop ? "/api/control/stop" : "/api/control/start";
     // ★ 2026-10-03 交互延迟修复：点击后**立即**给反馈，别让用户干等。
-    //   实测：POST /api/control/start 板端要 1070 ms（core 加载模型，物理下限），
-    //   而原来这 1 秒里按钮不置灰、文字不变、状态栏不动 ⇒ 体感就是"点了没反应"。
     //   做法：立刻把按钮切到「启动中…」并禁用，等后端返回再由 renderRuntime 还原。
-    showRuntimeControlBusy(true, shouldStop);
+    // ★ 2026-10-04 手感修复之二：**最短忙态时长 260ms**。
+    //   请求若在 260ms 内就返回（例如"已经在跑"的空操作，实测 ~60ms），
+    //   动画刚按下去就要弹回来 ⇒ 观感是"抖了一下"，比不动更难受。
+    //   等满 260ms 再复原，按压与光晕的过渡能完整走完。等待期间按钮本就
+    //   处于 disabled，用户不可能重复点，所以这 200ms 是无感的。
+    //   （CSS 里 transform 过渡 180ms，260ms 留了余量。）
+    const busyStartedAt = performance.now();
     let nextRuntime;
     try {
       nextRuntime = await api(path, { method: "POST" });
     } finally {
+      const remaining = 260 - (performance.now() - busyStartedAt);
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
       showRuntimeControlBusy(false, shouldStop);
     }
     if (state.data) {

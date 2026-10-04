@@ -9,6 +9,7 @@ namespace ttbox::core {
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
@@ -32,6 +33,26 @@ namespace {
 // ioctl 包装：统一错误处理
 int ioctl_call(int fd, unsigned long request, void* arg) {
     return ::ioctl(fd, request, arg);
+}
+
+// 本机已启动秒数（读 /proc/uptime 第一列）。读不到返回 -1 =「未知」。
+//
+// ★ 用途：判断 hdmirx 是否**早已**完成开机过渡 —— open() 里那段 800ms 等待的判据之一。
+//   hdmirx 的 format change 只发生在「盒子开机后 1~2 秒」（驱动注释），
+//   所以「盒子已启动多久」比「距上次 close 多久」更贴近这件事的真实成因。
+// ★ 失败契约：打不开 / 读失败一律返回 -1，**不抛不崩**；调用方把 -1 当「未知」，
+//   走最保守的分支（照旧等满 800ms），因此读不到 /proc/uptime 只是慢、不会错。
+double boot_uptime_sec() {
+    std::FILE* fp = std::fopen("/proc/uptime", "r");
+    if (fp == nullptr) {
+        return -1.0;
+    }
+    double up = -1.0;
+    if (std::fscanf(fp, "%lf", &up) != 1) {
+        up = -1.0;
+    }
+    std::fclose(fp);
+    return up;
 }
 
 }  // namespace
@@ -239,25 +260,56 @@ bool V4L2Capture::open(std::string* error) {
         const uint32_t first_h = fmt.fmt.pix_mp.height;
 
         // ---- 4. 等待格式稳定（hdmirx 开机过渡）----
-        // 延迟 800ms 后重新读取格式，如果改变了说明驱动还在过渡中。
+        // 原逻辑：无条件 sleep 800ms → 重新读 G_FMT 比对 → 变了就整体重试（最多 5 轮）。
         //
-        // ★ 2026-10-04 性能修复：**只在冷打开时等**，热重开（stop→start，设备未断电）
-        //   跳过。实测该等待占start 总耗时 997ms 的 80%（见头文件注释）。
-        //   为什么可以跳：800ms 守的是"hdmirx 刚上电、格式还在变"；而 stop→start 期间
-        //   设备节点一直开着（我们只是 close 了 fd，驱动仍在工作），格式早已稳定。
-        //   判据 = 距上次 close 不足 5s ⇒ 热重开；否则（含从未打开过）按冷启动等满。
-        //   ★ 保守起见：跳过后仍会做 G_FMT 重读比对（下面 fmt2那段照旧执行），
-        //     一旦发现格式真的变了，仍走原有的重试逻辑 —— 只是不再"主动等"。
+        // ★ 2026-10-04 性能修复（第二次）：把「无条件等」改成「**有证据才跳过**」。
+        //
+        //   为什么还要第二次修：上一版只让「热重开」（距上次 close < 5s）跳过，
+        //   而真实使用里几乎**每次**都是冷路径 —— 人点了停止、隔十几秒再点启动，
+        //   必然 > 5s。板端实测（V1.0.21）就是这个缺口：
+        //     冷路径 start = **1.07 s**，热路径 = **0.25 s**，差的正是这 800ms。
+        //
+        //   实测证据（板端 192.168.0.120，uptime 4.6 天）：
+        //     连续 40 次**全新 open** 读到的格式全部是 2560/1440 BGR3，一次都没变
+        //     ⇒ 驱动早已过渡完毕，这 800ms 纯属白等。
+        //
+        //   新判据（按序，命中即跳过）：
+        //     ① 热重开：距上次 close < kWarmReopenWindowMs(5s)。
+        //        设备节点一直没断电（我们只 close 了自己的 fd），格式早稳定。
+        //     ② 盒子已启动 >= kBootSettleSec(60s)。
+        //        hdmirx 的 format change 只发生在「开机后 1~2 秒」（驱动注释），
+        //        60s 有 30x 余量；且 ② 覆盖了绝大多数场景（盒子常年通电）。
+        //     ③ 兜底：**照旧睡满 800ms**。开机不到 60s、或 /proc/uptime 读不到
+        //        （boot_uptime_sec() 返回 -1 = 未知）都落到这一支 ——
+        //        行为与修复前**逐字节一致**，不做任何削减。
+        //   ⇒ 一句话：只在「真的可能还没稳」时才等；有证据说稳了就不等。
+        //   ★ 跳过后仍会做 G_FMT 重读比对（下面 fmt2 那段照旧执行），
+        //     一旦发现格式真的变了，仍走原有的重试逻辑 —— 只是不再「主动等」。
         const double now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::steady_clock::now().time_since_epoch())
                                   .count();
+        // -1 表示「本进程还没关过设备」⇒ 一定不是热重开（不能拿 0 当"刚刚关过"）。
+        const double since_close_ms =
+            (last_close_ms_ > 0.0) ? (now_ms - last_close_ms_) : -1.0;
         const bool warm_reopen =
-            last_close_ms_ > 0.0 && (now_ms - last_close_ms_) < kWarmReopenWindowMs;
+            since_close_ms >= 0.0 && since_close_ms < kWarmReopenWindowMs;
+        const double uptime_sec = boot_uptime_sec();
+        const bool boot_settled = uptime_sec >= kBootSettleSec;
+
         if (warm_reopen) {
             TTBOX_LOG_INFO("V4L2 热重开（距上次关闭 "
-                           + std::to_string(static_cast<int>(now_ms - last_close_ms_))
+                           + std::to_string(static_cast<int>(since_close_ms))
                            + " ms < 5s，跳过格式稳定等待）");
+        } else if (boot_settled) {
+            TTBOX_LOG_INFO("V4L2 冷打开，但盒子已启动 "
+                           + std::to_string(static_cast<long long>(uptime_sec))
+                           + " s（>= " + std::to_string(static_cast<int>(kBootSettleSec))
+                           + " s，hdmirx 早已稳定），跳过格式稳定等待");
         } else {
+            TTBOX_LOG_WARN("V4L2 冷打开且盒子启动仅 "
+                           + std::to_string(static_cast<long long>(uptime_sec))
+                           + " s（< " + std::to_string(static_cast<int>(kBootSettleSec))
+                           + " s 或未知），按保守路径等满 800ms 等 hdmirx 过渡");
             std::this_thread::sleep_for(std::chrono::milliseconds(800));
         }
 

@@ -44,6 +44,18 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.22 相对 V1.0.21（2026-10-04）：启停"首次点击卡顿 + 动画生硬"两半都修。
+#                       · core：800ms 格式稳定等待补第二条跳过判据 ——
+#                         除"热重开（距上次 close < 5s）"外，新增"盒子已启动 >= 60s"。
+#                         依据 = uptime 4.6 天的盒子上连续 40 次**全新 open**，
+#                         读到的格式全部 2560/1440 BGR3，一次都没变 ⇒ 早已稳定。
+#                         兜底分支（开机 < 60s / 读不到 /proc/uptime）**逐字节不变**，
+#                         仍睡满 800ms。实测冷路径 start 1.07s → 见发布记录。
+#                       · web 面板：.power-button 补 transition（原先一条都没有 ⇒
+#                         悬停位移/配色切换/忙态全是硬跳）；忙态改为"按压 scale +
+#                         外环加速 0.9s + 光晕呼吸"，不再用 opacity 调暗（会把文字弄糊）；
+#                         按下（:active）即反馈；忙态提到授权恢复 await 之前；
+#                         新增最短忙态 260ms（防短请求下按钮"抖一下"）。
 #   V1.0.21 相对 V1.0.20（2026-10-04）：
 #                       · 启停性能：V4L2 打开的 800ms 格式稳定等待改为**只在冷打开时等**
 #                         （停→启时设备未断电、格式早已稳定）；实测 start997ms → ~200ms。
@@ -68,7 +80,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.21 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.22 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
