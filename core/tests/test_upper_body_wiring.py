@@ -27,6 +27,10 @@ PROFILE = REPO / 'core' / 'src' / 'model' / 'RuntimeProfile.cpp'
 TYPES = REPO / 'core' / 'src' / 'mouse' / 'MouseTypes.hpp'
 POINT = REPO / 'core' / 'src' / 'mouse' / 'AimPointProfile.cpp'
 POINT_H = REPO / 'core' / 'src' / 'mouse' / 'AimPointProfile.hpp'
+SELECTOR = REPO / 'core' / 'src' / 'mouse' / 'TargetSelector.cpp'
+PREV_CPP = REPO / 'core' / 'src' / 'preview' / 'PreviewModule.cpp'
+PREV_H = REPO / 'core' / 'src' / 'preview' / 'PreviewModule.hpp'
+RUNTIME = REPO / 'core' / 'src' / 'runtime' / 'CoreRuntime.cpp'
 
 
 def _src(p: Path) -> str:
@@ -184,3 +188,37 @@ def test_shrink_is_unconditional():
     assert returns[-1:] == ['true'], '收缩成功路径必须在末尾：%r' % returns
     assert all(r == 'false' for r in returns[:-1]), (
         '提前 return 只能是 false（输入无效⇒原样返回），实得 %r' % returns)
+
+
+# ================================================================= 口径：算法不依赖 class 语义
+def test_algorithm_must_not_hardcode_class_semantics():
+    """★★ 业主 2026-10-04 定的产品口径：**算法不能依赖 class 语义**。
+
+    理由（他自己的原话）：「我们无法控制用户使用的模型，用户使用的模型不一定有
+    上半身框这个东西」。TTBOX 卖的是**盒子**，模型由客户自选 ⇒ class 数与语义都不可控
+    （现役 `sjzv11___1` 的 `class_names` 本来就是空的）。
+    ⇒ 凡是「class 5 = 全身 / class 8 = 上半身」这种假设，换个模型就全错。
+
+    允许：按**配置值**比较（cfg.hb_body1 / 用户的 class_offsets 表）。
+    禁止：按**字面量**比较（class_id == 0 / == 1 …）—— 那是把某份数据集的约定写进算法。
+    前科：V1.0.25 之前 `PreviewModule::draw_boxes` 就是「class 1 加粗 + 标成头色」
+    （出厂 2 类模型 EP 的约定），7 类模型下纯误导，已删。
+    """
+    for path in (POINT, SELECTOR, PREV_CPP):
+        code = _code_only(_src(path))
+        hits = re.findall(r'class_id\s*[!=]=\s*\d+', code)
+        assert not hits, (
+            '%s 里有按 class_id **字面量**的比较 %s —— 业主口径：算法不得依赖 class 语义'
+            '（模型由客户自选，class 数与语义都不可控）。要按类别区分请走配置项。'
+            % (path.name, hits))
+
+
+def test_geometry_pairing_ignores_class_id():
+    """几何配对识头必须纯几何（大框+小框的包含关系），不许按 class 号区分头/身。"""
+    body = _code_only(_src(POINT))
+    m = re.search(r'bool resolve_head_box\(.*?\n\}', body, re.S)
+    assert m, '找不到 resolve_head_box'
+    fn = m.group(0)
+    assert 'class_id' not in fn, (
+        'resolve_head_box 读了 class_id —— 它必须纯几何判据（包含/面积/上半部），'
+        '这样换任何模型都成立')
