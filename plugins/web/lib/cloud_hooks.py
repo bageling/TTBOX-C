@@ -143,8 +143,16 @@ def _ensure_heartbeat_worker() -> None:
             #   所以每次调用拿到的是同一个对象，心跳与 /api/license 读同一份会话。
             _CLOUD_CLIENT(), _CLOUD_SESSION(),
             on_expired=_cloud_deactivate_callback,
+            # ★ 五种参数各自期望什么类型（今天在这上面错了两次，逐条列清）：
+            #   client         : 对象  ⇒ _CLOUD_CLIENT()   （转发函数求值）
+            #   session        : 对象  ⇒ _CLOUD_SESSION()  （转发函数求值）
+            #   client_version : str   ⇒ kAppVersion()     （求值成字符串）
+            #   machine_code   : **Callable[[], str]** ⇒ **_machine_code（函数本身，不加括号）**
+            #   on_expired     : Callable            ⇒ 回调函数本身
+            # `machine_code` 加了括号就变成字符串 ⇒ worker 里 self._machine_code() 调它
+            # ⇒ TypeError: 'str' object is not callable（2026-10-04 板端心跳线程崩，实测）。
             client_version=kAppVersion(),
-            machine_code=_machine_code(),
+            machine_code=_machine_code,
         )
         # ★ 走 hub.set_ 而不是 setattr(hub.entry(), ...)：hub 绑定的是入口的
         #   __dict__（dict），不是模块对象 ⇒ setattr 对 dict 会 AttributeError。
