@@ -80,10 +80,8 @@ struct TestCtx {
         profile->mouse.aim_profiles[0].hotkey = 0x02;   // 右键
         profile->mouse.aim_profiles[0].hotkey2 = 0x00;
         profile->mouse.aim_profiles[0].hotkey_mode = 0; // any
-        profile->mouse.aim_alpha = 1.0f;     // 纯比例：输出量级可预测
-        profile->mouse.aim_gain = 1.0f;
-        profile->mouse.aim_max_move = 10000.0f;
-        profile->mouse.aim_deadzone_ratio = 0.0f;
+        profile->mouse.kp_x = 1.0f;         // 小 kp：输出量级可预测
+        profile->mouse.kp_y = 1.0f;
         profile->mouse.sensitivity = 1.0f;
         profile->mouse.output_scale = 1.0f;
         profile->mouse.output_deadzone = 0.0f;  // 死区关，观察拉枪附加量

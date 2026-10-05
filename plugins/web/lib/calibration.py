@@ -97,10 +97,18 @@ CALIB_AMP_MISS_LIMIT = 2
 #
 # ★★★ V1.0.38（2026-10-05）：**口径随 PID 一起翻回名义值**（业主令 pid 完全移植 pid1）。
 #   历史（V1.0.13~V1.0.37）：core 删掉 smooth、把"削弱 99%"折算进 kp，于是 kp 变成**生效值**，
-# ★★★ V1.0.41：pid1 删除，换 SmoothAimController。温和档只改 aim_gain
-#   （标定期把比例增益压到温和值，避免注入 bias 时振荡）。
-#   单帧吃误差比例 = aim_gain × gain_px_per_count ≈ 0.15 × 0.65 ≈ 10%（温和，不振荡）。
-CALIB_AIM_GAIN_MAX = 0.15
+#   温和档也从旧名义 10.0 换成 0.10。
+#   现在 core 恢复 smooth（接回 Pid1Controller 第 5 参，AimThread.cpp:274-277）、
+#   RuntimeProfile 里的折算整段删除 ⇒ kp 回到**名义值**域。
+#   ⚠ 不跟着翻的后果（实测口径推演）：温和档写 0.10 名义 ⇒ 经 smooth=9900 实际只发挥
+#     0.001，比板端现役 kp=25（生效 0.25）**弱 250 倍** ⇒ bias 阶跃推不动目标、
+#     位移采样全落在噪声里 ⇒ gain 测不准 ⇒ 整轮标定得出错误的 kp（"标定成功但参数是错的"）。
+#   ⇒ 换算：名义值 = 生效值 / (10000-smooth)/10000 = 0.10 / 0.01 = **10.0**（即回到 V1.0.13 之前）。
+CALIB_PID_KP_MAX = 10.0
+CALIB_PID_KD_RATIO = 3.0
+# ★ V1.0.38：smooth 又活过来了，标定期**不覆盖**它（保持用户/出厂值 9900）。
+#   V1.0.13 删过 CALIB_DEFAULT_SMOOTH_X / CALIB_MAX_SMOOTH_X / _calib_live_smooth()，
+#   现在不需要复活那套 —— 标定只改 kp/kd/predict_x，smooth 由用户在面板「缓冲」项自管。
 # 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
 # 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
 CALIB_MIN_COUNTS = 6
@@ -304,12 +312,12 @@ def _calib_derive_pid(gain_x: float, gain_y: float, delay_ms: float) -> dict:
 
 
 def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
-    """自动调参核心：按标定实测 gain + 延迟推导 aim_gain 并写回。
+    """自动调参核心：按标定实测 gain + 延迟推导整组 PID 并写回。
 
-    ★★★ V1.0.41（2026-10-05）：pid1 删除，换 SmoothAimController。标定只写回
-    aim_gain（= 误差 px → 移动 count 的比例）；alpha/max_move/deadzone_ratio
-    是手感参数，标定不动（面板默认值）。不同客户场景（灵敏度/延迟）→ 实测 gain/延迟
-    不同 → aim_gain 不同。
+    不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
+    → 推导出不同的最佳 KP/KD/predict。只动 kp/kd/predict_x 这三个，
+    rate 保持架构常量；**predict_y 一律不动** —— Y 轴预判在面板上已独立可调
+    （pid1.cpp 参考默认 0），自动调参不该覆盖业主手设的值。
     """
     try:
         with _CFG_WRITE_LOCK:
@@ -322,7 +330,11 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
                 float(calib.get('mouse_response_delay_ms') or 0),
             )
             mo = prof.setdefault('mouse', {})
-            mo['aim_gain'] = pid['aim_gain']
+            mo['kp_x'] = pid['kp']
+            mo['kp_y'] = pid['kp']
+            mo['kd_x'] = pid['kd']
+            mo['kd_y'] = pid['kd']
+            mo['predict_x'] = pid['predict']
             r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:
@@ -347,14 +359,18 @@ def _calib_worker() -> None:
         # 那会让紧接着的"稳定检测"先把目标拉偏、直接判定目标不稳。
         mo0['calibration_bias_x'] = 0.0
         mo0['calibration_bias_y'] = 0.0
-        # 温和档（见 CALIB_AIM_GAIN_MAX 注释）。保存用户原值：
+        # 温和档 PID（见 CALIB_PID_KP_MAX 注释）。保存用户原值：
         # 失败/取消时在 finally 恢复；成功时推导参数会覆盖，不能回头写旧值。
-        saved_gain = mo0.get('aim_gain')
+        saved_kp = mo0.get('kp_x')
+        saved_kd = mo0.get('kd_x')
         try:
-            calib_gain = min(float(saved_gain), CALIB_AIM_GAIN_MAX)
+            calib_kp = min(float(saved_kp), CALIB_PID_KP_MAX)
         except (TypeError, ValueError):
-            calib_gain = CALIB_AIM_GAIN_MAX
-        mo0['aim_gain'] = calib_gain
+            calib_kp = CALIB_PID_KP_MAX
+        mo0['kp_x'] = calib_kp
+        mo0['kp_y'] = calib_kp
+        mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO
+        mo0['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
         # ★ 首次 SET_CONFIG 必须查结果：失败还继续跑 = 全程用用户实战 KP 采数据，
         #   温和档根本没写进去，gain 样本全靠 MAD 门硬滤。
         _r0 = ipc_request('SET_CONFIG', {'profile': prof0})
@@ -537,17 +553,18 @@ def _calib_worker() -> None:
                         # 注入生效但位移不够 ⇒ 温和档对这个低 gain 系统太慢：
                         # 轮间抬 KP（不超过用户原配置），让后续轮补测。
                         try:
-                            gain_cap = float(saved_gain)
+                            kp_cap = float(saved_kp)
                         except (TypeError, ValueError):
-                            gain_cap = CALIB_AIM_GAIN_MAX
-                        new_gain = min(calib_gain * 1.7, max(gain_cap, CALIB_AIM_GAIN_MAX))
-                        if new_gain > calib_gain + 1e-6:
-                            calib_gain = new_gain
+                            kp_cap = CALIB_PID_KP_MAX
+                        new_kp = min(calib_kp * 1.7, max(kp_cap, CALIB_PID_KP_MAX))
+                        if new_kp > calib_kp + 1e-6:
+                            calib_kp = new_kp
                             prof = _get_runtime_profile()
                             mo = prof.setdefault('mouse', {})
-                            mo['aim_gain'] = calib_gain
+                            mo['kp_x'] = mo['kp_y'] = calib_kp
+                            mo['kd_x'] = mo['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
                             ipc_request('SET_CONFIG', {'profile': prof})
-                            _calib_set(reason='低增益：已抬高标定期 gain 继续测量')
+                            _calib_set(reason='低增益：已抬高标定期 KP 继续测量')
                 _calib_set(dropped_sample_count=sum(dropped.values()))
                 # ★ 摆动幅度闭环（2026-09-30 指令三）：追得上 → 记最快可追幅度、清零 miss；
                 #   追不上（注入生效却没过 60% 幅度）→ 计数；连续 miss 到上限 ⇒ 提前收敛停摆，
@@ -669,10 +686,12 @@ def _calib_worker() -> None:
                 mo['calibration_bias_x'] = 0.0
                 mo['calibration_bias_y'] = 0.0
                 # 温和档只在标定期生效：成功路径推导参数已由 _calib_apply_pid 写入，
-                # 不能覆盖回去；失败/取消则恢复用户原 gain。
+                # 不能覆盖回去；失败/取消则恢复用户原 KP/KD。
                 if _cal['state'] in ('failed', 'cancelled'):
-                    if saved_gain is not None:
-                        mo['aim_gain'] = saved_gain
+                    if saved_kp is not None:
+                        mo['kp_x'] = mo['kp_y'] = saved_kp
+                    if saved_kd is not None:
+                        mo['kd_x'] = mo['kd_y'] = saved_kd
                 if not was_enabled:
                     mo['enabled'] = False
                 ipc_request('SET_CONFIG', {'profile': prof})
@@ -739,9 +758,11 @@ def _calibration_payload() -> dict:
     eff = {}
     try:
         emo = (_get_runtime_profile().get('mouse')) or {}
-        # ★ 除了增益，aim_gain 也一并回「当前生效值」：标定写回 aim_gain 后，
-        #   前端要拿它刷新面板控件（不用刷新页面），且这里才是 core 真正在用的值。
-        for key in ('gain_x_px_per_count', 'gain_y_px_per_count', 'aim_gain'):
+        # ★ 除了增益，PID 三件也一并回「当前生效值」：标定写回 kp/kd/predict_x 后，
+        #   前端要拿它刷新面板控件（不用刷新页面），且这里才是 core 真正在用的值
+        #   （留档文件里的 pid_params 只回答"当时推导了多少"）。
+        for key in ('gain_x_px_per_count', 'gain_y_px_per_count',
+                    'kp_x', 'kd_x', 'predict_x'):
             try:
                 eff[key] = round(float(emo[key]), 4)
             except (KeyError, TypeError, ValueError):

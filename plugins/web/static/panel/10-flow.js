@@ -2402,11 +2402,17 @@ function populateForm(config) {
   setValue("hotkey_guard_toggle_hotkey", hotkeyGuard.toggle_hotkey ?? HOTKEY_GUARD_DEFAULTS.toggle_hotkey);
   renderAimProfiles(config.aim_profiles);
 
-  // ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数（两轴共用一套值）。
-  setValue("controller_aim_gain", controller.aim_gain ?? CONTROLLER_DEFAULTS.aim_gain);
-  setValue("controller_aim_alpha", controller.aim_alpha ?? CONTROLLER_DEFAULTS.aim_alpha);
-  setValue("controller_aim_max_move", controller.aim_max_move ?? CONTROLLER_DEFAULTS.aim_max_move);
-  setValue("controller_aim_deadzone_ratio", controller.aim_deadzone_ratio ?? CONTROLLER_DEFAULTS.aim_deadzone_ratio);
+  // Kp / Kd / Rate 三项两轴共用：回填取 X 轴的值（权威），保存时同时写回两轴。
+  // ★ 预判两轴独立，必须从各自的 _x / _y 回填 —— 否则「面板上调 X 的预判顺带改掉 Y」
+  //   那个 bug 会在下一次保存时复活（Y 的预判在 pid1.cpp 里必须是 0）。
+  setValue("controller_kp", controller.kp_x ?? CONTROLLER_DEFAULTS.kp);
+  setValue("controller_kd", controller.kd_x ?? CONTROLLER_DEFAULTS.kd);
+  setValue("controller_predict", controller.predict_x ?? CONTROLLER_DEFAULTS.predict);
+  setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
+  setValue("controller_rate", controller.rate_x ?? CONTROLLER_DEFAULTS.rate);
+  // ★ V1.0.38：smooth（pid1 的大误差保护）也要回填，否则面板看不到当前值。
+  //   两轴共用一个输入框，与 kp/kd/rate 同口径。
+  setValue("controller_smooth", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
@@ -2501,10 +2507,11 @@ function movementDefaultsForSection(sectionId) {
   const defaultsBySection = {
     "control-section-pid": {
       sens: MOVEMENT_CONTROL_DEFAULTS.sens,
-      controller_aim_gain: controller.aim_gain,
-      controller_aim_alpha: controller.aim_alpha,
-      controller_aim_max_move: controller.aim_max_move,
-      controller_aim_deadzone_ratio: controller.aim_deadzone_ratio,
+      controller_kp: controller.kp,
+      controller_kd: controller.kd,
+      controller_predict: controller.predict,
+      controller_predict_y: controller.predict_y,
+      controller_rate: controller.rate,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
     },
@@ -2596,11 +2603,21 @@ function collectConfig() {
     aim_profiles: collectAimProfiles(),
     ai: {
       controller: {
-        // ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数（两轴共用一套值）。
-        aim_alpha: getNumber("controller_aim_alpha", CONTROLLER_DEFAULTS.aim_alpha),
-        aim_gain: getNumber("controller_aim_gain", CONTROLLER_DEFAULTS.aim_gain),
-        aim_max_move: getNumber("controller_aim_max_move", CONTROLLER_DEFAULTS.aim_max_move),
-        aim_deadzone_ratio: getNumber("controller_aim_deadzone_ratio", CONTROLLER_DEFAULTS.aim_deadzone_ratio),
+        // Kp / Kd / Rate 三项 X / Y 共用面板上的同一个输入框：一个框写两份。
+        kp_x: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
+        kp_y: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
+        kd_x: getNumber("controller_kd", CONTROLLER_DEFAULTS.kd),
+        kd_y: getNumber("controller_kd", CONTROLLER_DEFAULTS.kd),
+        // ★ 预判两轴各一个输入框 —— 原来 predict_y 读的是 X 那个框，等于面板一调
+        //   X 就把 Y 顶成同一个值；而 pid1.cpp 里 Y 的 predict 必须是 0。
+        predict_x: getNumber("controller_predict", CONTROLLER_DEFAULTS.predict),
+        predict_y: getNumber("controller_predict_y", CONTROLLER_DEFAULTS.predict_y),
+        rate_x: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
+        rate_y: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
+        // ★ V1.0.38：smooth 两轴共用（同 kp/kd/rate 口径）。
+        //   它是 pid1 的 soft-limit 强度，0 = 关闭大误差保护。
+        smooth_x: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
+        smooth_y: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),

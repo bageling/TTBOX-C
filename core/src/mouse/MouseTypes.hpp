@@ -398,23 +398,26 @@ struct MouseProfile {
     std::vector<AimHotkeyProfile> aim_profiles{AimHotkeyProfile{}};
     float fov_range = 1.0f;                     // 目标选择范围（0~1，仅影响目标选择）
     float confidence = 0.25f;                   // 目标置信度阈值（目标选择）
-    // ★★★ V1.0.41（2026-10-05）：pid1 彻底删除，换 SmoothAimController（EMA+比例+限幅+框高死区）。
-    //   4 个互相独立的参数，调参简单、无前馈主导、无绝对像素门限：
-    //     aim_alpha          平滑系数（0~1；越大越跟手、越小越稳）
-    //     aim_gain           比例增益（误差 px → 移动 count）
-    //     aim_max_move       单帧最大移动（count，防一帧打飞）
-    //     aim_deadzone_ratio 死区 = 目标框高 × ratio（尺寸自适应 ⇒ 远近距离手感一致）
-    //   参考开源共识（cod-ai-aim-assist / 多个 YOLO 脚本）。
-    float aim_alpha = 0.5f;                    // 平滑系数
-    float aim_gain = 0.15f;                    // 比例增益（误差 px → 移动 count）
-    float aim_max_move = 30.0f;                // 单帧最大移动（count）
-    float aim_deadzone_ratio = 0.05f;          // 死区 = 框高 × ratio
+    // ★★★ V1.0.38（2026-10-05）：**回归 pid1 原文移植**（业主令「pid 以 pid1 为准完全移植，
+    //   不许有自己的变动」）。V1.0.13 曾把 kp/kd 语义改成"真实有效值"、删掉 smooth 字段，
+    //   本次**全部撤回**，kp/kd/smooth 三者恢复 pid1.cpp main() 的原始参数与原始关系：
+    //     runAxis("X", kp=25.0, kd=25.0, predict=3.0, rate=0.3, smooth=9900.0)
+    //     runAxis("Y", kp=25.0, kd=25.0, predict=0.0, rate=0.3, smooth=9900.0)
+    //   kp/kd 回到「未折算的原始比例增益」；soft-limit 重新由 smooth 字段控制（不再恒 0）。
+    //   ⚠ 口径变化：输出量级比 V1.0.13~V1.0.37 大（smooth 不再折进 kp），
+    //     出厂/旧配置需重跑标定（业主 2026-10-05 决定：不写迁移，全员重标）。
+    float kp_x = 25.0f;                         // X 比例增益（pid1 原始值，未折算）
+    float kp_y = 25.0f;
+    float kd_x = 25.0f;                         // 微分增益（pid1 刹车，防过冲）
+    float kd_y = 25.0f;
     // A10.1：FOV 角度换算模式（参考 PD Aim fov 算法，可选）
     bool fov_mode = false;                      // true = 角度换算输出（替代 kp×err）
     float hfov = 83.105f;                       // 水平视场角（度）
     float vfov = 53.0f;                         // 垂直视场角（度）
     float move_speed_x = 500.0f;                // X 每整圈移动像素（角度换算）
     float move_speed_y = 500.0f;                // Y 每整圈移动像素（角度换算）
+    float rate_x = 0.3f;                        // 输出速率（X 独立；pid1 kp_gain_rate=0.3）
+        float rate_y = 0.3f;
     float sensitivity = 1.0f;                   // 灵敏度
     float output_scale = 1.0f;                  // 输出缩放（与 fov_range 严格分离）
     // 标定产物：游戏灵敏度（px/count）——鼠标 1 count = 画面多少 px。
@@ -429,6 +432,21 @@ struct MouseProfile {
     float response_delay_ms = 0.0f;
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
+    // controller 公式（kp×rate×err + predict×vel）与输出链参数
+    // ★★★ V1.0.39+（2026-10-05）：predict_x 从 pid1 原文 3.0 降到 1.0。
+    //   pid1 原文 3.0 是「gain=1（1 count=1px）假设」下调的；我们板端实测 gain≈0.65
+    //   + 回路延迟 51ms，3.0 的前馈在该闭环下自激振荡（业主上板实测「乱飞」；
+    //   仿真移动目标 50px/s：p3.0 稳态误差 29.7px/翻转 16 次 vs p1.0 6.0px/稳定）。
+    //   ⇒ 降回 V1.0.13 的 1.0（当时有 A/B 实测 16 轮全稳支撑）。
+    //   Y 轴 pid1 原文就是 0（不带前馈），保持不变。
+    float predict_x = 1.0f;                   // X 前馈（pid1 原文 3.0，按 gain=0.65 折算到 1.0）
+    float predict_y = 0.0f;                   // pid1 Y 不带前馈（原始值 = 0）
+    // ★★★ V1.0.38：**smooth 字段恢复**（V1.0.13 曾删除并折算进 kp/kd）。
+    //   它是 pid1 的 soft-limit 强度：9900 = 把 P/D 压到 1%（原厂值），0 = 关闭软限幅。
+    //   Pid1Controller::update() 里 `if (smooth)` 的第 5 参就是它 —— 之前恒传 0.0
+    //   等于把 pid1 最重要的一道大误差保护整个关掉了。
+    float smooth_x = 9900.0f;                 // pid1 soft-limit（原始值）
+    float smooth_y = 9900.0f;
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
     // 插件配置（pull_curve / continuous_lead / recoil / personal_motion / personal_trajectory）
         PullCurveConfig pull_curve;

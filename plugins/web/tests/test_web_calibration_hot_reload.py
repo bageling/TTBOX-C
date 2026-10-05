@@ -67,14 +67,16 @@ def _payload(profile, record):
     return ns['_calibration_payload']()
 
 
-def test_effective_exposes_live_gain():
-    """标定写回的 aim_gain 必须从接口里读得到（面板热更新的数据源）。"""
+def test_effective_exposes_live_pid():
+    """标定写回的 kp/kd/predict_x 必须从接口里读得到（面板热更新的数据源）。"""
     profile = {'mouse': {
         'gain_x_px_per_count': 0.62, 'gain_y_px_per_count': 0.48,
-        'aim_gain': 0.1129,
+        'kp_x': 0.1129, 'kd_x': 0.2, 'predict_x': 0.3,
     }}
     eff = _payload(profile, None)['calibration']['effective']
-    assert eff.get('aim_gain') == 0.1129, eff
+    assert eff.get('kp_x') == 0.1129, eff
+    assert eff.get('kd_x') == 0.2, eff
+    assert eff.get('predict_x') == 0.3, eff
     # 增益照旧（原有契约不能破）
     assert eff.get('gain_x_px_per_count') == 0.62, eff
 

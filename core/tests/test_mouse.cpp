@@ -19,6 +19,7 @@
 #include "mouse/MotionMerge.hpp"
 #include "mouse/MouseRouter.hpp"
 #include "mouse/MouseTypes.hpp"
+#include "mouse/OutputScale.hpp"
 #include "mouse/PullCurve.hpp"
 #include "mouse/RateLimit.hpp"
 #include "mouse/TargetSelector.hpp"
@@ -449,10 +450,10 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.enabled = true;
     p.mouse.aim_profiles[0].hotkey = 0x02;
     p.mouse.fov_range = 0.41f;
-    p.mouse.aim_alpha = 0.4f;
-    p.mouse.aim_gain = 17.0f;
-    p.mouse.aim_max_move = 10.0f;
-    p.mouse.aim_deadzone_ratio = 0.3f;
+    p.mouse.kp_x = 17.0f;
+    p.mouse.kp_y = 10.0f;
+    p.mouse.rate_x = 0.4f;
+    p.mouse.rate_y = 0.3f;
     p.mouse.output_scale = 1.0f;
     p.mouse.deadzone_x = 1.0f;
     p.mouse.lost_grace_ms = 78.0f;
@@ -479,10 +480,9 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.enabled);
     CHECK_EQ(q.mouse.aim_profiles.at(0).hotkey, 0x02u);
     CHECK(q.mouse.fov_range == 0.41f);
-    CHECK(q.mouse.aim_alpha == 0.4f);
-    CHECK(q.mouse.aim_gain == 17.0f);
-    CHECK(q.mouse.aim_max_move == 10.0f);
-    CHECK(q.mouse.aim_deadzone_ratio == 0.3f);
+    CHECK(q.mouse.kp_x == 17.0f);
+    CHECK(q.mouse.kp_y == 10.0f);
+    CHECK(q.mouse.rate_x == 0.4f);
     CHECK(q.mouse.output_scale == 1.0f);
     CHECK(q.mouse.deadzone_x == 1.0f);
     CHECK(q.mouse.lost_grace_ms == 78.0f);
@@ -507,6 +507,21 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     // 非法值被拒
     q.mouse.fov_range = 1.5f;
     CHECK(!q.validate(&verr));
+}
+
+// ---------------------------------------------------------------------------
+// 附加：FOV 只影响目标选择，不影响输出缩放
+// ---------------------------------------------------------------------------
+TEST(mouse_fov_not_affect_output_scale) {
+    aim::MouseProfile a, b;
+    a.fov_range = 1.0f;
+    b.fov_range = 0.1f;
+    b.kp_x = a.kp_x;
+    b.rate_x = a.rate_x;
+    b.sensitivity = a.sensitivity;
+    b.output_scale = a.output_scale;
+    // 相同输入，输出缩放一致（fov_range 不参与）
+    CHECK_EQ(aim::output_scale_x(50.0f, a), aim::output_scale_x(50.0f, b));
 }
 
 // ---------------------------------------------------------------------------
@@ -630,11 +645,11 @@ TEST(mouse_continuous_lead_needs_accumulated_distance) {
 // ---------------------------------------------------------------------------
 TEST(mouse_profile_fields_roundtrip) {
     RuntimeProfile p;
-    // V1.0.41：pid1 删除，换 SmoothAimController 4 参数，这里锁往返
-    p.mouse.aim_alpha = 0.6f;
-    p.mouse.aim_gain = 0.42f;
-    p.mouse.aim_max_move = 19.0f;
-    p.mouse.aim_deadzone_ratio = 0.7f;
+    p.mouse.predict_x = 0.6f;
+    p.mouse.predict_y = 0.7f;
+    // V1.0.13：smooth_x/smooth_y 已删（折叠进 kp/kd）——这里改用 kp/kd 锁往返
+    p.mouse.kp_x = 0.42f;
+    p.mouse.kd_y = 0.19f;
     p.mouse.output_deadzone = 1.5f;
     p.mouse.pull_curve.enabled = true;
     p.mouse.pull_curve.strength = 0.9f;
@@ -643,10 +658,16 @@ TEST(mouse_profile_fields_roundtrip) {
 
     const JsonValue j = p.to_json();
     const RuntimeProfile q = RuntimeProfile::from_json(j);
-    CHECK(q.mouse.aim_alpha == 0.6f);
-    CHECK(q.mouse.aim_gain == 0.42f);
-    CHECK(q.mouse.aim_max_move == 19.0f);
-    CHECK(q.mouse.aim_deadzone_ratio == 0.7f);
+    CHECK(q.mouse.predict_x == 0.6f);
+    CHECK(q.mouse.predict_y == 0.7f);
+    CHECK(q.mouse.kp_x == 0.42f);
+    CHECK(q.mouse.kd_y == 0.19f);
+    // ★ V1.0.38：smooth 字段回归后也要锁往返（它现在是独立参数，不再折算进 kp）
+    p.mouse.smooth_x = 7777.0f;
+    p.mouse.smooth_y = 8888.0f;
+    const RuntimeProfile r = RuntimeProfile::from_json(p.to_json());
+    CHECK(std::fabs(r.mouse.smooth_x - 7777.0f) < 1e-3f);
+    CHECK(std::fabs(r.mouse.smooth_y - 8888.0f) < 1e-3f);
     CHECK(q.mouse.output_deadzone == 1.5f);
     CHECK(q.mouse.pull_curve.enabled);
     CHECK(q.mouse.pull_curve.strength == 0.9f);
@@ -655,9 +676,15 @@ TEST(mouse_profile_fields_roundtrip) {
 
 
 // ---------------------------------------------------------------------------
-// 编译期守卫：落点入口唯一化（V1.0.13）
-//   · AimPointProfile::aim_offset_x/y —— 准星像素偏移（第二个落点入口）不得存在
-//   · CaptureProfile::offset_x/y     —— 裁剪区偏移（第三个落点入口）不得存在
+// V1.0.38 编译期守卫：smooth 字段**必须存在**（pid1 完全移植的硬要求）
+//   V1.0.13 曾断言它不得存在（当时被折算进 kp/kd 并从参数面删除）。
+//   业主 2026-10-05 令「pid 以 pid1 为准完全移植」⇒ 断言方向反转：
+//   MouseProfile::smooth_x/y 是 pid1 的 soft-limit 强度（9900 = 把 P/D 压到 1%），
+//   它由 Pid1Controller::update() 的 `if (smooth)` 第 5 参直接消费，
+//   缺了它就等于把 pid1 的大误差保护整条关掉。
+//   仍然保留的两个守卫（与本次改动无关、结论不变）：
+//   · AimPointProfile::aim_offset_x/y —— 准星像素偏移（第二个落点入口）
+//   · CaptureProfile::offset_x/y     —— 裁剪区偏移（第三个落点入口）
 // ---------------------------------------------------------------------------
 template <typename T, typename = void>
 struct has_aim_offset_field : std::false_type {};
@@ -671,24 +698,83 @@ template <typename T>
 struct has_capture_offset_field<T, decltype(void(std::declval<T&>().offset_x))>
     : std::true_type {};
 
+template <typename T, typename = void>
+struct has_smooth_field : std::false_type {};
+template <typename T>
+struct has_smooth_field<T, decltype(void(std::declval<T&>().smooth_x))> : std::true_type {};
+
 static_assert(!has_aim_offset_field<aim::AimPointProfile>::value,
               "V1.0.13：AimPointProfile 不得再有 aim_offset_x（落点只留瞄点一个入口）");
 static_assert(!has_capture_offset_field<CaptureProfile>::value,
               "V1.0.13：CaptureProfile 不得再有 offset_x（裁剪区恒居中）");
+static_assert(has_smooth_field<aim::MouseProfile>::value,
+              "V1.0.38：MouseProfile 必须有 smooth_x —— pid1 完全移植，soft-limit 不可缺");
 
-// ★★★ V1.0.41：pid1 删除，缺省值换 SmoothAimController 4 参数
-//   （alpha=0.5 / gain=0.15 / max_move=30 / deadzone_ratio=0.05）。
-//   ⚠ 业主 2026-10-05 决定不写迁移：老配置升级后需重跑标定，不保兼容。
-TEST(mouse_defaults_are_smooth_aim) {
+// ---------------------------------------------------------------------------
+// ★★★ V1.0.38：smooth 折叠**已删除**，回归 pid1 原始读法。
+//   V1.0.13 时期这里是"折算测试"：老配置 kp_x=15 + smooth=9900 ⇒ 真实 kp_x=0.15。
+//   现在 kp/kd/smooth 三个键**各自独立**按 pid1 原义读取（RuntimeProfile.cpp 里的
+//   ×(10000-smooth)/10000 折算整段已删）⇒ kp_x 必须原样停在 15，smooth 独立停在 9900。
+//   ⚠ 这条测试同时钉住"不再双重缩放"：若有人把折算逻辑加回来，kp_x 会变 0.15 而红。
+// ---------------------------------------------------------------------------
+TEST(mouse_smooth_is_independent_and_never_folded_into_kp) {
+    auto lp = json_parse(
+        R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":9900,"smooth_y":9900,)"
+        R"("predict_x":0,"predict_y":0}})");
+    CHECK(lp.ok);
+    if (!lp.ok) return;
+    const RuntimeProfile legacy = RuntimeProfile::from_json(lp.value);
+
+    // kp/kd 原样读，**没有**被 smooth 折算（V1.0.13 时这里是 0.15 / 0.06）
+    CHECK(std::fabs(legacy.mouse.kp_x - 15.0f) < 1e-6f);
+    CHECK(std::fabs(legacy.mouse.kd_x - 6.0f) < 1e-6f);
+    // smooth 独立读自己的值
+    CHECK(std::fabs(legacy.mouse.smooth_x - 9900.0f) < 1e-3f);
+    CHECK(std::fabs(legacy.mouse.smooth_y - 9900.0f) < 1e-3f);
+
+    // 写回要产出 smooth_*（Pid1Controller 第 5 参要读它），且往返不漂移
+    const std::string out = legacy.to_json().dump();
+    CHECK(out.find("\"smooth_x\"") != std::string::npos);
+    CHECK(out.find("\"smooth_y\"") != std::string::npos);
+    const RuntimeProfile back = RuntimeProfile::from_json(legacy.to_json());
+    CHECK(std::fabs(back.mouse.kp_x - legacy.mouse.kp_x) < 1e-6f);
+    CHECK(std::fabs(back.mouse.kd_x - legacy.mouse.kd_x) < 1e-6f);
+    CHECK(std::fabs(back.mouse.smooth_x - legacy.mouse.smooth_x) < 1e-3f);
+}
+
+// ★ V1.0.38：smooth=0 = pid1 原义的「关闭 soft-limit」，kp 原样不动。
+//   （V1.0.13 时这条测的是"折算系数为 1 所以 kp 不变"；现在根本没有折算，
+//     kp 不变是理所当然，但**必须继续钉住 smooth 自己读到 0**——
+//     它是 Pid1Controller 第 5 参，钉错会让 soft-limit 静默恢复成 9900。）
+TEST(mouse_smooth_zero_means_soft_limit_disabled) {
+    auto p = json_parse(R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":0}})");
+    CHECK(p.ok);
+    if (!p.ok) return;
+    const RuntimeProfile t = RuntimeProfile::from_json(p.value);
+    CHECK(std::fabs(t.mouse.kp_x - 15.0f) < 1e-6f);
+    CHECK(std::fabs(t.mouse.kd_x - 6.0f) < 1e-6f);
+    // ★ 关键：smooth 必须真的是 0（= soft-limit 关闭），不能被缺省 9900 顶回来
+    CHECK(std::fabs(t.mouse.smooth_x - 0.0f) < 1e-6f);
+}
+
+// ★★★ V1.0.38→V1.0.39+：缺省值回归 pid1 原文 main() 的 runAxis 参数，
+//   但 predict_x 由 3.0 降到 1.0（pid1 原文 3.0 是 gain=1 假设，板端 gain≈0.65
+//   + 51ms 延迟下自激「乱飞」；见 MouseTypes.hpp 注释）。
+//   kp=25 / kd=25 / predict_x=1.0 / predict_y=0.0 / smooth=9900。
+//   ⚠ 业主 2026-10-05 决定不写迁移：老配置升级后需**重跑标定**，不保兼容。
+TEST(mouse_defaults_are_pid1_original) {
     auto p = json_parse(R"({"mouse":{"enabled":true}})");
     CHECK(p.ok);
     if (!p.ok) return;
     const RuntimeProfile t = RuntimeProfile::from_json(p.value);
-    CHECK(std::fabs(t.mouse.aim_alpha - 0.5f) < 1e-6f);
-    CHECK(std::fabs(t.mouse.aim_gain - 0.15f) < 1e-6f);
-    CHECK(std::fabs(t.mouse.aim_max_move - 30.0f) < 1e-6f);
-    CHECK(std::fabs(t.mouse.aim_deadzone_ratio - 0.05f) < 1e-6f);
-    CHECK(t.to_json().dump().find("\"aim_gain\"") != std::string::npos);
+    CHECK(std::fabs(t.mouse.kp_x - 25.0f) < 1e-6f);      // pid1 原始比例增益
+    CHECK(std::fabs(t.mouse.kd_x - 25.0f) < 1e-6f);
+    CHECK(std::fabs(t.mouse.predict_x - 1.0f) < 1e-6f);  // X 前馈（pid1 原文 3.0，折算到 1.0）
+    CHECK(std::fabs(t.mouse.predict_y - 0.0f) < 1e-6f);  // pid1 Y 无前馈
+    // smooth 缺省 = 9900（soft-limit 开启），且能被序列化出去给第 5 参读
+    CHECK(std::fabs(t.mouse.smooth_x - 9900.0f) < 1e-3f);
+    CHECK(std::fabs(t.mouse.smooth_y - 9900.0f) < 1e-3f);
+    CHECK(t.to_json().dump().find("\"smooth_x\"") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

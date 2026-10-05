@@ -11,11 +11,13 @@
 function setMovementControlDefaultsToForm() {
   const controller = MOVEMENT_CONTROL_DEFAULTS.controller;
   setValue("sens", MOVEMENT_CONTROL_DEFAULTS.sens);
-  // ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数。
-  setValue("controller_aim_gain", controller.aim_gain);
-  setValue("controller_aim_alpha", controller.aim_alpha);
-  setValue("controller_aim_max_move", controller.aim_max_move);
-  setValue("controller_aim_deadzone_ratio", controller.aim_deadzone_ratio);
+  setValue("controller_kp", controller.kp);
+  setValue("controller_kd", controller.kd);
+  setValue("controller_predict", controller.predict);
+  setValue("controller_predict_y", controller.predict_y);
+  setValue("controller_rate", controller.rate);
+  // ★ V1.0.38：smooth 一并恢复默认（pid1 的大误差保护，0 = 关闭）。
+  setValue("controller_smooth", controller.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);

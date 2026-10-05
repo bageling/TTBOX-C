@@ -542,11 +542,13 @@ def profile_to_web(prof: dict) -> dict:
     head_aim = mouse.get('head_aim') or {}
     recoil = mouse.get('recoil') or {}
     ctrl = {
-        # ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数。
-        'aim_alpha': mouse.get('aim_alpha'),
-        'aim_gain': mouse.get('aim_gain'),
-        'aim_max_move': mouse.get('aim_max_move'),
-        'aim_deadzone_ratio': mouse.get('aim_deadzone_ratio'),
+        'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
+        'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
+        'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),
+        'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
+        # ★ V1.0.38：smooth 回归（pid1 完全移植，core 侧 soft-limit 又活了）。
+        #   不加这两行 ⇒ 面板能填但存不进 core，且回填永远拿不到值。
+        'smooth_x': mouse.get('smooth_x'), 'smooth_y': mouse.get('smooth_y'),
         'output_deadzone': mouse.get('output_deadzone'),
         'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
         'pull_curve_enabled': pc.get('enabled', True),

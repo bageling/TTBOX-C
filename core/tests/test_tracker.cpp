@@ -47,10 +47,10 @@ static TestPidParams tracker_test_params() {
     TestPidParams p;
     p.reference_x = static_cast<float>(kRefX);
     p.reference_y = static_cast<float>(kRefY);
-    p.aim_alpha = 1.0f;    // 纯比例：输出与误差严格同号
-    p.aim_gain = 0.25f;
-    p.aim_max_move = 10000.0f;
-    p.aim_deadzone_ratio = 0.0f;
+    p.kp_x = 0.25f; p.kp_y = 0.25f;
+    p.kd_x = 0.0f;  p.kd_y = 0.0f;
+    p.predict_x = 0.0f; p.predict_y = 0.0f;
+    p.smooth_x = 0.0f; p.smooth_y = 0.0f;   // soft-limit 关闭：输出与误差严格同号
     p.sensitivity = 1.0f;
     p.output_scale = 1.0f;
     p.output_deadzone = 0.0f;              // 不让死区吃掉符号验证

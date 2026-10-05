@@ -126,13 +126,13 @@ TEST(runtime_profile_validate_rejects_nonfinite) {
     // C12 修复回归：inf/NaN 配置必须被 validate 拒绝（否则 PID 输出乱飞）
     RuntimeProfile p;
     // 手动塞入 inf（绕过 from_json 的默认路径，模拟 JSON 1e999 解析结果）
-    p.mouse.aim_gain = std::numeric_limits<float>::infinity();
+    p.mouse.kp_x = std::numeric_limits<float>::infinity();
     std::string err;
     CHECK(!p.validate(&err));
     CHECK(err.find("非有限") != std::string::npos);
 
-    p.mouse.aim_gain = 17.0f;
-    p.mouse.aim_max_move = std::numeric_limits<float>::quiet_NaN();
+    p.mouse.kp_x = 17.0f;
+    p.mouse.kd_y = std::numeric_limits<float>::quiet_NaN();
     CHECK(!p.validate(&err));
 }
 
@@ -222,7 +222,6 @@ TEST(runtime_profile_legacy_removed_keys_still_load) {
         "enabled": true,
         "sensitivity": 1.25,
         "kp_x": 0.5, "kp_y": 0.4,
-        "aim_gain": 0.3,
         "lead1": {"enabled": true, "frames": 3, "gain": 1.4, "max_offset": 44,
                   "activation_distance": 120},
         "lead1_enabled": true,
@@ -250,7 +249,7 @@ TEST(runtime_profile_legacy_removed_keys_still_load) {
     CHECK_EQ(p.capture.height, 640u);
     CHECK(p.mouse.enabled);
     CHECK_EQ(p.mouse.sensitivity, 1.25f);
-    CHECK_EQ(p.mouse.aim_gain, 0.3f);
+    CHECK_EQ(p.mouse.kp_x, 0.5f);
     CHECK_EQ(p.inference.confidence, 0.35f);
     CHECK_EQ(p.inference.max_detections, 30);
 

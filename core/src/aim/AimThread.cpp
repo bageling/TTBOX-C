@@ -20,9 +20,9 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     reset_runtime_state();
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
-    // SmoothAimController：无 init，configure 每帧从 frame_profile 接线；这里只给启动默认。
-    aim_x_.configure(0.5f, 0.15f, 30.0f, 0.05f);
-    aim_y_.configure(0.5f, 0.15f, 30.0f, 0.05f);
+    // pid1.cpp main() 原始参数：X predict=3.0，Y predict=0.0。
+    pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+    pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
     thread_ = std::thread(&AimThread::loop, this);
     return true;
 }
@@ -31,8 +31,8 @@ void AimThread::reset_runtime_state() {
     selector_.reset();
     state_machine_.reset();
     tracker_.reset();
-    aim_x_.reset();
-    aim_y_.reset();
+    pid_x_.reset();
+    pid_y_.reset();
     pull_curve_.reset();
     continuous_lead_.reset();  // 持续提前量累计/方向/渐入电平清零（destroy→init 重建一致）
     personal_shader_.reset();
@@ -99,6 +99,7 @@ void AimThread::loop() {
             ContinuousLeadConfig lead_cfg;  // 持续提前量配置（默认 enabled=false ⇒ 不动输出）
             PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
+            float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
             std::shared_ptr<const RuntimeProfile> frame_profile;
@@ -149,13 +150,13 @@ void AimThread::loop() {
             // 下降沿：热键松开 → 连提前量/拟人化/抗过冲/速度Kp 一并复位，
             //   下次按下是全新一轮（否则上一轮的收帧窗/积分/衰减帧数会带过来）。
             if (injection_allowed && !last_injection_allowed_) {
-                aim_x_.reset();
-                aim_y_.reset();
+                pid_x_.reset();
+                pid_y_.reset();
                 remainder_x_ = 0.0f;
                 remainder_y_ = 0.0f;
             } else if (!injection_allowed && last_injection_allowed_) {
-                aim_x_.reset();
-                aim_y_.reset();
+                pid_x_.reset();
+                pid_y_.reset();
                 remainder_x_ = 0.0f;
                 remainder_y_ = 0.0f;
                 jitter_ff_.reset();  // V3 阶段 5：热键松开那一帧的抖动欠账一并作废
@@ -244,6 +245,8 @@ void AimThread::loop() {
                 // 再用本档覆盖 offset 与类别偏移。
                 scfg.aim_ratio_x = ap ? ap->offset_x : frame_profile->mouse.aim_point.offset_x;
                 scfg.aim_ratio_y = ap ? ap->offset_y : frame_profile->mouse.aim_point.offset_y;
+                kp_x = frame_profile->mouse.kp_x; kp_y = frame_profile->mouse.kp_y;
+                kd_x = frame_profile->mouse.kd_x; kd_y = frame_profile->mouse.kd_y;
                 aim_point = frame_profile->mouse.aim_point;
                 if (ap) {
                     aim_point.offset_x = ap->offset_x;
@@ -263,18 +266,24 @@ void AimThread::loop() {
                 personal_traj_cfg = frame_profile->mouse.personal_trajectory;
                 lock_confirm_cfg = frame_profile->mouse.lock_confirm;
                 recoil_cfg = frame_profile->mouse.recoil;
-                // ★★★ V1.0.41：pid1 删除，换 SmoothAimController（EMA+比例+限幅+框高死区）。
-                //   4 个互相独立的参数：alpha 平滑 / gain 比例增益 / max_move 单帧限幅 /
-                //   deadzone_ratio 死区=框高×ratio（尺寸自适应 ⇒ 远近距离手感一致）。
-                //   放在同一「配置刷新块」内 ⇒ 改配置热更新即生效。
-                aim_x_.configure(frame_profile->mouse.aim_alpha,
-                                 frame_profile->mouse.aim_gain,
-                                 frame_profile->mouse.aim_max_move,
-                                 frame_profile->mouse.aim_deadzone_ratio);
-                aim_y_.configure(frame_profile->mouse.aim_alpha,
-                                 frame_profile->mouse.aim_gain,
-                                 frame_profile->mouse.aim_max_move,
-                                 frame_profile->mouse.aim_deadzone_ratio);
+                // ★★★ V1.0.38：**smooth 接回 Pid1Controller 第 5 参**（pid1 完全移植）。
+                //   V1.0.13 起这里恒传 0.0 ⇒ `if (smooth)` 恒假 ⇒ pid1 的 soft-limit
+                //   （smoothTerm：把大误差下的 P/D 输出压成亚线性，防止一帧打飞）
+                //   被整体关掉，只剩裸 K_p + K_i + K_d。
+                //   现按 pid1 原文 main() 的 runAxis(..., smooth=9900.0) 接回原值。
+                pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
+                                 frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
+                pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
+                                 frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
+                // ★★★ V1.0.39：把标定实测的 px/count 喂给速度观测器。
+                //   pid1 原文 `tv = error_diff + last_u` 隐含假设 gain=1（1count=1px），
+                //   我们板端实测 gain≈0.65 ⇒ 不换算就会系统性低估目标速度 35%，
+                //   前馈力度恒不足 ⇒ 只能靠调低 predict 补偿（V1.0.13 的 3.0→1.0 就是为此）。
+                //   接入后 predict 恢复作者原意量级，换游戏灵敏度不必再动 predict。
+                //   放在同一个「配置刷新块」内 ⇒ 标定写回 gain 后热更新即生效。
+                //   X/Y 各用自己的 gain（两轴灵敏度可能不同）。
+                pid_x_.set_gain(frame_profile->mouse.gain_x_px_per_count);
+                pid_y_.set_gain(frame_profile->mouse.gain_y_px_per_count);
             }
             // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
             // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
@@ -290,7 +299,7 @@ void AimThread::loop() {
             event.now_ms = task.timestamp_us / 1000ULL;
             event.target_confidence = selected.valid ? selected.box.score : 0.0f;
             event.target_distance = selected.distance;
-            if (state_machine_.update(event, scfg.lost_grace_ms, lock_confirm_cfg)) { aim_x_.reset(); aim_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            if (state_machine_.update(event, scfg.lost_grace_ms, lock_confirm_cfg)) { pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
@@ -308,8 +317,8 @@ void AimThread::loop() {
             // 只保留误差遥测；最终发送的 OutputAction 强制 dx=dy=0。
             // AI 链路（mailbox→selector→误差遥测）不受热键影响，始终运行。
             if (!injection_allowed) {
-                aim_x_.reset();      // 清在途量/PID 状态，防止旧状态绕过 Gate
-                aim_y_.reset();
+                pid_x_.reset();      // 清在途量/PID 状态，防止旧状态绕过 Gate
+                pid_y_.reset();
                 remainder_x_ = 0.0f;
                 remainder_y_ = 0.0f;
             }
@@ -422,7 +431,7 @@ void AimThread::loop() {
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_ &&
                     !selected.continuity) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
-                    aim_x_.reset(); aim_y_.reset(); remainder_x_ = remainder_y_ = 0.0f;
+                    pid_x_.reset(); pid_y_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
                     continuous_lead_.reset();  // 持续提前量累计清零（新目标重新累计"同向距离"）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
@@ -506,13 +515,14 @@ void AimThread::loop() {
                     aibox_x = fov_out_x;
                     aibox_y = fov_out_y;
                 } else {
-                    // SmoothAimController：EMA + 比例 + 限幅 + 框高×ratio 死区。
-                    // 框高喂进去做尺寸自适应死区（远目标框小→死区小→精确；近目标框大→死区大→不抖）。
-                    const float aim_box_h = aim_box_src.y2 - aim_box_src.y1;
-                    aibox_x = aim_x_.update(control_x, aim_box_h);
-                    aibox_y = aim_y_.update(control_y, aim_box_h);
+                    // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
+                    // ★ V1.0.12（2026-09-30）：原先误差先除以本档倍镜倍率再进 PID，已按
+                    //   业主口径删除（不区分倍镜，所有档位共用一套 kp）。
+                    aibox_x = static_cast<float>(pid_x_.update(control_x));
+                    aibox_y = static_cast<float>(pid_y_.update(control_y));
                 }
-                // 输出链：控制器输出 × sens（全局灵敏度） × output_scale。
+                // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
+                // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
                 const float out_gain = out_sensitivity * out_scale;
                 scaled_x = aibox_x * out_gain;
                 scaled_y = aibox_y * out_gain;
@@ -740,7 +750,7 @@ void AimThread::loop() {
                 // 兜底：若余数已非有限（理论上 validate 已挡），立即清零防持续乱飞
                 if (!std::isfinite(remainder_x_) || !std::isfinite(remainder_y_)) {
                     remainder_x_ = 0.0f; remainder_y_ = 0.0f;
-                    aim_x_.reset(); aim_y_.reset();
+                    pid_x_.reset(); pid_y_.reset();
                 }
                 // ---- 拟人化整形引擎（第 1 项落地）：对 move_x/move_y 做 Fitts 时长+速度包络+垂直抖动 ----
                 // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。

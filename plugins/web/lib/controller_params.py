@@ -11,12 +11,13 @@ from plugins.web.lib.hotkeys import _bits_to_hotkey, _hotkey_to_bits
 
 
 CONTROLLER_NUMS = {
-    # ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数
-    #   （alpha/gain/max_move/deadzone_ratio，见 core/src/aim/SmoothAimController.hpp）。
-    'aim_alpha': 'aim_alpha',
-    'aim_gain': 'aim_gain',
-    'aim_max_move': 'aim_max_move',
-    'aim_deadzone_ratio': 'aim_deadzone_ratio',
+    'kp_x': 'kp_x', 'kp_y': 'kp_y',
+    'kd_x': 'kd_x', 'kd_y': 'kd_y',
+    'predict_x': 'predict_x', 'predict_y': 'predict_y',
+    'rate_x': 'rate_x', 'rate_y': 'rate_y',
+    # ★ V1.0.38：smooth 回归（pid1 完全移植，core 侧 soft-limit 又活了）。
+    #   漏掉这两行 ⇒ 面板填的值到不了 core，且 GET 回填永远缺字段。
+    'smooth_x': 'smooth_x', 'smooth_y': 'smooth_y',
     'output_deadzone': 'output_deadzone',
     'selector_lost_grace_ms': 'lost_grace_ms',
 }
