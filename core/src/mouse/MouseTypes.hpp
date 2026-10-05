@@ -433,14 +433,15 @@ struct MouseProfile {
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
     // controller 公式（kp×rate×err + predict×vel）与输出链参数
-    // ★★★ V1.0.39+（2026-10-05）：predict_x 从 pid1 原文 3.0 降到 1.0。
-    //   pid1 原文 3.0 是「gain=1（1 count=1px）假设」下调的；我们板端实测 gain≈0.65
-    //   + 回路延迟 51ms，3.0 的前馈在该闭环下自激振荡（业主上板实测「乱飞」；
-    //   仿真移动目标 50px/s：p3.0 稳态误差 29.7px/翻转 16 次 vs p1.0 6.0px/稳定）。
-    //   ⇒ 降回 V1.0.13 的 1.0（当时有 A/B 实测 16 轮全稳支撑）。
-    //   Y 轴 pid1 原文就是 0（不带前馈），保持不变。
-    float predict_x = 1.0f;                   // X 前馈（pid1 原文 3.0，按 gain=0.65 折算到 1.0）
-    float predict_y = 0.0f;                   // pid1 Y 不带前馈（原始值 = 0）
+    // ★★★ V1.0.42（2026-10-05）：predict_x 定为 **0.5（BB927 实战值）**。
+    //   考古定案：pid1.cpp main() 的 3.0 是**演示值**；BB927（shuwu PID 的原发行方）
+    //   实战配置用 0.5（BB927_SOURCE/algo/pid_shuwu.lua 注释明写「predict X=3 是过期
+    //   信息，以 cfg 为准 0.5」，默认 predict_x=0.5）。V1.0.38 抄了演示值 3.0 ⇒ 乱飞。
+    //   本地仿真（gain=0.65 + 51ms + 噪声±2px）：p0.5 静态幅0.0/翻0，移动50px/s
+    //   落后2.9px稳，移动120px/s 落后6.0px稳 —— 三档预测里唯一全稳的。
+    //   Y 轴 BB927 实战也是 0（不打提前量），保持不变。
+    float predict_x = 0.5f;                   // X 前馈（BB927 实战值；pid1.cpp 的 3.0 是演示值）
+    float predict_y = 0.0f;                   // Y 前馈（BB927 实战 0，不打提前量）
     // ★★★ V1.0.38：**smooth 字段恢复**（V1.0.13 曾删除并折算进 kp/kd）。
     //   它是 pid1 的 soft-limit 强度：9900 = 把 P/D 压到 1%（原厂值），0 = 关闭软限幅。
     //   Pid1Controller::update() 里 `if (smooth)` 的第 5 参就是它 —— 之前恒传 0.0

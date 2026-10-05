@@ -44,6 +44,22 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.42 相对 V1.0.40（2026-10-05）：**回滚 V1.0.41（SmoothAimController），
+#     恢复 pid1（shuwu PID）+ predict=0.5（BB927 实战值）**
+#
+#   ① ★核心：V1.0.41 的 SmoothAimController（EMA+比例+限幅+框高死区）实测「太拉跨」，
+#     整体回滚（git revert d85b41f）⇒ 恢复 Pid1Controller（= BB927 实战在用的 shuwu PID，
+#     BB927_SOURCE/algo/pid_shuwu.lua 与其逐行一致）。
+#   ② ★predict_x 定 0.5：考古发现 pid1.cpp main() 的 3.0 是**演示值**，BB927（shuwu PID
+#     原发行方）实战配置 0.5（pid_shuwu.lua 注释「predict X=3 是过期信息，以 cfg 为准 0.5」）。
+#     V1.0.38 误抄演示值 3.0 ⇒ 乱飞；V1.0.40 折中 1.0 ⇒ 移动抖。
+#     本地仿真（gain=0.65+51ms+噪声±2px）：p0.5 静态幅0.0/翻0、移动50px/s 落后2.9px稳、
+#     移动120px/s 落后6.0px稳 —— 三档里唯一全稳。
+#   ③ 速度预测（AimTracker.predict / prediction_time_s）保持默认关（仿真实测全补偿会
+#     放大框噪声 ⇒ 高频抖；BB927 的同类 lead.lua 默认也关）。
+#   ④ 附带：usbproxy reset_device() 修（proxy.cpp:1518 加 reset_device_before_proxy 条件，
+#     被控电脑 reset 时不再把物理星闪接收器打死 ⇒ 透传失效要拔插的问题）。
+#
 #   V1.0.40 相对 V1.0.39（2026-10-05）：**predict 前馈默认 3.0→1.0（修复 gain=0.65 下自激乱飞）
 #     + predict_y 出厂 bug 修正（3→0）+ 转换依赖前置检查**
 #
@@ -339,7 +355,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.40 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.42 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

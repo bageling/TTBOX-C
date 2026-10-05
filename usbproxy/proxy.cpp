@@ -1511,10 +1511,20 @@ void ep0_loop(int fd) {
 			// requests submitted via sync I/O. Thus, we reset the proxied device to
 			// force libusb to interrupt the requests and allow the endpoint threads
 			// to exit on please_stop_eps checks.
-				if (set_configuration_done_once)
-					please_stop_eps = true;
-				set_configuration_status_succeeded = false;
-				clear_hid_readiness();
+			if (set_configuration_done_once)
+				please_stop_eps = true;
+			set_configuration_status_succeeded = false;
+			clear_hid_readiness();
+			// ★ 1.5.63（2026-10-05）：quirk 固件（星闪接收器 373b:10c9）扛不住 USB reset——
+			//   host 每次发 USB reset / dwc3 disconnect 都会进这条分支，原代码无条件
+			//   reset_device() ⇒ 对物理鼠标做一次 libusb_reset_device ⇒ 接收器被打死
+			//   （整设备掉总线、只能拔插）。这与 connect_device 的 reset_device_before_proxy
+			//   （device-libusb.cpp:217，1.5.61 起默认跳过）是同一类坑，但本处一直没盖到。
+			//   reset 风暴期间物理鼠标侧 I/O 不阻塞（设备还活着，正常发报告），跳过 reset 后
+			//   端点线程在下次 I/O 返回后检查 please_stop_eps 即可退出（libusb interrupt transfer
+			//   自带 timeout，不会无限卡）。最坏情况是 usbproxy 卡住被 systemd 拉起，
+			//   远好于"打死接收器要人工拔插"。
+			if (reset_device_before_proxy)
 				reset_device();
 			if (set_configuration_done_once) {
 				struct raw_gadget_config *config = &host_device_desc.configs[host_device_desc.current_config];

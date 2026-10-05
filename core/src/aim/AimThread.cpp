@@ -20,8 +20,8 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     reset_runtime_state();
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
-    // pid1.cpp main() 原始参数：X predict=3.0，Y predict=0.0。
-    pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+    // BB927 实战参数：X predict=0.5（pid1.cpp 的 3.0 是演示值），Y predict=0.0。
+    pid_x_.init(25.0, 25.0, 0.5, 0.3, 9900.0);
     pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
     thread_ = std::thread(&AimThread::loop, this);
     return true;

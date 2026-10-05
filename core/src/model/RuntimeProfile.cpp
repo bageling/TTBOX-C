@@ -677,10 +677,9 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
         // 对齐参数
-        // ★★★ V1.0.39+（2026-10-05）：predict_x 缺省从 pid1 原文 3.0 降到 1.0。
-        //   pid1 原文 3.0 是 gain=1 假设下调的，板端 gain≈0.65 + 51ms 延迟下自激
-        //   （业主上板实测「乱飞」）。Y 轴 pid1 原文就是 0，保持不变。
-        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 1.0));
+        // ★★★ V1.0.42（2026-10-05）：predict_x 缺省 0.5 = BB927 实战值
+        //   （pid1.cpp 的 3.0 是演示值；仿真 0.5 全稳、3.0 乱飞）。Y 保持 0。
+        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 0.5));
                 p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）

@@ -21,16 +21,15 @@
 
 namespace ttbox::core::aim {
 
-// 双轴 PID 参数（测试专用，默认 = pid1.cpp main() 原始值）
+// 双轴 PID 参数（测试专用，默认 = BB927 实战值）
 struct TestPidParams {
-    // ★★★ V1.0.38→V1.0.39+：回归 pid1 原文 runAxis 参数，但 predict_x 由 3.0 降到 1.0
-    //   （pid1 原文 3.0 是 gain=1 假设，板端 gain≈0.65 + 51ms 延迟自激「乱飞」）。
+    // ★★★ V1.0.42：predict_x = 0.5（BB927 实战值；pid1.cpp 的 3.0 是演示值）。
     //   判据：与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值保持一致。
     float kp_x = 25.0f;       // X 比例增益（pid1 原始值，未折算）
     float kp_y = 25.0f;
     float kd_x = 25.0f;       // 微分增益（pid1 刹车）
     float kd_y = 25.0f;
-    float predict_x = 1.0f;   // X 前馈（pid1 原文 3.0，折算到 1.0）
+    float predict_x = 0.5f;   // X 前馈（BB927 实战值；pid1 的 3.0 是演示值）
     float predict_y = 0.0f;   // Y 不带前馈（pid1 原始值）
     float rate_x = 0.3f;      // 输出速率（pid1 kp_gain_rate）
     float rate_y = 0.3f;
@@ -50,8 +49,8 @@ struct TestPidParams {
 class TestPidController {
 public:
     TestPidController() {
-        // 与 AimThread::start() 构造一致：pid1.cpp main() 原始演示值（predict 已折算到 1.0）
-        pid_x_.init(25.0, 25.0, 1.0, 0.3, 9900.0);
+        // 与 AimThread::start() 构造一致（predict = BB927 实战值 0.5）
+        pid_x_.init(25.0, 25.0, 0.5, 0.3, 9900.0);
         pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
         // ★ V1.0.38：紧接着按默认 params configure 一次。
         //   生产里 AimThread 每帧都会用 frame_profile 调 configure()，从不存在
