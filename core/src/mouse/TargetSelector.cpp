@@ -331,7 +331,9 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     : std::min(cfg.roi_w, cfg.roi_h) * 0.5f;
                 const float radius = base_radius * cfg.fov_range;
                 const float radius_sq = radius * radius;
-                last_fov_radius_px_ = radius;  // ★ V1.0.31：供预览画同一个圆
+                last_fov_radius_px_ = radius;  // ★ 记录本帧实际用的选靶半径（像素）。V1.0.37 起
+                                               //   预览蓝圆已移前端，此值现由 test_target_selector
+                                               //   观察选靶半径数学（防止 base_radius × fov_range 被改坏）
 
                 // ByteTrack：每帧先对现有轨迹做卡尔曼预测（写入 pred_cx/pred_cy 供关联参考）
                 for (auto& t : tracks_) kalman_predict(t, cfg);

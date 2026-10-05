@@ -44,6 +44,16 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.37 相对 V1.0.36（2026-10-05）：**预览「瞄准范围」改常驻蓝圆、实时联动滑块**。
+#                       · 起因：预览里有两个圈 —— 前端 HTML 白框（实时随滑块变）+ core 视频流蓝圆
+#                         （要等保存才变），两者不同步、重叠，业主反馈「蓝圆不变、白框变」。
+#                       · 改（蓝圆与选靶同源、实时）：前端 .aim-range-overlay 白框 → 常驻蓝圆，
+#                         直径 = 截取尺寸 × 倍率（与 core 选靶半径 search_radius_px × fov_range 同源），
+#                         拖动滑块/改截图尺寸实时变；core 删掉 draw_guides 里的 FOV 蓝圆（避免两圆重叠）。
+#                       · 删（core）：PreviewModule::draw_guides 的 cv::circle 蓝圆、AimGuides::fov_radius /
+#                         fov_circle_crop 字段、CoreRuntime 的 g.fov_radius 接线、AimThread::fov_radius_px 转发。
+#                       · 护栏：test_preview_and_targeting_v31.py 改「core 不再带 FOV 半径」；
+#                         test_web_fov_radius_semantics.py 的直径公式 / 越界带不变。
 #   V1.0.36 相对 V1.0.35（2026-10-05）：**删除「瞄头部小框」功能**。
 #                       · 业主令「删除 PID 页面里那个瞄头部小框功能」：移除
 #                         mouse.aim_point.aim_at_head_box 开关 + resolve_head_box() 几何配对识头
@@ -262,7 +272,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.36 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.37 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

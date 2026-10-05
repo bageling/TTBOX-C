@@ -254,9 +254,10 @@ bool CoreRuntime::start(std::string* error) {
                 });
                 // ★★ V1.0.31 预览三层（对照 GitHub sunone_aimbot 2026-10-04 调研）：
                 //   ① 全部检测框（细）—— 看得见 AI 此刻检出了哪些候选、各在哪；
-                //   ③ 中心→落点连线 + FOV 圆 —— 看得见准星往哪走、范围约束多大。
-                //   圆半径直接取**选靶本帧真正用的那个值**（`last_fov_radius_px()`），
-                //   不是自己重算 —— 否则"画的圆"和"约束的圆"会对不上（调试画面最常见的骗人方式）。
+                //   ③ 中心→落点连线 —— 看得见准星往哪走。
+                //   ★ V1.0.37：FOV 蓝圆已移到前端（web 覆盖层实时画，与「瞄准范围」滑块联动，
+                //     直径 = 截取尺寸 × 倍率，与 core 选靶半径 search_radius_px × fov_range 同源），
+                //     core 视频流不再烧圆 —— 否则两圆不同步、重叠。
                 preview_->set_detections_provider([this]() {
                     return aim_thread_.status().detection_boxes;
                 });
@@ -270,7 +271,6 @@ bool CoreRuntime::start(std::string* error) {
                         ? (st.target_x1 + st.target_x2) * 0.5f : 0.0f;
                     g.aim_y = (st.has_target && st.target_y2 > st.target_y1)
                         ? st.target_y1 + (st.target_y2 - st.target_y1) * 0.24f : 0.0f;
-                    g.fov_radius = aim_thread_.fov_radius_px();
                     return g;
                 });
             }

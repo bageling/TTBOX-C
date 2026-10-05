@@ -43,7 +43,7 @@ def test_preview_draws_all_three_layers():
     cpp = _src(PREV_CPP)
     for fn, why in (('draw_detections_list', '① 全部检测框（细）'),
                     ('draw_aim_box', '② 选中的框（粗）'),
-                    ('draw_guides', '③ 中心→落点连线 + FOV 圆')):
+                    ('draw_guides', '③ 中心→落点连线')):
         assert fn in cpp, '缺少 %s —— %s' % (fn, why)
     # 三层都要在绘制分支里被调用（顺序：全部 → 选中 → 辅助线）
     i_all = cpp.index('draw_detections_list(crop, roi.w, roi.h, crop_stride, all, roi.x, roi.y);')
@@ -59,17 +59,17 @@ def test_all_three_providers_are_registered():
         assert setter in rt, 'CoreRuntime 没注册 %s ⇒ 那一层画不出来' % setter
 
 
-def test_guides_provider_reuses_selector_fov_radius():
-    """★ 画出来的圆必须**就是**约束选靶的那个圆（不能两处各算一遍）。
-    调试画面最常见的骗人方式就是"画的圆"与"生效的圆"对不上。"""
+def test_guides_provider_no_longer_carries_fov_radius():
+    """★ V1.0.37：蓝圆已移到前端（web 覆盖层实时画、随「瞄准范围」滑块变）。
+    core 的 guides 只保留中心→落点连线，**不许**再带 FOV 半径 —— 否则视频流里
+    又出现一个「要等保存才变」的圆，与前端实时蓝圆不同步、重叠（正是本轮回修的 bug）。"""
     rt = _code_only(_src(RUNTIME))
     m = re.search(r'set_guides_provider\(\[this\]\(\)\s*\{(.*?)\n                \}\);', rt, re.S)
     assert m, '找不到 guides provider 的实现'
     body = m.group(1)
-    assert 'fov_radius()' in body or 'fov_radius_px' in body, (
-        'guides 里的 FOV 半径必须取自选靶器的实际值（fov_radius_px），不能自己重算')
-    assert 'last_fov_radius' not in body, (
-        'selector_ 是 AimThread 私有成员，外部拿不到；应经 AimThread::fov_radius_px() 转发')
+    assert 'fov_radius' not in body and 'fov_radius_px' not in body, (
+        'guides 里又出现 FOV 半径 —— 蓝圆应由前端画（实时），core 画会与前端不同步重叠：%s'
+        % body.strip())
 
 
 def test_fov_radius_no_longer_doubled():

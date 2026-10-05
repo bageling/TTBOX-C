@@ -137,9 +137,6 @@ public:
         prediction_time_s_ = seconds > 0.0f ? seconds : 0.0f;
     }
     Status status() const;
-    // ★ V1.0.31：本帧实际使用的 FOV 半径（像素）。预览画圆直接取它，
-    //   避免"画的圆"与"约束选靶的圆"两处各算一遍而对不上。
-    float fov_radius_px() const { return selector_.last_fov_radius_px(); }
 
 private:
     // 每次 start 都代表一个全新的采集/模型运行世代。必须清除旧模型的目标锁定、

@@ -225,12 +225,11 @@ void PreviewModule::draw_detections_list(uint8_t* crop, uint32_t width, uint32_t
     }
 }
 
-// ③ 中心→落点 连线 + FOV 圆。
+// ③ 中心→落点 连线（FOV 圆已移到前端：V1.0.37 起蓝圆由 web 覆盖层实时画、
+//    与「瞄准范围」滑块联动，core 视频流不再烧圆 —— 否则两圆不同步、重叠）。
 //    画法来源（2026-10-04 GitHub 调研）：
 //      sunone_aimbot      show_target_line：中心到当前目标的连线
-//      VIper / 各类 aimbot cv2.circle(frame, (center,center), fov_r, ...)：圆心=截取区中心
-//    我们的准星/参考点 = 裁剪区中心（CoordinateTransform::reference_point），
-//    与业界的"截取区中心"是同一个点 ⇒ 圆心也用它。
+//    我们的准星/参考点 = 裁剪区中心（CoordinateTransform::reference_point）。
 void PreviewModule::draw_guides(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
                                const AimGuides& guides, uint32_t origin_x,
                                uint32_t origin_y) const {
@@ -239,10 +238,6 @@ void PreviewModule::draw_guides(uint8_t* crop, uint32_t width, uint32_t height, 
     // 圆心 = 裁剪区中心（准星位置）
     const int ccx = static_cast<int>(width / 2);
     const int ccy = static_cast<int>(height / 2);
-    if (guides.fov_radius > 1.0f) {
-        cv::circle(image, cv::Point(ccx, ccy), static_cast<int>(guides.fov_radius),
-                   cv::Scalar(255, 200, 0), 1, cv::LINE_8);  // BGR 蓝：与"框"区分
-    }
     if (guides.has_aim_point) {
         int ax, ay;
         if (to_crop_coords(guides.aim_x, guides.aim_y, origin_x, origin_y, width, height, &ax, &ay)) {

@@ -1123,10 +1123,13 @@ html[data-theme="light"] .preview-panel {
   object-fit: contain;
 }
 
-/* 瞄准范围框：**故意画成方形**（业主 2026-09-24 裁定，别当 bug 改成圆）。
-   数值上边长 = 截取尺寸 × 倍率 = 瞄准范围圆的直径（倍率 1.00 即截取区内接圆），
-   方框就是这个内接圆的包围盒 —— 保方形是为了边界看得更清楚。
-   改了倍率语义（见 updateAimRangeOverlay）务必同步复核这里的边长口径。 */
+/* 瞄准范围圆：**常驻蓝色圆**（业主 2026-10-05 裁定，V1.0.37 起）。
+   蓝圆 = 当前瞄准范围：直径 = 截取尺寸 × 倍率（倍率 1.00 即截取区内接圆），
+   与 core 选靶半径同源（search_radius_px × fov_range，见 AimThread / TargetSelector）。
+   拖动「瞄准范围」滑块、或改「看得有多宽」截图尺寸，蓝圆都**实时**变（不等保存）。
+   ★ 这个圆由前端 HTML 覆盖层画（实时），core 视频流里不再烧蓝圆 ——
+     否则两个圆不同步、重叠。改了倍率语义务必同步复核
+     01-home.js 的 updateAimRangeOverlay（边长口径）。 */
 .aim-range-overlay {
   position: absolute;
   z-index: 2;
@@ -1135,11 +1138,11 @@ html[data-theme="light"] .preview-panel {
   width: 100%;
   aspect-ratio: 1 / 1;
   pointer-events: none;
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  border-radius: 3px;
+  border: 2px solid rgba(0, 180, 255, 0.95);
+  border-radius: 50%;
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.42),
-    0 0 18px rgba(255, 255, 255, 0.18);
+    0 0 18px rgba(0, 180, 255, 0.30);
   opacity: 0.95;
   transform: translate(-50%, -50%);
 }

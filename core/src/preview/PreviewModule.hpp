@@ -67,15 +67,15 @@ public:
         detections_provider_ = std::move(provider);
     }
 
-    // ③ 辅助线：中心→落点 的连线端点，以及 FOV 圆半径（像素）。
+    // ③ 辅助线：中心→落点 的连线端点。
     //   aim_point 给的是**落点**（ty = 框顶 + offset_y×框高），与 sunone 的
-    //   `show_target_line` 同义。fov_radius <= 0 表示不画圆。
+    //   `show_target_line` 同义。
+    //   ★ V1.0.37：FOV 圆已移到前端（web 覆盖层实时画蓝圆、与「瞄准范围」滑块联动），
+    //     故这里不再带 fov_radius / fov_circle_crop 字段。
     struct AimGuides {
         bool has_aim_point = false;
         float aim_x = 0.0f;
         float aim_y = 0.0f;
-        float fov_radius = 0.0f;   // 像素；<=0 不画
-        bool fov_circle_crop = false;  // true = 圆心在裁剪区中心（默认）
     };
     using GuidesProvider = std::function<AimGuides()>;
     void set_guides_provider(GuidesProvider provider) {
@@ -109,7 +109,7 @@ private:
     void draw_detections_list(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
                               const std::vector<DetectionBox>& boxes,
                               uint32_t origin_x, uint32_t origin_y) const;
-    // ③ 中心→落点 连线 + FOV 圆（画法对照 sunone_aimbot / 各类 aimbot 的 cv2.circle）
+    // ③ 中心→落点 连线（FOV 圆已移前端，见 AimGuides 注释）
     void draw_guides(uint8_t* crop, uint32_t width, uint32_t height, uint32_t stride,
                      const AimGuides& guides, uint32_t origin_x, uint32_t origin_y) const;
     // 把像素坐标平移到"裁剪区坐标系"（框是全帧坐标，预览只画裁剪区那块）

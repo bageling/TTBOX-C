@@ -15,7 +15,7 @@
 简单说：**盒子只用 HDMI 线看电脑屏幕，用 AI 找到目标，再用 USB 线把鼠标指令送进电脑。**
 它不读内存、不改游戏数据，只处理外部画面，接入电脑时不需要安装任何软件。
 
-当前出货版本 **`V1.0.36`**。版本号的写法有讲究（不能改成纯数字），原因见[第八节](#八版本与交付)。
+当前出货版本 **`V1.0.37`**。版本号的写法有讲究（不能改成纯数字），原因见[第八节](#八版本与交付)。
 
 ---
 
@@ -210,18 +210,18 @@ python docs/check_links.py
 
 ### 版本号为什么必须带字母前缀
 
-当前产品版本 **`V1.0.36`**，真源是 `core/include/ttbox/core/version.hpp::kCoreVersion`。
+当前产品版本 **`V1.0.37`**，真源是 `core/include/ttbox/core/version.hpp::kCoreVersion`。
 
-**不要把它改成纯数字 `1.0.36`。** 盒子判「云端这个包能不能升」只看版本串排序，规则在三个地方各写一份（板端 `scripts/ttbox_ota_updater.py`、面板 `plugins/web/bin/ttbox-web.py`、云端 bridge `ota.js`），且**字母段排在数字段之前**：
+**不要把它改成纯数字 `1.0.37`。** 盒子判「云端这个包能不能升」只看版本串排序，规则在三个地方各写一份（板端 `scripts/ttbox_ota_updater.py`、面板 `plugins/web/bin/ttbox-web.py`、云端 bridge `ota.js`），且**字母段排在数字段之前**：
 
 | 比较 | 结果 |
 |---|---|
-| `V1.0.36` vs `1.5.70` | `V1.0.36` 更新，可以升 ✅ |
-| `1.0.36` vs `1.5.70` | `1.0.36` 更旧，判降级、直接拒装 ❌ |
+| `V1.0.37` vs `1.5.70` | `V1.0.37` 更新，可以升 ✅ |
+| `1.0.37` vs `1.5.70` | `1.0.37` 更旧，判降级、直接拒装 ❌ |
 
 关键：这套判定跑在**盒子已装好的旧版本**里，改仓库源码救不了现网。只要跨这条线，新版本就必须带字母前缀。回归锁在 `plugins/web/tests/test_web_ota_version_scheme.py`。
 
-CMake 的 `project(VERSION)` 只认数字，所以 `core/CMakeLists.txt` 写**去掉前缀的数字镜像** `1.0.36`，门禁第 ⑥ 项断言「`kCoreVersion` 去前导字母 == CMake VERSION」。
+CMake 的 `project(VERSION)` 只认数字，所以 `core/CMakeLists.txt` 写**去掉前缀的数字镜像** `1.0.37`，门禁第 ⑥ 项断言「`kCoreVersion` 去前导字母 == CMake VERSION」。
 
 ### 出货链路
 
@@ -229,7 +229,7 @@ CMake 的 `project(VERSION)` 只认数字，所以 `core/CMakeLists.txt` 写**�
 改代码 → 提交 → 本机全绿 → WSL 交叉构建（留档）→ 打包签名 → 云端入库 → 切 latest → 板端点「检查更新」
 ```
 
-板子**不会自己拉云端**，OTA 只由面板「检查更新」按钮触发。云端版本管理页按 `versionCode` 倒序，`V1.0.36`（versionCode 100036）比 `1.5.xx`（105xxx）小、排列表最后一行，不影响功能（盒子只认 `/ota/latest`）。
+板子**不会自己拉云端**，OTA 只由面板「检查更新」按钮触发。云端版本管理页按 `versionCode` 倒序，`V1.0.37`（versionCode 100037）比 `1.5.xx`（105xxx）小、排列表最后一行，不影响功能（盒子只认 `/ota/latest`）。
 
 ---
 
