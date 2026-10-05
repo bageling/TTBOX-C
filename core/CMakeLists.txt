@@ -44,6 +44,26 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.43 相对 V1.0.42（2026-10-06）：**新增 Fitts 定律控制器（治 pid1「追着怪/停不住」）**
+#
+#   ① ★核心：业主实测 V1.0.42（pid1+predict=0.5）仍「追着怪、停不住、瞄准有问题」。
+#     定位为 pid1 **结构缺陷**（前馈主导对误差变化率敏感 → 追着怪；P/D 被 smooth
+#     压 100 倍 → 停不住；死区绝对像素 → 瞄不准），非参数能修。新增 Fitts 定律控制器
+#     （dat58/aimbot 思路）：MT = A + B×log2(2|err|/W+1)，近慢远快、只追误差不追变化率。
+#     参数 A=20/B=20/dz=3px/ff_gain=0.6 为板端仿真定案。
+#     **保留 pid1 可切换**（mouse.controller_type：fitts 默认 / pid1 备选）——
+#     Fitts 上板不行改配置切回，不用再发版。
+#   ② 速度前馈补固有滞后：Fitts 只对误差比例响应 ⇒ 移动目标滞后 ≈ 速度×MT
+#     （err=100px 时 MT=108ms，叠加 51ms 回路延迟总滞后 ~110ms = 「追着慢」）。
+#     ff = min(ff_gain,0.85) × vel × MT，喂 AimTracker 的 vx/vy（One-Euro 滤波后）。
+#   ③ 三个安全护栏（算法核对时发现并修复）：
+#     · **dt 实测传入**：Fitts 是时间模型，写死 dt ⇒ 帧率抖动时输出 ±50% 失配。
+#     · **非有限输入拦截**：abs(NaN)<dz 恒假 ⇒ NaN 穿死区 ⇒ log2(NaN) 一路到 HID 输出
+#       （int16 转 NaN 是 UB）。入口三参数 isfinite + 出口兜底。
+#     · **前馈符号护栏**：反向前馈只钳幅度不翻符号（否则「减速」变「加速」）。
+#   ④ 仿真验证（gain=0.65 + 51ms + 噪声±2px）：不规则目标翻转 10→4（降 60%）、
+#     移动 50px/s 翻转 2→0、静态/急停全 0（停得住）。单测 10/10、ctest 43/43。
+#
 #   V1.0.42 相对 V1.0.40（2026-10-05）：**回滚 V1.0.41（SmoothAimController），
 #     恢复 pid1（shuwu PID）+ predict=0.5（BB927 实战值）**
 #
@@ -355,7 +375,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.42 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.43 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -994,6 +1014,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_pid1 tests/test_pid1.cpp)
   target_link_libraries(test_pid1 PRIVATE ttbox_core)
   add_test(NAME test_pid1 COMMAND test_pid1)
+
+  # V1.0.43：Fitts 定律控制器单测（近慢远快/尺寸死区/px→count/纯函数/MT 钳位）
+  add_executable(test_fitts_aim tests/test_fitts_aim.cpp)
+  target_link_libraries(test_fitts_aim PRIVATE ttbox_core)
+  add_test(NAME test_fitts_aim COMMAND test_fitts_aim)
 
   # V3 阶段 5：拟人化抖动前馈扣除（延迟对齐环形缓冲 + 两条链抖动上报）
   add_executable(test_jitter_feedforward tests/test_jitter_feedforward.cpp)

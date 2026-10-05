@@ -404,6 +404,13 @@ JsonValue RuntimeProfile::to_json() const {
     //   的第 5 参，配置若不落盘则每次重启都只能吃缺省值，用户在面板的调整会丢。
     m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
     m.set("smooth_y", JsonValue::number(static_cast<double>(mouse.smooth_y)));
+    // ★ V1.0.43：Fitts 控制器（治 pid1「追着怪/停不住」）。controller_type + 3 参数必须落盘，
+    //   否则重启吃缺省、面板调整丢失（与 smooth_x 同理由）。
+    m.set("controller_type", JsonValue::string(mouse.controller_type));
+    m.set("fitts_a_ms", JsonValue::number(static_cast<double>(mouse.fitts_a_ms)));
+    m.set("fitts_b_ms", JsonValue::number(static_cast<double>(mouse.fitts_b_ms)));
+    m.set("fitts_deadzone_px", JsonValue::number(static_cast<double>(mouse.fitts_deadzone_px)));
+    m.set("fitts_ff_gain", JsonValue::number(static_cast<double>(mouse.fitts_ff_gain)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
     JsonValue pc = JsonValue::object();
@@ -665,6 +672,12 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", 25.0));
         p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));
         p.mouse.smooth_y = static_cast<float>(obj_num(*m, "smooth_y", 9900.0));
+        // ★★★ V1.0.43：Fitts 控制器（默认 fitts；老配置无此键 ⇒ 吃缺省 fitts，与 MouseTypes 一致）
+        p.mouse.controller_type = obj_str(*m, "controller_type", "fitts");
+        p.mouse.fitts_a_ms = static_cast<float>(obj_num(*m, "fitts_a_ms", 20.0));
+        p.mouse.fitts_b_ms = static_cast<float>(obj_num(*m, "fitts_b_ms", 20.0));
+        p.mouse.fitts_deadzone_px = static_cast<float>(obj_num(*m, "fitts_deadzone_px", 3.0));
+        p.mouse.fitts_ff_gain = static_cast<float>(obj_num(*m, "fitts_ff_gain", 0.6));
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
         p.mouse.hfov = static_cast<float>(obj_num(*m, "hfov", 83.105));
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));

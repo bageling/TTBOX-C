@@ -15,6 +15,7 @@
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
+#include "aim/FittsAimController.hpp"
 #include "aim/PipelineDebug.hpp"
 #include "aim/PidTrace.hpp"
 #include "mouse/AimTracker.hpp"
@@ -153,6 +154,10 @@ private:
     TargetSelector selector_;
     Pid1Controller pid_x_;   // P_PID：X 轴（predict=3.0）
     Pid1Controller pid_y_;   // P_PID：Y 轴（predict=0.0）
+    // ★ V1.0.43：Fitts 定律控制器（dat58 思路，治 pid1「追着怪/停不住」）。
+    //   与 pid_x_/pid_y_ 并存，由 mouse.controller_type 二选一（默认 fitts）。
+    FittsAimController fitts_x_;
+    FittsAimController fitts_y_;
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）

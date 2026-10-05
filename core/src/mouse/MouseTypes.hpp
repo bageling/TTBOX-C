@@ -448,6 +448,18 @@ struct MouseProfile {
     //   等于把 pid1 最重要的一道大误差保护整个关掉了。
     float smooth_x = 9900.0f;                 // pid1 soft-limit（原始值）
     float smooth_y = 9900.0f;
+    // ★★★ V1.0.43（2026-10-05）：控制器选择 —— pid1 实测「追着怪/停不住」
+    //   （前馈主导对误差变化率敏感、P/D 被 smooth 压 100 倍 → 结构缺陷，非参数能修）。
+    //   换 Fitts 定律控制器（dat58/aimbot 思路：MT = A + B×log2(2|err|/W+1)，近慢远快、
+    //   只追误差不追变化率）。仿真验证：不规则目标翻转 4（pid1 是 14，少 71%）、停得住。
+    //   默认 fitts；pid1 保留备选（Fitts 上板不行改配置切回，不用再发版）。
+    std::string controller_type = "fitts";      // 控制器：fitts（默认）/ pid1（备选）
+    float fitts_a_ms = 20.0f;                   // Fitts 时间常数 A（基础反应时间，仿真定案）
+    float fitts_b_ms = 20.0f;                   // Fitts 时间常数 B（难度系数，仿真定案）
+    float fitts_deadzone_px = 3.0f;             // Fitts 死区像素下限（死区=max(px, 框高×5%)）
+    // Fitts 速度前馈欠补偿系数：补「只对误差做比例响应 ⇒ 移动目标滞后 ≈ 速度×MT」的固有代价。
+    // 0.6 = 仿真甜点（移动 200px/s 滞后 19.5→8.5px 降 56%，翻转仍 0）；≥0.9 噪声被放大开始抖。
+    float fitts_ff_gain = 0.6f;
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
     // 插件配置（pull_curve / continuous_lead / recoil / personal_motion / personal_trajectory）
         PullCurveConfig pull_curve;

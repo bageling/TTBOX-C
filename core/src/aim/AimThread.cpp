@@ -100,6 +100,10 @@ void AimThread::loop() {
             PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
+            // ★ V1.0.43：Fitts 控制器（dat58 思路，治 pid1「追着怪/停不住」）。
+            //   与 pid1 并存，controller_type 二选一（默认 fitts）。
+            bool use_fitts = false;
+            float gain_x_ppc = 0.65f, gain_y_ppc = 0.65f;  // 标定增益（Fitts px→count 换算）
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
             std::shared_ptr<const RuntimeProfile> frame_profile;
@@ -284,6 +288,21 @@ void AimThread::loop() {
                 //   X/Y 各用自己的 gain（两轴灵敏度可能不同）。
                 pid_x_.set_gain(frame_profile->mouse.gain_x_px_per_count);
                 pid_y_.set_gain(frame_profile->mouse.gain_y_px_per_count);
+                // ★★★ V1.0.43：Fitts 控制器配置 + 控制器选择（与 pid 并存，controller_type 二选一）。
+                //   gain 复用标定产物（gain_x/y_px_per_count，与 pid set_gain 同源）。
+                use_fitts = (frame_profile->mouse.controller_type == "fitts");
+                fitts_x_.configure(frame_profile->mouse.fitts_a_ms,
+                                   frame_profile->mouse.fitts_b_ms,
+                                   frame_profile->mouse.fitts_deadzone_px,
+                                   0.05f, frame_profile->mouse.fitts_ff_gain);
+                fitts_y_.configure(frame_profile->mouse.fitts_a_ms,
+                                   frame_profile->mouse.fitts_b_ms,
+                                   frame_profile->mouse.fitts_deadzone_px,
+                                   0.05f, frame_profile->mouse.fitts_ff_gain);
+                gain_x_ppc = frame_profile->mouse.gain_x_px_per_count > 1e-4f
+                                 ? frame_profile->mouse.gain_x_px_per_count : 0.65f;
+                gain_y_ppc = frame_profile->mouse.gain_y_px_per_count > 1e-4f
+                                 ? frame_profile->mouse.gain_y_px_per_count : 0.65f;
             }
             // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
             // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
@@ -514,6 +533,18 @@ void AimThread::loop() {
                 if (fov_mode_active) {
                     aibox_x = fov_out_x;
                     aibox_y = fov_out_y;
+                } else if (use_fitts) {
+                    // ★★★ V1.0.43：Fitts 定律控制器（近慢远快、只追误差不追变化率，
+                    //   治 pid1「追着怪/停不住」）。死区用目标框高做尺寸自适应
+                    //   （远目标框小死区小→精确，近目标框大死区大→不抖）。
+                    const float box_h = (selected.valid && selected.box.y2 > selected.box.y1)
+                                            ? (selected.box.y2 - selected.box.y1) : 0.0f;
+                    // ★ 速度前馈用 AimTracker 的 vx/vy（One-Euro + 框高自适应滤波后的速度估计，
+                    //   噪声已抑制）。补偿 Fitts 只对误差做比例响应带来的固有滞后。
+                    aibox_x = fitts_x_.update(control_x, box_h, gain_x_ppc,
+                                              tracker_.state().vx, dt_ms);
+                    aibox_y = fitts_y_.update(control_y, box_h, gain_y_ppc,
+                                              tracker_.state().vy, dt_ms);
                 } else {
                     // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
                     // ★ V1.0.12（2026-09-30）：原先误差先除以本档倍镜倍率再进 PID，已按
