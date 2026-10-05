@@ -94,14 +94,21 @@ CALIB_AMP_MISS_LIMIT = 2
 # 会打进持续振荡（实测 ±150px），把目标甩出画面 ⇒ 整轮 no_target 作废
 # （2026-09-24 板上 A/B：kp0.10/kd0.30 十六轮全稳）。gain=Δpx/ΔΣcounts 是闭环恒等式、
 # 与 PID 参数无关 ⇒ 压 PID 不影响测量。kd 按 3×kp 给阻尼。
-# ★ V1.0.13（2026-09-30）：10.0 是**旧名义值**（实际生效 0.10）。core 删掉 smooth 之后
-#   mouse.kp_x 就是生效值，这里必须一起换域 —— 否则标定期会把 10 直接写进 kp_x，
-#   环路自激 100 倍，目标被甩飞、整轮标定白跑。
-CALIB_PID_KP_MAX = 0.10
+#
+# ★★★ V1.0.38（2026-10-05）：**口径随 PID 一起翻回名义值**（业主令 pid 完全移植 pid1）。
+#   历史（V1.0.13~V1.0.37）：core 删掉 smooth、把"削弱 99%"折算进 kp，于是 kp 变成**生效值**，
+#   温和档也从旧名义 10.0 换成 0.10。
+#   现在 core 恢复 smooth（接回 Pid1Controller 第 5 参，AimThread.cpp:274-277）、
+#   RuntimeProfile 里的折算整段删除 ⇒ kp 回到**名义值**域。
+#   ⚠ 不跟着翻的后果（实测口径推演）：温和档写 0.10 名义 ⇒ 经 smooth=9900 实际只发挥
+#     0.001，比板端现役 kp=25（生效 0.25）**弱 250 倍** ⇒ bias 阶跃推不动目标、
+#     位移采样全落在噪声里 ⇒ gain 测不准 ⇒ 整轮标定得出错误的 kp（"标定成功但参数是错的"）。
+#   ⇒ 换算：名义值 = 生效值 / (10000-smooth)/10000 = 0.10 / 0.01 = **10.0**（即回到 V1.0.13 之前）。
+CALIB_PID_KP_MAX = 10.0
 CALIB_PID_KD_RATIO = 3.0
-# ★ V1.0.13（2026-09-30）：CALIB_DEFAULT_SMOOTH_X / CALIB_MAX_SMOOTH_X 与
-#   _calib_live_smooth() 一并删除 —— core 侧 smooth_x 已折叠进 kp/kd，配置里没有这个量了。
-#   继续按默认 9900 传，推导出的 kp 会**强 100 倍**（详见 derive_pid_params 的注释）。
+# ★ V1.0.38：smooth 又活过来了，标定期**不覆盖**它（保持用户/出厂值 9900）。
+#   V1.0.13 删过 CALIB_DEFAULT_SMOOTH_X / CALIB_MAX_SMOOTH_X / _calib_live_smooth()，
+#   现在不需要复活那套 —— 标定只改 kp/kd/predict_x，smooth 由用户在面板「缓冲」项自管。
 # 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
 # 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
 CALIB_MIN_COUNTS = 6

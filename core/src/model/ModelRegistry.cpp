@@ -714,6 +714,15 @@ bool ModelRegistry::install(const std::string& model_id, std::string* error) {
         fs::remove_all(install_tmp, rm_ec);
         return false;
     }
+    // ⚠⚠ **不要在这里清 staging**（2026-10-05 实测踩坑后撤回）。
+    //   本板端确有staging 残留（实测 2 套 = 15.1 MB，sjzv11___1 与 320dawan0907），
+    //   但**不能靠 install 成功后清理来修** —— `install` 刻意支持**幂等重放**
+    //   （见 test_model_registry.cpp:126「同一 staging 内容的安装请求允许幂等重放，
+    //   例如首次响应在网络中丢失」）：清掉 staging 会让重放直接失败
+    //   （实测报「模型未验证（先 validate）」）。
+    //   ⇒ 正确做法是**保留 staging**，靠 `remove(model_id)`（第 851 行已清）或
+    //     独立的"陈旧 staging 回收"策略处理，不要动 install 的成功路径。
+    //     （陈旧回收属独立需求，未实现；本条注释钉住"为什么这里不能清"。）
     refresh_locked(nullptr);
     return true;
 }

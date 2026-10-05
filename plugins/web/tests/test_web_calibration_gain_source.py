@@ -322,16 +322,34 @@ def test_payload_exposes_new_diagnostics():
 # ===========================================================================
 # 8. 标定期"温和档" PID（2026-09-24 板上 A/B 定死）
 #
-#   实战参数（kp=0.25/kd=0.25，V1.0.13 起都是**生效值**）在 ~50ms 采集回路延迟下，
-#   bias 阶跃（±8..32px 换向）会把环打进持续振荡（实测准星 ±150px），目标被甩出画面
-#   ⇒ 整轮 no_target。kp=0.10/kd=0.30 同一链路 16 轮全稳、gain 一致性 0.94/0.90。
+#   实战参数（kp=0.25/kd=0.25）在 ~50ms 采集回路延迟下，bias 阶跃（±8..32px 换向）
+#   会把环打进持续振荡（实测准星 ±150px），目标被甩出画面 ⇒ 整轮 no_target。
+#   kp=0.10/kd=0.30 同一链路 16 轮全稳、gain 一致性 0.94/0.90。
 #   gain=Δpx/ΔΣcounts 是闭环恒等式 ⇒ 压 PID 不影响测量结果。
+#
+# ★ 上面三行的 kp/kd 都是**生效值**（板端 A/B 当年 core 已删 smooth）。
+#   V1.0.38 回归 pid1 完全移植后，配置里写的是**名义值**（= 生效值 ×100），
+#   见下面 test_calib_gentle_pid_constants_are_sane 的换算说明。
 # ===========================================================================
 
 def test_calib_gentle_pid_constants_are_sane(web_mod):
-    # ★ V1.0.13：10.0 是**旧名义值**（实际生效 0.10）。kp 换成生效值之后这里必须同步，
-    #   否则标定期会把 10 直接写进 mouse.kp_x ⇒ 环路自激 100 倍 ⇒ 整轮标定白跑。
-    assert 0.04 <= web_mod.CALIB_PID_KP_MAX <= 0.15
+    """★ V1.0.38：口径随 PID 翻回**名义值**域，断言也改成在**生效域**做。
+
+    这条测试的**物理意图不变**：温和档必须落在"能稳定采集"的那一档
+    （板端 A/B 实测：kp_eff 0.10 十六轮全稳，0.25 持续振荡）。
+    变的只是"返回值属于哪个域"—— V1.0.13~V1.0.37 core 删了 smooth、kp 即生效值，
+    当时区间直接写 [0.04, 0.15]；V1.0.38 回归 pid1 完全移植（smooth 接回第 5 参）、
+    kp 回到名义域，区间需换算：生效值 0.04~0.15 ⇒ 名义值 4.0~15.0。
+
+    两种口径混用会**静默**失效：温和档若按 0.10 名义写进配置 ⇒ 经 soft-limit
+    实际只发挥 0.001 ⇒ bias 阶跃推不动目标 ⇒ gain 采样全落在噪声里
+    ⇒ 整轮标定得出错误 kp（"标定成功但参数是错的"）。
+    """
+    from ttbox_motion.calibration import SMOOTH_FACTOR
+    kp_eff = web_mod.CALIB_PID_KP_MAX * SMOOTH_FACTOR   # 换算回生效域再判
+    assert 0.04 <= kp_eff <= 0.15, (
+        f'温和档换算成生效值应在 0.04~0.15，实际 {kp_eff:.4f}'
+        f'（CALIB_PID_KP_MAX={web_mod.CALIB_PID_KP_MAX} 名义 × SMOOTH_FACTOR）')
     assert 2.0 <= web_mod.CALIB_PID_KD_RATIO <= 4.0
 
 

@@ -389,8 +389,8 @@ def _brand_template_name(template: str, brand: Any = None) -> str:
 # 参数翻译（Web 格式 ↔ RuntimeProfile 格式）
 # 映射依据：Web 前端 collectConfig()（web/static/app.js:5663）+ Web daemon
 # 二进制字段名实测。predict_x/y 是 Pid1Controller 的 I 通道增益（无量纲），
-# rate_x/y 是 kp_gain_rate —— 全部直通。
-# ★ V1.0.13（2026-09-30）：smooth_x/y 已随 core 一起删除（折叠进 kp/kd），
-#   aim_offset_x/y 与 capture.offset_x/y 也一并删除（落点只留「瞄点」一个入口）。
-#   老配置里若还带这些键，core 一律静默忽略。
+# rate_x/y 是 kp_gain_rate，smooth_x/y 是 soft-limit 强度（9900=压到 1%）—— 全部直通。
+# ★ V1.0.38（2026-10-05）：smooth_x/y **回来了**（pid1 完全移植，core 恢复第 5 参，
+#   见 Pid1Controller/AimThread:274-277）。V1.0.13~V1.0.37 期间曾随折算一起删除。
+#   aim_offset_x/y 与 capture.offset_x/y 的删除不变（落点只留「瞄点」一个入口）。
 # ====================================================================

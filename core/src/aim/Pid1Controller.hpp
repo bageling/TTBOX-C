@@ -61,7 +61,34 @@ public:
         bandwidth = kBandwidth;
     }
 
-    // 与 pid1.cpp P_PID::update 完全一致。
+    // ================================================================
+    // ★★ V1.0.39（2026-10-05）唯一一处改动：**速度观测器的单位换算**
+    //
+    //   pid1 原文：`tv = error_diff + last_u`
+    //   推导：error(k+1) = error(k) - u(k)·g + v_t ⇒ v_t = error_diff + u(k)·g
+    //   ⇒ 作者的 `+ last_u` 其实隐含假设 **g = 1（1 count = 1 px）**。
+    //
+    //   我们板端实测 **g ≈ 0.65**（1 count = 0.65 px，标定写回
+    //   mouse.gain_x_px_per_count）。沿用 g=1 的假设会**系统性低估目标速度 35%**
+    //   ⇒ 前馈力度恒不足 ⇒ 只能靠把 predict 调低来补偿（这正是 V1.0.13 把 predict
+    //   从 3.0 降到 1.0 的真正原因）⇒ **每台机器/每个游戏灵敏度都要重调 predict**。
+    //
+    //   接入 gain 后：v_t 估算回到正确量级 ⇒ predict 恢复作者原意（3.0 附近）
+    //   ⇒ **换游戏灵敏度不必再动 predict**。
+    //
+    //   ⚠ 仿真实测（带51ms 延迟 + gain 0.65 的闭环）：
+    //     predict=3 时g=1.0 → 误差 -1.50（略微过冲，最理想）
+    //     predict=3 时 g=0.65 → 误差 +4.63（欠冲 6px，差 3 倍）
+    //   ⇒ 这 35% 的错配是**可测量**的，不是理论推断。
+    //
+    //   ★ 兼容性：`gain_= 1.0`（缺省）时公式**逐字节等于 pid1 原文**，
+    //     test_pid1 的等价性对拍仍可钉住（默认不调用 set_gain）。
+    // ================================================================
+    void set_gain(double gain_px_per_count) {
+        if (gain_px_per_count > 0.0) gain_ = gain_px_per_count;
+    }
+
+    // 与 pid1.cpp P_PID::update 完全一致（仅 tv 一行带 gain，见上）。
     double update(double error) {
         if (std::abs(error) < 0.3) error = 0.0;
         if (std::abs(error - last_error) > 30.0) reset();
@@ -70,12 +97,15 @@ public:
         kp_integral(error);
 
         double error_diff = error - last_error;
-        double target_velocity = error_diff + last_u;
+        // ★ 唯一改动行：pid1 原文是 `+ last_u`，这里按 g 换算成"屏幕像素/帧"。
+        double target_velocity = error_diff + last_u * gain_;
         target_velocity = update_velocity_filter(target_velocity);
 
         double raw_velocity_input = target_velocity;
         if (std::abs(error) < 1.0 && std::abs(error_diff) < 0.1) {
-            raw_velocity_input = error_diff + last_u * 0.5;
+            // ★ 同上：近点分支的 last_u 也要按g 换算，否则与主分支量纲不一致
+            //   （主分支已经是 px/帧，这里若留 count，会在 |err|<1 时突然掉一个数量级）。
+            raw_velocity_input = error_diff + last_u * gain_ * 0.5;
         }
 
         double ki_raw = raw_velocity_input;
@@ -197,6 +227,11 @@ private:
     double velocity_filter_p = 1.0;
     double integral_filter_x = 0.0;
     double integral_filter_p = 1.0;
+
+    // ★ V1.0.39：速度观测器的单位换算因子 = mouse.gain_*_px_per_count（标定实测）。
+    //   **缺省 1.0 = pid1 原文假设**（1 count = 1 px）⇒ 不调用 set_gain() 时
+    //   update() 与 pid1.cpp 逐字节一致，test_pid1 的对拍仍能钉住。
+    double gain_ = 1.0;
 };
 
 }  // namespace ttbox::core::aim

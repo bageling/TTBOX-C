@@ -244,6 +244,104 @@ int main() {
         }
     }
 
+    // =====================================================================
+    // ★★★ V1.0.39：速度观测器的 gain 单位换算（唯一一处 pid 改动）
+    //
+    // pid1 原文 `tv = error_diff + last_u` 隐含假设 gain=1（1 count = 1 px）。
+    // 我们板端 gain≈0.65 ⇒ 不换算会系统性低估目标速度 35%，前馈力度恒不足。
+    //
+    // ★ 为什么要单独测：对拍**证明不了这条** —— 对拍路径全程gain_=1.0
+    //   （缺省），压根不经过换算。所以必须另加行为断言。
+    // =====================================================================
+
+    // ① 默认 gain=1.0 ⇒ 与 pid1 原文逐点一致（这是兼容性的根本保证）。
+    //    上面那整段主对拍已经覆盖了这一点，这里只做一次显式确认。
+    {
+        Pid1Controller a, b;
+        a.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        // 不调 set_gain() ⇒ gain_ 保持缺省 1.0
+        std::vector<double> seq;
+        for (int i = 1; i <= 30; ++i) seq.push_back(2.0 * i);   // 同用例②：越过 0.5 闸门的等速序列
+        int lf = 0;
+        for (size_t i = 0; i < seq.size(); ++i) {
+            if (std::abs(a.update(seq[i]) - b.update(seq[i])) > eps) {
+                std::printf("[FAIL] gain 缺省时第 %zu 步偏离 pid1\n", i);
+                ++lf;
+            }
+        }
+        if (lf == 0) std::printf("  [OK] gain 缺省(=1.0) 与 pid1 一致\n");
+        fails += lf;
+    }
+
+    // ② set_gain() 真的生效：gain=0.65 与 gain=1.0 在同一序列上输出必须不同。
+    //    （若 set_gain 是空实现，两者会完全相同 ⇒ 此断言立刻红。）
+    //
+    // ★ 序列选择要点（2026-10-05 实测踩坑）：必须让 `ki_raw` 越过 |ki|>0.5 闸门，
+    //   否则 gain 乘进去也被闸门抹成 0，gain 的影响**根本传不到输出**。
+    //   静止/缓变序列（50→20→8…）的 error_diff≈0 ⇒ ki_raw<0.5 ⇒ 闸门关掉 ⇒ 两者相同。
+    //   所以这里用**持续单向变化**的序列：error_diff 恒定 ⇒ 速度观测器有量。
+    {
+        Pid1Controller a, b;
+        a.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        a.set_gain(1.0);
+        b.set_gain(0.65);                      // 板端实测值
+        // 每帧 +2px 的等速序列（error_diff=2.0 > 0.5 闸门），共 30 帧让两个增益都热起来
+        std::vector<double> seq;
+        for (int i = 1; i <= 30; ++i) seq.push_back(2.0 * i);
+        double ua = 0.0, ub = 0.0;
+        for (double e : seq) { ua = a.update(e); ub = b.update(e); }
+        if (std::abs(ua - ub) <= eps) {
+            std::printf("[FAIL] set_gain 无效果：gain=0.65 与 gain=1.0 输出完全相同"
+                        "（序列未让 ki_raw 越过 0.5 闸门？）\n");
+            ++fails;
+        } else {
+            std::printf("  [OK] set_gain 生效：g=1.0 出 %.6f vs g=0.65 出 %.6f\n", ua, ub);
+        }
+    }
+
+    // ③ 非法 gain（≤0）必须被忽略、保持 1.0 ⇒ 防止标定异常把观测器打废。
+    {
+        Pid1Controller a, b;
+        a.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.set_gain(0.0);
+        b.set_gain(-1.0);
+        std::vector<double> seq;
+        for (int i = 1; i <= 30; ++i) seq.push_back(2.0 * i);   // 同用例②：越过 0.5 闸门的等速序列
+        int lf = 0;
+        for (size_t i = 0; i < seq.size(); ++i) {
+            if (std::abs(a.update(seq[i]) - b.update(seq[i])) > eps) {
+                std::printf("[FAIL] 非法 gain 未被忽略：第 %zu 步\n", i);
+                ++lf;
+            }
+        }
+        if (lf == 0) std::printf("  [OK] 非法 gain(≤0) 被忽略，保持 1.0\n");
+        fails += lf;
+    }
+
+    // ④ 近点减半分支也必须换算（|err|<1 且 |err_diff|<0.1）。
+    //    这条最容易漏：主分支改了、近点分支没改 ⇒ 该分支量纲差 1/g 倍。
+    {
+        Pid1Controller a, b;
+        a.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        b.set_gain(0.65);
+        // 先喂一个能让 last_u 显著非零的序列，再进近点分支
+        const std::vector<double> warm = {50.0, 25.0, 12.0, 6.0, 3.0, 1.5, 1.0};
+        for (double e : warm) { a.update(e); b.update(e); }
+        double ua = 0.0, ub = 0.0;
+        const std::vector<double> near = {0.8, 0.5, 0.3, 0.2};
+        for (double e : near) { ua = a.update(e); ub = b.update(e); }
+        if (std::abs(ua - ub) <= eps) {
+            std::printf("[FAIL] 近点分支未换算：|err|<1 区间内两轴输出无差异\n");
+            ++fails;
+        } else {
+            std::printf("  [OK] 近点分支已换算：g=1.0 出 %.6f vs g=0.65 出 %.6f\n", ua, ub);
+        }
+    }
+
     if (fails == 0) std::printf("test_pid1: PASS\n");
     else std::printf("test_pid1: %d FAILED\n", fails);
     return fails == 0 ? 0 : 1;

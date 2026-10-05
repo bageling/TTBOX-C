@@ -215,6 +215,23 @@ def import_model():
     label = stem.strip() or model_id
     incoming = Path(ttbox_paths.models_root()) / '_incoming'
     incoming.mkdir(parents=True, exist_ok=True)
+    # ★★ V1.0.39（2026-10-05）Bug 修复（补第三层兜底）：_incoming **总量配额**。
+    #   上面的 finally 已保证"上传即删、不留痕"，但那只能防新泄漏；板端实测
+    #   **历史已残留 5 个文件 23.4 MB**（repro2/repro3/conc1 等），且本目录
+    #   **既无配额也无启动清理**。面板是免密无鉴权的（ttbox-web.py「D1 免密全拆」），
+    #   单请求上限 256 MB ⇒ 反复上传即可把磁盘写满。
+    #   ⇒ 加目录总量上限，超了直接拒并**回滚本次落盘**（fail-closed，不静默接受）。
+    #   阈值 512 MB：现役模型 4~11 MB，够放~50 个未清理的残留又不至于撑爆分区。
+    _INCOMING_QUOTA_BYTES = 512 * 1024 * 1024
+    try:
+        _used = sum(p.stat().st_size for p in incoming.iterdir() if p.is_file())
+    except OSError:
+        _used = 0
+    if _used > _INCOMING_QUOTA_BYTES:
+        return jsonify({'ok': False,
+                        'error': (f'_incoming 目录已占用 {_used // (1024 * 1024)} MB，'
+                                  f'超过配额 {_INCOMING_QUOTA_BYTES // (1024 * 1024)} MB，'
+                                  f'拒绝上传（磁盘可能被占满）')}), 507
     src_ext = '.onnx' if lower.endswith('.onnx') else '.rknn'
     dst = incoming / f'{model_id}{src_ext}'
     f.save(str(dst))
@@ -227,7 +244,6 @@ def import_model():
                                           'source_format': 'onnx' if src_ext == '.onnx' else 'rknn',
                                           'sha256': _sha})
         if r1.get('status') != 0:
-            dst.unlink(missing_ok=True)
             return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
         # ★ 超时分级（api_v1.py 表）：模型加载可到分钟级，默认 5s 会把"正在加载"误判成
         #   "Core 挂了"，操作者会反复重试。VALIDATE/ACTIVATE ≥120s、INSTALL 60s。
@@ -239,6 +255,18 @@ def import_model():
             return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
     finally:
         _end_import(model_id)
+        # ★★ V1.0.39（2026-10-05）Bug 修复：_incoming 的上传落点**必须无条件删除**。
+        #   原实现只在 `r1 失败` 那一支 unlink ⇒ 校验失败、安装失败、以及
+        #   **成功导入**三条路径都会把 4~11 MB 的 .rknn 永久留在 _incoming/。
+        #   板端实测残留 5 个文件 = 23.4 MB（含 repro2/repro3/conc1 等历史垃圾）。
+        #
+        #   ★ 为什么这条更该修（安全视角）：面板是**免密无鉴权**的（见 ttbox-web.py
+        #     「D1 免密全拆」），而 _incoming 是无认证上传的落点、单请求上限 256 MB。
+        #     修复前反复上传即可把磁盘写满 ⇒ **未鉴权远程可触发磁盘耗尽**。
+        #     修完每次请求不留痕（模型已在 installed/），无法靠此路径占空间。
+        #     注：MODEL_IMPORT 已把内容复制进 staging/，此处删的是"上传暂存副本"，
+        #     不影响导入结果（staging 副本由 core 侧 install 成功后自行清理）。
+        dst.unlink(missing_ok=True)
     ui_meta = {}
     if class_names:
         ui_meta['class_names'] = class_names

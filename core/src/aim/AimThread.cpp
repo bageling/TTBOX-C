@@ -275,6 +275,15 @@ void AimThread::loop() {
                                  frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
                                  frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
+                // ★★★ V1.0.39：把标定实测的 px/count 喂给速度观测器。
+                //   pid1 原文 `tv = error_diff + last_u` 隐含假设 gain=1（1count=1px），
+                //   我们板端实测 gain≈0.65 ⇒ 不换算就会系统性低估目标速度 35%，
+                //   前馈力度恒不足 ⇒ 只能靠调低 predict 补偿（V1.0.13 的 3.0→1.0 就是为此）。
+                //   接入后 predict 恢复作者原意量级，换游戏灵敏度不必再动 predict。
+                //   放在同一个「配置刷新块」内 ⇒ 标定写回 gain 后热更新即生效。
+                //   X/Y 各用自己的 gain（两轴灵敏度可能不同）。
+                pid_x_.set_gain(frame_profile->mouse.gain_x_px_per_count);
+                pid_y_.set_gain(frame_profile->mouse.gain_y_px_per_count);
             }
             // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
             // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
