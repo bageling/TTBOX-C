@@ -261,15 +261,36 @@
             <section id="control-section-pid" class="control-section is-active" data-control-section>
               <div class="assist-grid control-group-grid">
                 <div class="pid-control-block">
-                  <div class="module-title"><strong>跟枪手感（五个数调完基本就定了）</strong></div>
-                  <div class="field-hint">这页决定准星怎么追人：先「拉」过去，再「刹」住不乱晃。左右和上下共用前三项；只有「预判」左右、上下各一个，默认上下不预判（保持 0）。</div>
+                  <div class="module-title"><strong>跟枪手感（先选控制器，再调那几个数）</strong></div>
+                  <div class="field-hint">V1.0.43 起默认用 <strong>Fitts 控制器</strong>：按「离目标多远」决定这一帧该走多快，天然近慢远快、只追误差不追变化（治「追着怪、停不住」）。老 pid 控制器保留为备选，觉得不对可切回去。切换后只有对应那半边的参数生效，另一半会被忽略。</div>
                   <div class="field-grid compact pid-field-grid">
-                    <label class="field"><span class="field-label">拉力（追得有多猛）</span><input id="controller_kp" data-config type="number" step="0.01"><span class="field-hint">准星往人身上拉的力气。追不上人、总跟丢就加；拉过头来回冲、抖就降。★ V1.0.38 起这是 pid1 的<strong>名义值</strong>（出厂 25，实际出力由「缓冲」那一项决定）；自动标定也会写这个数。</span></label>
-                    <label class="field"><span class="field-label">刹车（稳不稳）</span><input id="controller_kd" data-config type="number" step="0.01"><span class="field-hint">快到目标时踩刹车的力度，防冲过头。数值太大反而会抖 —— 觉得画面晃，优先把它降下来。</span></label>
-                    <label class="field"><span class="field-label">左右预判</span><input id="controller_predict" data-config type="number" step="0.1"><span class="field-hint">对左右移动的人提前往前瞄一点（打提前量）。总是慢半拍就加；瞄到前面太多就降。★ 出厂 0.5 是 BB927 实战值；3.0 是原版演示值，在这套 51ms 延迟下必发飘，别往上调太多。</span></label>
-                    <label class="field"><span class="field-label">上下预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">上下一般不预判，保持 0。只有追上下移动很厉害的目标才考虑加。</span></label>
-                    <label class="field"><span class="field-label">跟随速度</span><input id="controller_rate" data-config type="number" step="0.01"><span class="field-hint">力气涨上来的快慢。觉得反应慢就加一点；觉得一窜一窜就降一点。</span></label>
-                    <label class="field"><span class="field-label">缓冲（防一帧打飞）</span><input id="controller_smooth" data-config type="number" step="10"><span class="field-hint">★ pid1 的大误差保护：差得越远，它把输出压得越狠，避免一帧冲到头再拉回来。出厂 9900 = 压到 1%；<strong>调到 0 会关掉这层保护</strong>，切过去时容易过冲。左右和上下共用。</span></label>
+                    <label class="field"><span class="field-label">控制器</span>
+                      <select id="controller_type" data-config>
+                        <option value="fitts">Fitts（推荐，治追着怪/停不住）</option>
+                        <option value="pid1">老 pid（备选，V1.0.42 及更早）</option>
+                      </select>
+                      <span class="field-hint">切到「老 pid」下面那五个参数才会生效；Fitts 模式下它们被忽略。</span>
+                    </label>
+                  </div>
+
+                  <div class="module-title"><strong>Fitts 控制器（当前默认）</strong></div>
+                  <div class="field-hint">四个数：前两个定「快慢节奏」，后两个定「跟得多紧 / 收得多早」。默认值是本地仿真扫出来的平衡点。</div>
+                  <div class="field-grid compact pid-field-grid">
+                    <label class="field"><span class="field-label">快慢（时间常数 A）</span><input id="fitts_a_ms" data-config type="number" step="1"><span class="field-hint"><strong>调大 = 整体更慢更稳</strong>，调小 = 更跟手。觉得「追不上人」就降（20 → 12）；觉得「太黏糊」就加（20 → 30）。出厂 20。</span></label>
+                    <label class="field"><span class="field-label">难度系数（B）</span><input id="fitts_b_ms" data-config type="number" step="1"><span class="field-hint">决定「远处/近处」的分离程度。<strong>调大 = 远处更卖力拉、近处更谨慎</strong>（近慢远快更明显）。出厂 20；觉得远处拉不动就加到 28。</span></label>
+                    <label class="field"><span class="field-label">跟多紧（死区像素）</span><input id="fitts_deadzone_px" data-config type="number" step="0.5"><span class="field-hint">准星进到目标框这么近（像素）以内就停。跟太紧会左右小幅抖动就调大（3 → 5）；总是慢半拍够不到就调小（3 → 1.5）。实际死区还会自动按目标框高放大（远目标更精确）。出厂 3。</span></label>
+                    <label class="field"><span class="field-label">提前量（前馈强度）</span><input id="fitts_ff_gain" data-config type="number" step="0.05"><span class="field-hint">对移动的人<b>提前往他要去的方向走一点</b>，补 51ms 延迟造成的落后。<strong>调大更跟手、但过了会「冲过头再拉回」</strong>。觉得移动目标跟不上就加（0.6 → 0.75）；觉得动一下就冲过头就降（0.6 → 0.4）。出厂 0.6，上限 0.85。</span></label>
+                  </div>
+
+                  <div class="module-title"><strong>老 pid 控制器（备选，切到上面选它才生效）</strong></div>
+                  <div class="field-hint">BB927 实战那套（前馈主导）。V1.0.42 实测「追着怪、停不住」才换的 Fitts，这里保留以便随时切回对比。</div>
+                  <div class="field-grid compact pid-field-grid">
+                    <label class="field"><span class="field-label">拉力</span><input id="controller_kp" data-config type="number" step="0.01"><span class="field-hint">比例力度，出厂 25。</span></label>
+                    <label class="field"><span class="field-label">刹车</span><input id="controller_kd" data-config type="number" step="0.01"><span class="field-hint">微分阻尼，出厂 25。</span></label>
+                    <label class="field"><span class="field-label">左右预判</span><input id="controller_predict" data-config type="number" step="0.1"><span class="field-hint">出厂 0.5（BB927 实战值；3.0 是原版演示值，在这套 51ms 延迟下必发飘）。</span></label>
+                    <label class="field"><span class="field-label">上下预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">出厂 0（不打上下提前量）。</span></label>
+                    <label class="field"><span class="field-label">跟随速度</span><input id="controller_rate" data-config type="number" step="0.01"><span class="field-hint">出力爬升速率，出厂 0.3。</span></label>
+                    <label class="field"><span class="field-label">缓冲（soft-limit）</span><input id="controller_smooth" data-config type="number" step="10"><span class="field-hint">pid 的大误差保护，出厂 9900。<strong>调到 0 = 关掉这层保护</strong>，容易过冲。</span></label>
                   </div>
                 </div>
                 <article class="module-tile">

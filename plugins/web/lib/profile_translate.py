@@ -26,6 +26,7 @@ from plugins.web.lib.capture_geometry import (
 from plugins.web.lib.controller_params import (
     CONTROLLER_BOOLS,
     CONTROLLER_NUMS,
+    CONTROLLER_STRINGS,
     CTRL_BLOCKS,
     CTRL_SELECTOR_FIELDS,
     _coerce_ctrl_value,
@@ -154,7 +155,7 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     ctrl = (body.get('ai') or {}).get('controller') or {}
     mouse: dict = {}
 
-    # 1) controller 数值/布尔直通
+    # 1) controller 数值/布尔/枚举直通
     for yk, tk in CONTROLLER_NUMS.items():
         if ctrl.get(yk) is not None:
             mouse[tk] = ctrl[yk]
@@ -163,6 +164,13 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
             if tk.startswith('_'):
                 continue  # 嵌套结构开关，下面统一处理
             mouse[tk] = bool(ctrl[yk])
+    # ★ V1.0.43：controller_type 是枚举字符串（fitts/pid1），必须白名单化才不被丢弃。
+    #   非法值一律回退 'fitts'（与 core MouseProfile 缺省一致），防面板写脏值让 core
+    #   落到「既不是 fitts 也不是 pid1」的第三态 ⇒ 控制器静默不工作。
+    _ctype = ctrl.get('controller_type')
+    if _ctype is not None:
+        _ctype = str(_ctype).strip().lower()
+        mouse['controller_type'] = _ctype if _ctype in ('fitts', 'pid1') else 'fitts'
 
     # 2) 插件结构（pull_curve / personal_trajectory / lock_confirm / head_aim / personal_motion）
     pull_curve: dict = {}
@@ -542,6 +550,14 @@ def profile_to_web(prof: dict) -> dict:
     head_aim = mouse.get('head_aim') or {}
     recoil = mouse.get('recoil') or {}
     ctrl = {
+        # ★★★ V1.0.43：控制器选择 + Fitts 四参必须进回填投影，否则 GET_CONFIG 回来
+        #   没有这些键 ⇒ 面板永远显示默认值，看不到板端真实生效值（改了也看不出效果）。
+        'controller_type': mouse.get('controller_type'),
+        'fitts_a_ms': mouse.get('fitts_a_ms'),
+        'fitts_b_ms': mouse.get('fitts_b_ms'),
+        'fitts_deadzone_px': mouse.get('fitts_deadzone_px'),
+        'fitts_ff_gain': mouse.get('fitts_ff_gain'),
+        # ---- 老 pid 参数（controller_type=pid1 时才被 core 消费，但始终投影以便来回切）----
         'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
         'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
         'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),

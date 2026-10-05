@@ -11,6 +11,13 @@ from plugins.web.lib.hotkeys import _bits_to_hotkey, _hotkey_to_bits
 
 
 CONTROLLER_NUMS = {
+    # ★★★ V1.0.43：控制器选择 + Fitts 四参（治 pid1「追着怪/停不住」，默认控制器）。
+    #   controller_type 是**字符串**，不走本表（见下方 CTRL_STRINGS）；Fitts 四参是数值。
+    'fitts_a_ms': 'fitts_a_ms',          # 时间常数 A（调大=更慢更稳）
+    'fitts_b_ms': 'fitts_b_ms',          # 难度系数 B（调大=远处更卖力）
+    'fitts_deadzone_px': 'fitts_deadzone_px',  # 死区像素（跟多紧）
+    'fitts_ff_gain': 'fitts_ff_gain',    # 速度前馈（提前量强度）
+    # ---- 老 pid 控制器（仅 controller_type=pid1 时被 core 消费）----
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
     'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'predict_x': 'predict_x', 'predict_y': 'predict_y',
@@ -20,6 +27,13 @@ CONTROLLER_NUMS = {
     'smooth_x': 'smooth_x', 'smooth_y': 'smooth_y',
     'output_deadzone': 'output_deadzone',
     'selector_lost_grace_ms': 'lost_grace_ms',
+}
+
+# controller 内的字符串字段（不走数值表；值域是枚举，不是连续量）。
+# ★ V1.0.43：controller_type 决定 core 消费哪套参数（fitts 默认 / pid1 备选）。
+#   白名单化是必须的：不在白名单的键会被 web 层静默丢弃 ⇒ 面板改了不生效。
+CONTROLLER_STRINGS = {
+    'controller_type': 'controller_type',   # 'fitts' | 'pid1'
 }
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {

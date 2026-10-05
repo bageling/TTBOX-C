@@ -83,12 +83,15 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
-  // ★★★ V1.0.38：面板回归 pid1 原文移植（业主令「pid 以 pid1 为准完全移植」）。
-  //   kp/kd/predict 回到**名义值**域 —— V1.0.13~V1.0.37 的 [0,1]/[0,2] 是折算口径
-  //   （kp 生效值上限 1.0），现在 kp=25 出厂、标定写回约 10.2，老上限会直接卡死。
-  //   换算关系：生效 = 名义 × (10000-smooth)/10000（smooth 出厂 9900 ⇒ ×0.01）。
-  //   ⇒ 名义域上限 = 生效域上限 / 0.01 = 100/200。
-  //   ★ smooth=0 会关掉 soft-limit（pid1 的大误差保护），故上限锁 9999 与 core 校验同界。
+  // ★★★ V1.0.43：控制器二选一（fitts 默认 / pid1 备选）+ Fitts 四参数。
+  //   范围与 core 的 FittsAimController / MouseProfile 校验同界（core 侧 A/B 无上限硬校验，
+  //   这里给面板设上限防手滑填出离谱值 ⇒ 整段 clamp 到 [1,200]ms / ff [0,0.85]）。
+  fitts_a_ms: [1, 200],
+  fitts_b_ms: [1, 200],
+  fitts_deadzone_px: [0, 50],
+  // ff 上限 0.85 = FittsAimController 内的硬钳（再大也不会更跟手，只会被噪声放大成抖）
+  fitts_ff_gain: [0, 0.85],
+  // ---- 老 pid 控制器（仅 controller_type=pid1 时生效）----
   controller_kp: [0, 100],
   controller_kd: [0, 200],
   controller_predict: [0, 10],
@@ -109,17 +112,15 @@ const OVERVIEW_DEFAULTS = {
 };
 
 const CONTROLLER_DEFAULTS = {
-  // 2026-09-20 定案：pid1.cpp 的 P_PID 为唯一标准，面板只暴露它的这几个参数。
-  // ★ 2026-09-24 修正：原先把 kp/kd/predict/rate/smooth 五项**同时写 _x 与 _y**，
-  //   回填只取 X ⇒ 面板上调 X 的预判会把 Y 一起改成同一个值。而 pid1.cpp main() 里
-  //   X/Y 的唯一差别恰恰就是 predict ⇒ predict_y 必须独立。
-  //   现在：Kp / Kd / Rate 两轴共用（参考实现里两轴本来就同值），
-  //         predict_x / predict_y 各自独立。
-  // ★ V1.0.42：predict 定为 **0.5 = BB927 实战值**。
-  //   pid1.cpp main() 的 3.0 是演示值（V1.0.38 误抄 ⇒ 乱飞）；BB927（shuwu PID 原发行方）
-  //   实战配置 0.5（pid_shuwu.lua 注释「X=3 是过期信息，以 cfg 为准 0.5」）。
-  //   本地仿真（gain=0.65 + 51ms）：p0.5 静态幅0.0/翻0、移动稳 —— 三档里唯一全稳。
+  // ★★★ V1.0.43：控制器选择 + Fitts 四参数（默认值 = 板端仿真定案）。
   //   判据：必须与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值一字不差。
+  controller_type: "fitts",
+  fitts_a_ms: 20,
+  fitts_b_ms: 20,
+  fitts_deadzone_px: 3,
+  fitts_ff_gain: 0.6,
+  // ---- 老 pid 控制器（controller_type=pid1 时才生效）----
+  //   predict=0.5 = BB927 实战值（pid1.cpp main() 的 3.0 是演示值，误抄 ⇒ 乱飞）。
   kp: 25,
   kd: 25,
   predict: 0.5,

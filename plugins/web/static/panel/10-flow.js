@@ -2402,6 +2402,13 @@ function populateForm(config) {
   setValue("hotkey_guard_toggle_hotkey", hotkeyGuard.toggle_hotkey ?? HOTKEY_GUARD_DEFAULTS.toggle_hotkey);
   renderAimProfiles(config.aim_profiles);
 
+  // ★★★ V1.0.43：控制器选择 + Fitts 四参回填（下拉用 setValue，与 number 框同一套 API）。
+  setValue("controller_type", controller.controller_type ?? CONTROLLER_DEFAULTS.controller_type);
+  setValue("fitts_a_ms", controller.fitts_a_ms ?? CONTROLLER_DEFAULTS.fitts_a_ms);
+  setValue("fitts_b_ms", controller.fitts_b_ms ?? CONTROLLER_DEFAULTS.fitts_b_ms);
+  setValue("fitts_deadzone_px", controller.fitts_deadzone_px ?? CONTROLLER_DEFAULTS.fitts_deadzone_px);
+  setValue("fitts_ff_gain", controller.fitts_ff_gain ?? CONTROLLER_DEFAULTS.fitts_ff_gain);
+  // ---- 老 pid 参数回填（仅 controller_type=pid1 时被 core 消费，但始终回填以便来回切）----
   // Kp / Kd / Rate 三项两轴共用：回填取 X 轴的值（权威），保存时同时写回两轴。
   // ★ 预判两轴独立，必须从各自的 _x / _y 回填 —— 否则「面板上调 X 的预判顺带改掉 Y」
   //   那个 bug 会在下一次保存时复活（Y 的预判在 pid1.cpp 里必须是 0）。
@@ -2603,6 +2610,17 @@ function collectConfig() {
     aim_profiles: collectAimProfiles(),
     ai: {
       controller: {
+        // ★★★ V1.0.43：控制器选择（fitts 默认 / pid1 备选）。
+        //   两种参数**都**提交：core 侧 controller_type 决定消费哪一套
+        //   （Fitts 模式不读 kp/kd/predict/rate/smooth；pid1 模式不读 fitts_*），
+        //   所以用户来回切控制器时，另一套的值原地保留、不会丢。
+        controller_type: getString("controller_type") || CONTROLLER_DEFAULTS.controller_type,
+        // Fitts 四参数（默认控制器的调参面）
+        fitts_a_ms: getNumber("fitts_a_ms", CONTROLLER_DEFAULTS.fitts_a_ms),
+        fitts_b_ms: getNumber("fitts_b_ms", CONTROLLER_DEFAULTS.fitts_b_ms),
+        fitts_deadzone_px: getNumber("fitts_deadzone_px", CONTROLLER_DEFAULTS.fitts_deadzone_px),
+        fitts_ff_gain: getNumber("fitts_ff_gain", CONTROLLER_DEFAULTS.fitts_ff_gain),
+        // ---- 老 pid 参数（controller_type=pid1 时才被 core 消费）----
         // Kp / Kd / Rate 三项 X / Y 共用面板上的同一个输入框：一个框写两份。
         kp_x: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
         kp_y: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
