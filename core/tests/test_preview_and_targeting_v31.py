@@ -129,3 +129,26 @@ def test_round_object_is_sorted_after_humanoid():
         '几何判据必须是**第一排序键**（圆/方块物整体后排）')
     assert seg.index('prefer_humanoid') < seg.index('a.priority'), (
         '几何判据要排在 priority 之前 —— 否则一个高优先级类别的球还是会赢')
+
+
+# ---------------------------------------------------------------- 角标 = 置信度
+def test_aim_box_label_is_confidence_not_class():
+    """业主 2026-10-05：框上方应是模型的置信度，不应该是类别。
+    类别号在 7 类模型（class_names 为空）下没有语义；置信度才是模型直接输出。"""
+    prev = _code_only(_src(PREV_CPP))
+    m = re.search(r'snprintf\(label[^;]*\)', prev)
+    assert m, '找不到 draw_aim_box 的角标 snprintf'
+    assert 'box.score' in m.group(0), '角标应取 box.score（置信度），不是别的：%s' % m.group(0)
+    assert 'box.class_id' not in m.group(0), (
+        '角标不应再取 box.class_id（类别）：%s' % m.group(0))
+    # 数据源必须把选中目标置信度传出来（不能再硬编码 0）
+    rt = _code_only(_src(RUNTIME))
+    assert 'out->score = st.target_score' in rt, (
+        'aim_box_provider 应回填 st.target_score，不能写死 0')
+    # AimThread 必须把选中目标置信度写进 status
+    th = _code_only(_src(THREAD))
+    assert 'status_.target_score = selected.valid ? selected.box.score' in th, (
+        'AimThread 没把选中目标置信度写进 status')
+    # Status 结构体必须有 target_score 字段
+    ah = _src(REPO / 'core' / 'src' / 'aim' / 'AimThread.hpp')
+    assert re.search(r'float\s+target_score\s*=', ah), 'AimThread::Status 缺 target_score 字段'

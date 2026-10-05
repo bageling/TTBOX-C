@@ -34,6 +34,7 @@ public:
         bool has_target = false;
         int target_id = -1;
         int target_class_id = -1;
+        float target_score = 0.0f;   // 选中目标的模型置信度（0~1），预览框角标显示
         float target_width = 0.0f;
         float target_height = 0.0f;
         float target_x1 = 0.0f;

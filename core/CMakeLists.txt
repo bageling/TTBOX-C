@@ -44,6 +44,16 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.35 相对 V1.0.34（2026-10-05）：**预览框角标显示模型置信度，不再显示类别号**。
+#                       · 业主反馈「框上方应该是模型的置信度，不应该是类别」：V1.0.25 起
+#                         角标画的是 `cls %d`（类别号），但板端现役是 7 类模型、class_names 为空
+#                         ⇒ 类别号没有语义。置信度才是模型「这是目标」的直接输出（0~1）。
+#                       · 修（4 处）：AimThread::Status 加 target_score 字段 + AimThread.cpp
+#                         写 status_.target_score = selected.box.score；CoreRuntime.cpp 的
+#                         aim_box_provider 回填 out->score = st.target_score（不再硬编码 0）；
+#                         PreviewModule.cpp 角标 snprintf 改为 "%.0f%%"（box.score×100）。
+#                       · 护栏：test_preview_and_targeting_v31.py 新增
+#                         test_aim_box_label_is_confidence_not_class（源码级）。
 #   V1.0.34 相对 V1.0.33（2026-10-05）：**修 FOV 预览圈与主页「瞄准范围」滑块不同步（差 2 倍）**。
 #                       · 根因：V1.0.31 起 core 已把 fov_range = fov.radius × 2 改成
 #                         fov.radius × fov_scale（AimThread.cpp，删掉 ×2），但 web 翻译层
@@ -242,7 +252,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.34 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.35 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

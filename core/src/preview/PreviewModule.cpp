@@ -278,9 +278,10 @@ void PreviewModule::draw_aim_box(uint8_t* crop, uint32_t width, uint32_t height,
     const cv::Scalar color(0, 255, 0);
     cv::rectangle(image, cv::Point(x1, y1), cv::Point(x2, y2), color, 3, cv::LINE_8);
 
-    // 角标：只标类别号（Status 里没有"选中目标"的置信度字段，标 score 只能填 0 误导人）。
+    // 角标：显示选中目标的模型置信度（0~1 → 百分比）。不标类别号 —— class_names 为空时
+    // 类别号没有语义（板端现役是 7 类模型），置信度才是模型"这是目标"的直接输出。
     char label[32];
-    std::snprintf(label, sizeof(label), "cls %d", box.class_id);
+    std::snprintf(label, sizeof(label), "%.0f%%", box.score * 100.0f);
     int baseline = 0;
     const cv::Size text_size = cv::getTextSize(
         label, cv::FONT_HERSHEY_SIMPLEX, 0.45, 1, &baseline);

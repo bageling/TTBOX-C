@@ -845,6 +845,7 @@ void AimThread::loop() {
             status_.has_target = selected.valid;
             status_.target_id = selected.valid ? selected.target_id : -1;
             status_.target_class_id = selected.valid ? selected.box.class_id : -1;
+            status_.target_score = selected.valid ? selected.box.score : 0.0f;
             // ★ V1.0.24：显示框 = **控制链正在用的那个上半身框**，不再做多框并集。
             //   旧实现把同一目标身上的所有框并起来（身体框 + 头框 → 画面上那个
             //   "又大又含头"的框），业主看到的"框是全身加头部"就是它造成的 ——

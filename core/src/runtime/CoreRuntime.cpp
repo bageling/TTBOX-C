@@ -235,7 +235,7 @@ bool CoreRuntime::start(std::string* error) {
                 //   现在只喂 `target_*`（AimThread 那一帧真正在控制链上用的框，
                 //   V1.0.24 起 = 上半身虚拟框、无并集），**所见即所控**。
                 //   没有选中目标 ⇒ 返回 false ⇒ 画面不画框（诚实：此刻确实没在瞄）。
-                //   `status()` 自带锁，返回值拷贝；只取 4 个 float + 1 个 int，
+                //   `status()` 自带锁，返回值拷贝；只取 5 个 float + 1 个 int，
                 //   比旧路径（拷贝整个 detection_boxes vector）更省。
                 preview_->set_aim_box_provider([this](DetectionBox* out) -> bool {
                     if (out == nullptr) return false;
@@ -249,7 +249,7 @@ bool CoreRuntime::start(std::string* error) {
                     out->x2 = st.target_x2;
                     out->y2 = st.target_y2;
                     out->class_id = st.target_class_id;
-                    out->score = 0.0f;  // Status 无"选中目标置信度"字段，不编造
+                    out->score = st.target_score;  // 选中目标的模型置信度（0~1），预览角标显示
                     return true;
                 });
                 // ★★ V1.0.31 预览三层（对照 GitHub sunone_aimbot 2026-10-04 调研）：
