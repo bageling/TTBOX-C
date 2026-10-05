@@ -38,17 +38,6 @@ void class_offset_for(const AimPointProfile& prof, int class_id,
 bool constrain_aim_point_to_head(const DetectionBox& box, const AimPointProfile& prof,
                                  float* tx, float* ty);
 
-// 几何配对识别「头部小框」（不依赖 class_id）：
-//   在 dets 里找「被 ref（身体框）包住、面积明显更小、中心落在 ref 上半部」的框 = 头。
-//   命中返回 true 并写 head；找不到（模型没单独出头框 / 只有一个框）返回 false。
-//   判据写死（不进面板，对齐"精细量只遥测不暴露"的口径）：
-//     · 面积 ≤ ref 面积 × 0.5（明显更小，头远小于身体）
-//     · 中心 x 落在 ref 水平范围、中心 y 落在 ref 上半部（头在身体上端）
-//     · 越出 ref 的部分不超过自身宽/高的 40%（大体被包住，容忍框抖动）
-//   多个候选时取面积最小者（最像头）。
-bool resolve_head_box(const DetectionBox& ref, const std::vector<DetectionBox>& dets,
-                      DetectionBox* head);
-
 // ★ V1.0.31：上半身**裁框**已整体退役（业主口径「框完整，只偏移落点」）。
 // 框保持模型给的原样；落点由 offset_y 在框内定位（0.24 ≈ 胸口）。
 // 排除非人目标见 TargetSelector 的几何兜底。

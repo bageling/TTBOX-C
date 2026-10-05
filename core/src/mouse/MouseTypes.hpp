@@ -111,11 +111,6 @@ struct AimPointProfile {
     bool clip_bottom_extrapolate = true;
     float body_w_over_h = 0.32f;          // 兜底「人体框 宽/高」（仅无自校准值时用）
     float clip_bottom_margin_px = 12.0f;  // 框底离裁剪区下边界多近算「贴边」
-    // ★ 几何配对识头（不依赖类别号）：模型同一目标给出「大框(身体)+小框(头)」两个框时，
-    //   落点直接取小框正中心（resolve_head_box）。判据纯几何——小框被大框包住、面积明显
-    //   更小、中心落在大框上半部。适合训练场「单个目标只有两个框」的场景；模型只给一个
-    //   身体框时配对失败 ⇒ 落点退回身体框 × offset，行为与关掉时一致。默认关 = 零变化。
-    bool aim_at_head_box = false;
 };
 
 // 瞄准档位（2026-09-24）：面板「热键与类别」页每张卡片 = 一个档位。

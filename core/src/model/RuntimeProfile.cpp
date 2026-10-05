@@ -514,7 +514,6 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("clip_bottom_extrapolate", JsonValue::boolean(mouse.aim_point.clip_bottom_extrapolate));
     m.set("body_w_over_h", JsonValue::number(static_cast<double>(mouse.aim_point.body_w_over_h)));
     m.set("clip_bottom_margin_px", JsonValue::number(static_cast<double>(mouse.aim_point.clip_bottom_margin_px)));
-    m.set("aim_at_head_box", JsonValue::boolean(mouse.aim_point.aim_at_head_box));
     // switch_delay_ms 已删（尸体字段，见 MouseTypes.hpp 的说明）；老配置里带着会被忽略。
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
     m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
@@ -820,7 +819,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.aim_point.body_w_over_h = static_cast<float>(obj_num(*m, "body_w_over_h", 0.32));
         p.mouse.aim_point.clip_bottom_margin_px =
             static_cast<float>(obj_num(*m, "clip_bottom_margin_px", 12.0));
-        p.mouse.aim_point.aim_at_head_box = obj_bool(*m, "aim_at_head_box", false);
         p.mouse.lost_grace_ms = static_cast<float>(obj_num(*m, "lost_grace_ms", 78.0));
         p.mouse.switch_hysteresis = static_cast<float>(obj_num(*m, "switch_hysteresis", 0.5));
         // 选靶四项机制（默认 0/false，见 MouseProfile 注释）

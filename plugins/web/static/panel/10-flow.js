@@ -2415,7 +2415,6 @@ function populateForm(config) {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
-  setCheckbox("controller_aim_at_head_box", controller.aim_at_head_box ?? CONTROLLER_DEFAULTS.aim_at_head_box);
 
   // 压枪：开关与触发键走 config.recoil，其余（拉力/速度/上限/渐出/门控）走
   // BB_CTRL_MODULES 的 recoil 前缀，即 controller_recoil_* 之外的扁平键 recoil_*。
@@ -2512,7 +2511,6 @@ function movementDefaultsForSection(sectionId) {
       controller_rate: controller.rate,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
-      controller_aim_at_head_box: controller.aim_at_head_box,
     },
   };
   return defaultsBySection[sectionId] || defaultsBySection["control-section-pid"];
@@ -2618,7 +2616,6 @@ function collectConfig() {
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
-        aim_at_head_box: getCheckbox("controller_aim_at_head_box"),
         // BB 对标模块（表驱动，见 BB_CTRL_MODULES）
         ...collectControllerModules(),
       },

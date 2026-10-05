@@ -124,7 +124,6 @@ const CONTROLLER_DEFAULTS = {
   pull_curve_strength: 0.8,
   pull_curve_min_distance: 80,
   selector_lost_grace_ms: 78,
-  aim_at_head_box: false,
 };
 // ---------------------------------------------------------------------------
 // BB 对标模块表（2026-09-24 面板收敛）

@@ -371,31 +371,18 @@ void AimThread::loop() {
                 // ★ V1.0.23：aim_box 的未冻结分支取收缩框 aim_box_src（frozen_rect
                 //   观察的也是收缩框 ⇒ 冻结域与实时域同域，切换不跳）。
                 const DetectionBox& aim_box = have_frozen ? frozen_box : aim_box_src;
-                // ★ 几何配对识头（不依赖类别号）：模型同一目标给出「大框(身体)+小框(头)」
-                //   两个框时，落点直接取小框正中心（resolve_head_box，见 AimPointProfile）。
-                //   只动**控制链的落点**（tx/ty → 平滑 → PID）；显示框、measurement_valid、
-                //   冻结判定仍用 selected.box（身体框）——「逻辑/视频两条线」不混。
-                //   配对失败（模型没单独出头框）/ 冻结中 ⇒ 走原身体框 × offset 落点。
-                DetectionBox head_box;
-                const bool aim_at_head = aim_point.aim_at_head_box && !have_frozen &&
-                                         resolve_head_box(aim_box, task.detections, &head_box);
-                if (aim_at_head) {
-                    tx = (head_box.x1 + head_box.x2) * 0.5f;
-                    ty = (head_box.y1 + head_box.y2) * 0.5f;
-                } else {
-                    // ★ V1.0.23：落点用收缩框 + 换算后的 prof_ub（offset 等比例量已 ÷k，
-                    //   ty 与不收缩时同一像素）。aim_point_at / constrain 内部不改。
-                    if (!aim_point_at(aim_box, selected.box.class_id, prof_ub, &tx, &ty,
-                                      have_frozen ? -1.0f : crop_bottom_px_,
-                                      have_frozen ? 0.0f : clipped_h_over_w)) {
-                        tx = (aim_box.x1 + aim_box.x2) * 0.5f;
-                        ty = aim_box.y1 + (aim_box.y2 - aim_box.y1) * 0.15f;
-                    }
-                    // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
-                    // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
-                    if (prof_ub.head_aim.enabled) {
-                        constrain_aim_point_to_head(aim_box, prof_ub, &tx, &ty);
-                    }
+                // ★ V1.0.23：落点用收缩框 + 换算后的 prof_ub（offset 等比例量已 ÷k，
+                //   ty 与不收缩时同一像素）。aim_point_at / constrain 内部不改。
+                if (!aim_point_at(aim_box, selected.box.class_id, prof_ub, &tx, &ty,
+                                  have_frozen ? -1.0f : crop_bottom_px_,
+                                  have_frozen ? 0.0f : clipped_h_over_w)) {
+                    tx = (aim_box.x1 + aim_box.x2) * 0.5f;
+                    ty = aim_box.y1 + (aim_box.y2 - aim_box.y1) * 0.15f;
+                }
+                // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
+                // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
+                if (prof_ub.head_aim.enabled) {
+                    constrain_aim_point_to_head(aim_box, prof_ub, &tx, &ty);
                 }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
                 // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。

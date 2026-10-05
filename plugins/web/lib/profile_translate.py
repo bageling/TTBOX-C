@@ -357,10 +357,6 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     # 这两个是"全局基底瞄准点"，core 侧再被当前档的 offset 覆盖。
     for k, v in aim_point_vals.items():
         mouse[k] = v
-    # 几何配对识头（不依赖类别号）：面板勾上后落点取「小框正中心」（见 core resolve_head_box）。
-    # 平铺键，与 clip_bottom_extrapolate / offset_x 同层。
-    if ctrl.get('aim_at_head_box') is not None:
-        mouse['aim_at_head_box'] = bool(ctrl['aim_at_head_box'])
 
     # 6) 推理参数
     inference: dict = {}
@@ -580,7 +576,6 @@ def profile_to_web(prof: dict) -> dict:
         'head_aim_head_height_fraction': head_aim.get('head_height_fraction', 0.28),
         'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
         'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
-        'aim_at_head_box': mouse.get('aim_at_head_box', False),
         # personal_motion 改由 CTRL_BLOCKS 表驱动搬运（键名规则一致：前缀_字段），
         # 这里不再手写（手写与表并存会互相覆盖，且容易漏同步）。
     }

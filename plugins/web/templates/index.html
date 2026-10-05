@@ -284,15 +284,6 @@
                     <label class="field"><span class="field-label">跟丢后宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">人短暂被挡住、识别不到时，继续盯着原来的位置这么多毫秒再换人（1000 毫秒 = 1 秒）。调大不容易丢人，但太大可能一直粘着错的人。</span></label>
                   </div>
                 </article>
-                <article class="module-tile">
-                  <div class="module-title">
-                    <strong>瞄头部小框</strong>
-                    <label class="switch"><input id="controller_aim_at_head_box" data-config type="checkbox"><span></span></label>
-                  </div>
-                  <div class="assist-section-body">
-                    <div class="field-hint">训练场「单个目标只有大框(身体)＋小框(头)」时勾上：落点自动取小框正中心，按几何配对识别（小框被大框包住、面积明显更小、在大框上半部），不依赖类别号。模型只出一个身体框时勾了也没影响，会自动退回身体框落点。</div>
-                  </div>
-                </article>
               </div>
             </section>
 
