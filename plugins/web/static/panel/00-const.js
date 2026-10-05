@@ -117,10 +117,12 @@ const CONTROLLER_DEFAULTS = {
   //         predict_x / predict_y 各自独立。
   // ★ V1.0.38：默认值回归 pid1.cpp main() 的 runAxis 原始参数（业主令完全移植）。
   //   V1.0.13~V1.0.37 曾是 kp=0.25/predict=1.0 且无 smooth（折算口径、soft-limit 恒关）。
+  // ★ V1.0.39+：predict 由 pid1 原文 3.0 降到 1.0（pid1 原文 3.0 是 gain=1 假设，
+  //   板端 gain≈0.65 + 51ms 延迟自激「乱飞」，见 MouseTypes.hpp 注释）。
   //   判据：必须与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值一字不差。
   kp: 25,
   kd: 25,
-  predict: 3,
+  predict: 1,
   predict_y: 0,
   rate: 0.3,
   smooth: 9900,

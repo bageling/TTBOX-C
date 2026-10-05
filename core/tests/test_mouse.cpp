@@ -757,9 +757,10 @@ TEST(mouse_smooth_zero_means_soft_limit_disabled) {
     CHECK(std::fabs(t.mouse.smooth_x - 0.0f) < 1e-6f);
 }
 
-// ★★★ V1.0.38：缺省值回归 pid1 原文 main() 的 runAxis 参数。
-//   kp=25 / kd=25 / predict_x=3.0 / predict_y=0.0 / smooth=9900（V1.0.13 曾改成
-//   kp=0.25 / predict_x=1.0 且删掉 smooth —— 本次全部撤回）。
+// ★★★ V1.0.38→V1.0.39+：缺省值回归 pid1 原文 main() 的 runAxis 参数，
+//   但 predict_x 由 3.0 降到 1.0（pid1 原文 3.0 是 gain=1 假设，板端 gain≈0.65
+//   + 51ms 延迟下自激「乱飞」；见 MouseTypes.hpp 注释）。
+//   kp=25 / kd=25 / predict_x=1.0 / predict_y=0.0 / smooth=9900。
 //   ⚠ 业主 2026-10-05 决定不写迁移：老配置升级后需**重跑标定**，不保兼容。
 TEST(mouse_defaults_are_pid1_original) {
     auto p = json_parse(R"({"mouse":{"enabled":true}})");
@@ -768,7 +769,7 @@ TEST(mouse_defaults_are_pid1_original) {
     const RuntimeProfile t = RuntimeProfile::from_json(p.value);
     CHECK(std::fabs(t.mouse.kp_x - 25.0f) < 1e-6f);      // pid1 原始比例增益
     CHECK(std::fabs(t.mouse.kd_x - 25.0f) < 1e-6f);
-    CHECK(std::fabs(t.mouse.predict_x - 3.0f) < 1e-6f);  // pid1 X 前馈原始值
+    CHECK(std::fabs(t.mouse.predict_x - 1.0f) < 1e-6f);  // X 前馈（pid1 原文 3.0，折算到 1.0）
     CHECK(std::fabs(t.mouse.predict_y - 0.0f) < 1e-6f);  // pid1 Y 无前馈
     // smooth 缺省 = 9900（soft-limit 开启），且能被序列化出去给第 5 参读
     CHECK(std::fabs(t.mouse.smooth_x - 9900.0f) < 1e-3f);

@@ -31,6 +31,8 @@ from plugins.web.lib import hub
 from plugins.web.lib.model_convert import _CONVERT_LOCK
 from plugins.web.lib.model_convert import _CONVERT_STATE
 from plugins.web.lib.model_convert import _CONVERT_WORKDIR
+# ★★ V1.0.39：转换依赖前置检查（板端三依赖全缺时诚实回报，不再吐 errno 2）
+from plugins.web.lib.model_convert import convert_prerequisites
 from plugins.web.lib.import_lock import _begin_import
 from plugins.web.lib.model_convert import _conversion_worker
 from plugins.web.lib.model_convert import _convert_state_public
@@ -133,6 +135,25 @@ def import_onnx():
         return jsonify({'ok': False, 'error': '缺少 ONNX 模型文件'})
     if not f.filename.lower().endswith('.onnx'):
         return jsonify({'ok': False, 'error': '仅支持 .onnx 文件（RKNN 请走 /api/models/import）'})
+    # ★★ V1.0.39（2026-10-05）Bug 修复：**转换依赖前置检查**（fail-fast，诚实报错）。
+    #   板端实测（2026-10-05）：三个依赖**全部缺失**——
+    #     · /opt/ttbox/venv-convert/bin/python        （转换器解释器）
+    #     · /opt/ttbox/current/tools/converter/convert_onnx_to_rknn.py（转换器脚本）
+    #     · /opt/ttbox/calib/imgs/                     （INT8 校准数据集，默认 5 张）
+    #   根因：`deploy/pack_manifest.txt` **没有收录 tools/ 与 calib/**（见 07 节的缺口登记）。
+    #   原行为：入口只查"有没有文件/有没有别的转换在跑"，于是用户点了之后
+    #   线程里 `subprocess.run` 抛 FileNotFoundError → 被最外层 `except Exception`
+    #   吞成 `errno 2 No such file or directory` ⇒ **用户完全看不出是"转换器没装"**。
+    #   现在：入口直接点名缺哪个、怎么补，并明确告知板端是否支持转换。
+    missing = convert_prerequisites()
+    if missing:
+        return jsonify({'ok': False,
+                        'error': ('板端不具备 ONNX→RKNN 转换能力（缺少：'
+                                  + '、'.join(missing) + '）。'
+                                  '请上传已转换好的 .rknn（走 /api/models/import），'
+                                  '或补齐上述依赖后重试。'),
+                        'missing': missing,
+                        'supported': False}), 501
     with _CONVERT_LOCK:                              # 互斥：同一时间只允许一个转换
         if _CONVERT_STATE.get('state') == 'converting':
             return jsonify({'ok': False, 'error': '另一个 ONNX 转换正在进行中'}), 409

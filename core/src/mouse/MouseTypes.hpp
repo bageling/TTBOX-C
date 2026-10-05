@@ -433,12 +433,13 @@ struct MouseProfile {
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
     // controller 公式（kp×rate×err + predict×vel）与输出链参数
-    // ★★★ V1.0.38：predict 回归 pid1 原始值 —— X=3.0（pid1 main() runAxis("X", ..., 3.0, ...)）、
-    //   Y=0.0（pid1 main() runAxis("Y", ..., 0.0, ...)）。V1.0.13 曾把 X 降到 1.0
-    //   （理由：51ms 延迟 + 144fps 下 3.0 会自激），本次按业主令**撤回该降级**。
-    //   ⚠ predict 上限改由面板承担（00-const.js 放宽），现场若自激由用户自行下调，
-    //     不在 core 侧硬编码降级。
-    float predict_x = 3.0f;                   // pid1 X 前馈（原始值）
+    // ★★★ V1.0.39+（2026-10-05）：predict_x 从 pid1 原文 3.0 降到 1.0。
+    //   pid1 原文 3.0 是「gain=1（1 count=1px）假设」下调的；我们板端实测 gain≈0.65
+    //   + 回路延迟 51ms，3.0 的前馈在该闭环下自激振荡（业主上板实测「乱飞」；
+    //   仿真移动目标 50px/s：p3.0 稳态误差 29.7px/翻转 16 次 vs p1.0 6.0px/稳定）。
+    //   ⇒ 降回 V1.0.13 的 1.0（当时有 A/B 实测 16 轮全稳支撑）。
+    //   Y 轴 pid1 原文就是 0（不带前馈），保持不变。
+    float predict_x = 1.0f;                   // X 前馈（pid1 原文 3.0，按 gain=0.65 折算到 1.0）
     float predict_y = 0.0f;                   // pid1 Y 不带前馈（原始值 = 0）
     // ★★★ V1.0.38：**smooth 字段恢复**（V1.0.13 曾删除并折算进 kp/kd）。
     //   它是 pid1 的 soft-limit 强度：9900 = 把 P/D 压到 1%（原厂值），0 = 关闭软限幅。

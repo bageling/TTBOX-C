@@ -44,6 +44,17 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.40 相对 V1.0.39（2026-10-05）：**predict 前馈默认 3.0→1.0（修复 gain=0.65 下自激乱飞）
+#     + predict_y 出厂 bug 修正（3→0）+ 转换依赖前置检查**
+#
+#   ① ★核心：predict_x 默认值 3.0 → 1.0（MouseTypes.hpp / RuntimeProfile.cpp / 出厂配置 / 面板 / 测试）
+#      · 根因：pid1 原文 predict_x=3.0 是「gain=1（1count=1px）」假设下调的；板端实测 gain≈0.65
+#        + 回路延迟 51ms，3.0 的前馈在该闭环下自激振荡（业主上板实测「乱飞」；仿真移动目标
+#        50px/s：p3.0 稳态误差 29.7px/翻转 16 次 vs p1.0 6.0px/稳定）。
+#      · 降到 1.0 是 V1.0.13 有 A/B 实测「16 轮全稳」的历史稳定值。
+#      · Y 轴 pid1 原文就是 0（不带前馈），保持不变；出厂 10-device.json 的 predict_y 错写成 3，一并修 0。
+#   ② 转换依赖前置检查：ONNX→RKNN 转换入口缺依赖时 fail-fast 诚实报错（板端三依赖全缺不再吐 errno 2）。
+#
 #   V1.0.39 相对 V1.0.38（2026-10-05）：**速度观测器接入 gain + 模型库磁盘泄漏修复 + 标定温和档口径回归**
 #
 #   ① ★核心（pid1 唯一改动，实质 2 行公式）：速度观测器的单位换算
@@ -328,7 +339,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.39 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.40 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

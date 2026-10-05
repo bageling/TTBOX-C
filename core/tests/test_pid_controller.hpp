@@ -23,14 +23,14 @@ namespace ttbox::core::aim {
 
 // 双轴 PID 参数（测试专用，默认 = pid1.cpp main() 原始值）
 struct TestPidParams {
-    // ★★★ V1.0.38：回归 pid1 原文 runAxis 的原始参数（V1.0.13~V1.0.37 曾是
-    //   kp=0.25 / predict_x=1.0 / smooth 恒 0，那是"折算口径"，本次全部撤回）。
+    // ★★★ V1.0.38→V1.0.39+：回归 pid1 原文 runAxis 参数，但 predict_x 由 3.0 降到 1.0
+    //   （pid1 原文 3.0 是 gain=1 假设，板端 gain≈0.65 + 51ms 延迟自激「乱飞」）。
     //   判据：与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值保持一致。
     float kp_x = 25.0f;       // X 比例增益（pid1 原始值，未折算）
     float kp_y = 25.0f;
     float kd_x = 25.0f;       // 微分增益（pid1 刹车）
     float kd_y = 25.0f;
-    float predict_x = 3.0f;   // X 前馈（pid1 原始值）
+    float predict_x = 1.0f;   // X 前馈（pid1 原文 3.0，折算到 1.0）
     float predict_y = 0.0f;   // Y 不带前馈（pid1 原始值）
     float rate_x = 0.3f;      // 输出速率（pid1 kp_gain_rate）
     float rate_y = 0.3f;
@@ -50,13 +50,13 @@ struct TestPidParams {
 class TestPidController {
 public:
     TestPidController() {
-        // 与 AimThread::start() 构造一致：pid1.cpp main() 原始演示值
-        pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+        // 与 AimThread::start() 构造一致：pid1.cpp main() 原始演示值（predict 已折算到 1.0）
+        pid_x_.init(25.0, 25.0, 1.0, 0.3, 9900.0);
         pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
         // ★ V1.0.38：紧接着按默认 params configure 一次。
         //   生产里 AimThread 每帧都会用 frame_profile 调 configure()，从不存在
-        //   "只有 init、没 configure"的状态；而本桩的 init 值（pid1 演示用 predict=3.0）
-        //   与默认 params（predict_x=3.0 但 kp/kd/smooth 走 params）不一定同源。
+        //   "只有 init、没 configure"的状态；而本桩的 init 值（pid1 演示用 predict=1.0）
+        //   与默认 params（predict_x=1.0 但 kp/kd/smooth 走 params）不一定同源。
         //   不补这一次 ⇒ 不调 configure() 的用例（如 test_tracker 全部场景）
         //   会一直跑在 init 的演示参数上，params_ 里的死区/灵敏度等根本没生效。
         configure(params_);
