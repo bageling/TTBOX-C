@@ -332,51 +332,37 @@ def test_payload_exposes_new_diagnostics():
 #   见下面 test_calib_gentle_pid_constants_are_sane 的换算说明。
 # ===========================================================================
 
-def test_calib_gentle_pid_constants_are_sane(web_mod):
-    """★ V1.0.38：口径随 PID 翻回**名义值**域，断言也改成在**生效域**做。
+def test_calib_gentle_gain_is_sane(web_mod):
+    """★ V1.0.41：pid1 删除，温和档只改 aim_gain（生效值，无 smooth 折算层）。
 
-    这条测试的**物理意图不变**：温和档必须落在"能稳定采集"的那一档
-    （板端 A/B 实测：kp_eff 0.10 十六轮全稳，0.25 持续振荡）。
-    变的只是"返回值属于哪个域"—— V1.0.13~V1.0.37 core 删了 smooth、kp 即生效值，
-    当时区间直接写 [0.04, 0.15]；V1.0.38 回归 pid1 完全移植（smooth 接回第 5 参）、
-    kp 回到名义域，区间需换算：生效值 0.04~0.15 ⇒ 名义值 4.0~15.0。
-
-    两种口径混用会**静默**失效：温和档若按 0.10 名义写进配置 ⇒ 经 soft-limit
-    实际只发挥 0.001 ⇒ bias 阶跃推不动目标 ⇒ gain 采样全落在噪声里
-    ⇒ 整轮标定得出错误 kp（"标定成功但参数是错的"）。
+    物理意图不变：温和档必须落在「能稳定采集」的那一档
+    （板端 A/B 实测单帧吃 6.9% 十六轮全稳，17% 持续振荡）。
+    温和档 aim_gain 上限 0.15 ⇒ 单帧吃 0.15×0.65≈10%，稳。
     """
-    from ttbox_motion.calibration import SMOOTH_FACTOR
-    kp_eff = web_mod.CALIB_PID_KP_MAX * SMOOTH_FACTOR   # 换算回生效域再判
-    assert 0.04 <= kp_eff <= 0.15, (
-        f'温和档换算成生效值应在 0.04~0.15，实际 {kp_eff:.4f}'
-        f'（CALIB_PID_KP_MAX={web_mod.CALIB_PID_KP_MAX} 名义 × SMOOTH_FACTOR）')
-    assert 2.0 <= web_mod.CALIB_PID_KD_RATIO <= 4.0
+    gain = web_mod.CALIB_AIM_GAIN_MAX
+    assert 0.04 <= gain <= 0.2, f'温和档 aim_gain 应在 0.04~0.2，实际 {gain}'
 
 
-def test_worker_enters_with_gentle_pid_and_saves_original():
-    """入场必须：先保存用户原 kp/kd，再把温和档写进**第一次** SET_CONFIG。"""
+def test_worker_enters_with_gentle_gain_and_saves_original():
+    """入场必须：先保存用户原 aim_gain，再把温和档写进**第一次** SET_CONFIG。"""
     body = _worker_src()
-    assert "saved_kp = mo0.get('kp_x')" in body, '没保存用户原 KP'
-    assert "saved_kd = mo0.get('kd_x')" in body, '没保存用户原 KD'
+    assert "saved_gain = mo0.get('aim_gain')" in body, '没保存用户原 gain'
     first_set = body.index("ipc_request('SET_CONFIG'")
     head = body[:first_set]
-    assert "mo0['kp_x'] = calib_kp" in head
-    assert "mo0['kp_y'] = calib_kp" in head
-    assert 'CALIB_PID_KP_MAX' in head, 'KP 没被压到温和档'
-    assert "mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO" in head
+    assert "mo0['aim_gain'] = calib_gain" in head
+    assert 'CALIB_AIM_GAIN_MAX' in head, 'gain 没被压到温和档'
 
 
-def test_worker_restores_pid_on_failure_but_never_on_success():
-    """失败/取消要恢复用户原 kp/kd；成功路径若恢复会把刚推导的参数覆盖掉。"""
+def test_worker_restores_gain_on_failure_but_never_on_success():
+    """失败/取消要恢复用户原 aim_gain；成功路径若恢复会把刚推导的参数覆盖掉。"""
     body = _worker_src()
     fin = body[body.index('    finally:'):]
     assert "in ('failed', 'cancelled')" in fin, '恢复必须只发生在失败/取消'
-    assert "mo['kp_x'] = mo['kp_y'] = saved_kp" in fin
-    assert "mo['kd_x'] = mo['kd_y'] = saved_kd" in fin
+    assert "mo['aim_gain'] = saved_gain" in fin
 
 
-def test_worker_raises_kp_when_low_gain_samples_are_dropped():
-    """注入生效但位移不够（低 gain 系统温和档太慢）⇒ 轮间抬 KP，上限是用户原值。"""
+def test_worker_raises_gain_when_low_gain_samples_are_dropped():
+    """注入生效但位移不够（低 gain 系统温和档太慢）⇒ 轮间抬 aim_gain，上限是用户原值。"""
     body = _worker_src()
-    assert 'calib_kp * 1.7' in body
+    assert 'calib_gain * 1.7' in body
     assert 'd_px < CALIB_MIN_DELTA_PX' in body

@@ -151,8 +151,8 @@ function calibRenderSaved(els, saved) {
         ["模型", saved.model_id || "—"],
       ];
       const pidSaved = saved.pid_params || {};
-      if (pidSaved.kp != null) {
-        rows.push(["推导 PID", `Kp ${Number(pidSaved.kp).toFixed(3)} · Kd ${Number(pidSaved.kd ?? 0).toFixed(3)} · 预判 ${Number(pidSaved.predict ?? 0).toFixed(3)}`]);
+      if (pidSaved.aim_gain != null) {
+        rows.push(["推导拉力", `aim_gain ${Number(pidSaved.aim_gain).toFixed(3)}`]);
       }
       savedSummary.innerHTML = rows.map(([k, v]) => `<div class="runtime-stat"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join("");
     } else {

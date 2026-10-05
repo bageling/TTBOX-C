@@ -44,6 +44,16 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.41 相对 V1.0.40（2026-10-05）：**pid1 彻底删除，换 SmoothAimController（EMA+比例+限幅+框高死区）**
+#
+#   ① ★核心：pid1（前馈主导、smooth 压 P/D 100 倍、绝对像素门限）整个删除，
+#     换 SmoothAimController —— 4 个互相独立参数（调参简单，见 core/src/aim/SmoothAimController.hpp）：
+#        aim_alpha(0.5) 平滑 / aim_gain(0.15) 比例增益 / aim_max_move(30) 单帧限幅 / aim_deadzone_ratio(0.05) 死区=框高×ratio。
+#     参考开源共识（cod-ai-aim-assist / 多个 YOLO 脚本）：EMA 平滑 + 比例 + 限幅 + 尺寸自适应死区。
+#   ② 删除：Pid1Controller.hpp、OutputScale.hpp（死代码）、test_pid1.cpp；MouseTypes 删 kp/kd/predict/rate/smooth 10 字段。
+#   ③ 标定链：derive_pid_params 只返回 aim_gain = 0.07/gain；温和档 CALIB_AIM_GAIN_MAX=0.15。
+#   ④ 面板：6 旧控件 → 4 新控件（拉力/平滑/单帧上限/锁定范围）。
+#
 #   V1.0.40 相对 V1.0.39（2026-10-05）：**predict 前馈默认 3.0→1.0（修复 gain=0.65 下自激乱飞）
 #     + predict_y 出厂 bug 修正（3→0）+ 转换依赖前置检查**
 #
@@ -339,7 +349,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.40 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.41 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -973,11 +983,6 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
-
-  # P_PID 对照测试（与参考实现输出逐点一致）
-  add_executable(test_pid1 tests/test_pid1.cpp)
-  target_link_libraries(test_pid1 PRIVATE ttbox_core)
-  add_test(NAME test_pid1 COMMAND test_pid1)
 
   # V3 阶段 5：拟人化抖动前馈扣除（延迟对齐环形缓冲 + 两条链抖动上报）
   add_executable(test_jitter_feedforward tests/test_jitter_feedforward.cpp)

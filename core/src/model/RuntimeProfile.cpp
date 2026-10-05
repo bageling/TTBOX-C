@@ -106,8 +106,7 @@ std::string obj_str(const JsonValue& o, const char* key, const std::string& def)
 bool RuntimeProfile::validate(std::string* error) const {
     // 非有限值总闸：JSON 1e999 等可产生 inf，NaN/inf 进入 PID 会输出乱飞（fail-closed 防线）。
     const float mouse_nums[] = {
-        mouse.kp_x, mouse.kp_y, mouse.kd_x, mouse.kd_y,
-        mouse.predict_x, mouse.predict_y, mouse.rate_x, mouse.rate_y,
+        mouse.aim_alpha, mouse.aim_gain, mouse.aim_max_move, mouse.aim_deadzone_ratio,
         mouse.fov_range, mouse.confidence, mouse.sensitivity, mouse.output_scale,
         mouse.deadzone_x, mouse.deadzone_y, mouse.output_deadzone,
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
@@ -159,21 +158,20 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.confidence 必须在 [0,1]";
         return false;
     }
-    if (mouse.kp_x < 0.0f || mouse.kp_y < 0.0f) {
-        if (error) *error = "mouse.kp 不能为负";
+    if (mouse.aim_alpha < 0.0f || mouse.aim_alpha > 1.0f) {
+        if (error) *error = "mouse.aim_alpha 必须在 [0,1]";
         return false;
     }
-    // ★ 2026-09-26（第四轮审计）：kd 为负 = 阻尼变正反馈，必须挡住。
-    //   （smooth 的 [0,9999] 校验在 V1.0.13 随字段删除一起去掉了，
-    //     V1.0.38 回归 pid1 完全移植时**一并恢复** —— 越界值会让
-    //     smoothTerm 的 outputScale(=10000-smooth) 变成负数 ⇒ 输出整体反号。）
-    if (mouse.kd_x < 0.0f || mouse.kd_y < 0.0f) {
-        if (error) *error = "mouse.kd 不能为负";
+    if (mouse.aim_gain < 0.0f) {
+        if (error) *error = "mouse.aim_gain 不能为负";
         return false;
     }
-    if (mouse.smooth_x < 0.0f || mouse.smooth_x > 9999.0f ||
-        mouse.smooth_y < 0.0f || mouse.smooth_y > 9999.0f) {
-        if (error) *error = "mouse.smooth 必须在 [0,9999]";
+    if (mouse.aim_max_move < 0.0f) {
+        if (error) *error = "mouse.aim_max_move 不能为负";
+        return false;
+    }
+    if (mouse.aim_deadzone_ratio < 0.0f) {
+        if (error) *error = "mouse.aim_deadzone_ratio 不能为负";
         return false;
     }
     if (mouse.hfov <= 0.0f || mouse.hfov >= 180.0f ||
@@ -185,8 +183,7 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.move_speed 不能为负";
         return false;
     }
-    if (mouse.rate_x < 0.0f || mouse.rate_y < 0.0f ||
-        mouse.sensitivity < 0.0f || mouse.output_scale < 0.0f) {
+    if (mouse.sensitivity < 0.0f || mouse.output_scale < 0.0f) {
         if (error) *error = "mouse 输出系数不能为负";
         return false;
     }
@@ -381,29 +378,20 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("aim_profiles", std::move(aps));
     m.set("fov_range", JsonValue::number(static_cast<double>(mouse.fov_range)));
     m.set("confidence", JsonValue::number(static_cast<double>(mouse.confidence)));
-    m.set("kp_x", JsonValue::number(static_cast<double>(mouse.kp_x)));
-    m.set("kp_y", JsonValue::number(static_cast<double>(mouse.kp_y)));
-    m.set("kd_x", JsonValue::number(static_cast<double>(mouse.kd_x)));
-    m.set("kd_y", JsonValue::number(static_cast<double>(mouse.kd_y)));
+    // ★★★ V1.0.41：pid1 字段（kp/kd/predict/rate/smooth）删除，换 SmoothAimController 4 参数。
+    m.set("aim_alpha", JsonValue::number(static_cast<double>(mouse.aim_alpha)));
+    m.set("aim_gain", JsonValue::number(static_cast<double>(mouse.aim_gain)));
+    m.set("aim_max_move", JsonValue::number(static_cast<double>(mouse.aim_max_move)));
+    m.set("aim_deadzone_ratio", JsonValue::number(static_cast<double>(mouse.aim_deadzone_ratio)));
     m.set("fov_mode", JsonValue::boolean(mouse.fov_mode));
     m.set("hfov", JsonValue::number(static_cast<double>(mouse.hfov)));
     m.set("vfov", JsonValue::number(static_cast<double>(mouse.vfov)));
     m.set("move_speed_x", JsonValue::number(static_cast<double>(mouse.move_speed_x)));
     m.set("move_speed_y", JsonValue::number(static_cast<double>(mouse.move_speed_y)));
-    m.set("rate_x", JsonValue::number(static_cast<double>(mouse.rate_x)));
-    m.set("rate_y", JsonValue::number(static_cast<double>(mouse.rate_y)));
     m.set("sensitivity", JsonValue::number(static_cast<double>(mouse.sensitivity)));
     m.set("output_scale", JsonValue::number(static_cast<double>(mouse.output_scale)));
     m.set("deadzone_x", JsonValue::number(static_cast<double>(mouse.deadzone_x)));
     m.set("deadzone_y", JsonValue::number(static_cast<double>(mouse.deadzone_y)));
-    // 对齐参数
-    m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
-    m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
-    // ★★★ V1.0.38：smooth 回归序列化（V1.0.13 删字段时连to_json 一起去掉了）。
-    //   必须写出去：AimThread 用 frame_profile->mouse.smooth_x 喂 Pid1Controller
-    //   的第 5 参，配置若不落盘则每次重启都只能吃缺省值，用户在面板的调整会丢。
-    m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
-    m.set("smooth_y", JsonValue::number(static_cast<double>(mouse.smooth_y)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
     JsonValue pc = JsonValue::object();
@@ -652,36 +640,22 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         // 热键的唯一真源是 mouse.aim_profiles（见本段末尾的档位解析，老配置在那里合成第 0 档）。
         p.mouse.fov_range = static_cast<float>(obj_num(*m, "fov_range", 1.0));
         p.mouse.confidence = static_cast<float>(obj_num(*m, "confidence", 0.25));
-        // ★★★ V1.0.38：**删掉 V1.0.13 的 smooth→kp 折算**，回归 pid1 原始读法。
-        //   V1.0.13 曾在下面把老配置里的 smooth_x/smooth_y 乘进 kp/kd
-        //   （kp_eff = kp×(10000-smooth)/10000），并把 smooth 从参数面删除。
-        //   现在 smooth 字段回来了、Pid1Controller 的第 5 参重新接它（见 AimThread.cpp），
-        //   若保留这段折算就是**双重缩放**（kp 被折一次 + soft-limit 再压一次）
-        //   ⇒ 输出会小 100 倍。业主 2026-10-05 令「pid 完全移植 pid1，不许有自己的变动」，
-        //   故整段删除，kp/kd/smooth 三个键各自独立按 pid1 原义读取。
-        p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", 25.0));
-        p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", 25.0));
-        p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", 25.0));
-        p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", 25.0));
-        p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));
-        p.mouse.smooth_y = static_cast<float>(obj_num(*m, "smooth_y", 9900.0));
+        // ★★★ V1.0.41：pid1 字段（kp/kd/predict/rate/smooth）删除，换 SmoothAimController 4 参数。
+        //   老配置里的 pid1 键（kp_x/kd_x/predict_x/rate_x/smooth_x 等）从此不再读取
+        //   （业主 2026-10-05 令「pid1 彻底删除」；旧配置需重跑标定，不写迁移）。
+        p.mouse.aim_alpha = static_cast<float>(obj_num(*m, "aim_alpha", 0.5));
+        p.mouse.aim_gain = static_cast<float>(obj_num(*m, "aim_gain", 0.15));
+        p.mouse.aim_max_move = static_cast<float>(obj_num(*m, "aim_max_move", 30.0));
+        p.mouse.aim_deadzone_ratio = static_cast<float>(obj_num(*m, "aim_deadzone_ratio", 0.05));
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
         p.mouse.hfov = static_cast<float>(obj_num(*m, "hfov", 83.105));
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));
         p.mouse.move_speed_x = static_cast<float>(obj_num(*m, "move_speed_x", 500.0));
         p.mouse.move_speed_y = static_cast<float>(obj_num(*m, "move_speed_y", 500.0));
-        p.mouse.rate_x = static_cast<float>(obj_num(*m, "rate_x", 0.3));
-                p.mouse.rate_y = static_cast<float>(obj_num(*m, "rate_y", 0.3));
         p.mouse.sensitivity = static_cast<float>(obj_num(*m, "sensitivity", 1.0));
         p.mouse.output_scale = static_cast<float>(obj_num(*m, "output_scale", 1.0));
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
-        // 对齐参数
-        // ★★★ V1.0.39+（2026-10-05）：predict_x 缺省从 pid1 原文 3.0 降到 1.0。
-        //   pid1 原文 3.0 是 gain=1 假设下调的，板端 gain≈0.65 + 51ms 延迟下自激
-        //   （业主上板实测「乱飞」）。Y 轴 pid1 原文就是 0，保持不变。
-        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 1.0));
-                p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
         if (const JsonValue* pc = m->find("pull_curve"); pc && pc->is_object()) {

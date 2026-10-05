@@ -83,18 +83,11 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
-  // ★★★ V1.0.38：面板回归 pid1 原文移植（业主令「pid 以 pid1 为准完全移植」）。
-  //   kp/kd/predict 回到**名义值**域 —— V1.0.13~V1.0.37 的 [0,1]/[0,2] 是折算口径
-  //   （kp 生效值上限 1.0），现在 kp=25 出厂、标定写回约 10.2，老上限会直接卡死。
-  //   换算关系：生效 = 名义 × (10000-smooth)/10000（smooth 出厂 9900 ⇒ ×0.01）。
-  //   ⇒ 名义域上限 = 生效域上限 / 0.01 = 100/200。
-  //   ★ smooth=0 会关掉 soft-limit（pid1 的大误差保护），故上限锁 9999 与 core 校验同界。
-  controller_kp: [0, 100],
-  controller_kd: [0, 200],
-  controller_predict: [0, 10],
-  controller_predict_y: [0, 10],
-  controller_rate: [0, 1],
-  controller_smooth: [0, 9999],
+  // ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数（alpha/gain/max_move/deadzone_ratio）。
+  controller_aim_gain: [0, 2],
+  controller_aim_alpha: [0, 1],
+  controller_aim_max_move: [0, 200],
+  controller_aim_deadzone_ratio: [0, 2],
   controller_output_deadzone: [0, 20],
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_min_distance: [0, 1280],
@@ -109,23 +102,12 @@ const OVERVIEW_DEFAULTS = {
 };
 
 const CONTROLLER_DEFAULTS = {
-  // 2026-09-20 定案：pid1.cpp 的 P_PID 为唯一标准，面板只暴露它的这几个参数。
-  // ★ 2026-09-24 修正：原先把 kp/kd/predict/rate/smooth 五项**同时写 _x 与 _y**，
-  //   回填只取 X ⇒ 面板上调 X 的预判会把 Y 一起改成同一个值。而 pid1.cpp main() 里
-  //   X/Y 的唯一差别恰恰就是 predict ⇒ predict_y 必须独立。
-  //   现在：Kp / Kd / Rate 两轴共用（参考实现里两轴本来就同值），
-  //         predict_x / predict_y 各自独立。
-  // ★ V1.0.38：默认值回归 pid1.cpp main() 的 runAxis 原始参数（业主令完全移植）。
-  //   V1.0.13~V1.0.37 曾是 kp=0.25/predict=1.0 且无 smooth（折算口径、soft-limit 恒关）。
-  // ★ V1.0.39+：predict 由 pid1 原文 3.0 降到 1.0（pid1 原文 3.0 是 gain=1 假设，
-  //   板端 gain≈0.65 + 51ms 延迟自激「乱飞」，见 MouseTypes.hpp 注释）。
+  // ★★★ V1.0.41：pid1 删除，换 SmoothAimController 4 参数（调参简单、互相独立）。
   //   判据：必须与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值一字不差。
-  kp: 25,
-  kd: 25,
-  predict: 1,
-  predict_y: 0,
-  rate: 0.3,
-  smooth: 9900,
+  aim_gain: 0.15,
+  aim_alpha: 0.5,
+  aim_max_move: 30,
+  aim_deadzone_ratio: 0.05,
   output_deadzone: 1,
   pull_curve_enabled: true,
   pull_curve_strength: 0.8,

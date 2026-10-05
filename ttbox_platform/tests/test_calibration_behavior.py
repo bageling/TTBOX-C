@@ -100,40 +100,19 @@ def test_calibration_session_has_explicit_state_transitions():
     assert session.failure_reason == "目标不稳定"
 
 
-def test_derive_pid_params_scales_kp_inverse_to_gain():
-    # 增益越大（1 count 移动越多 px），KP 应越小以防过冲
+def test_derive_aim_gain_scales_inverse_to_gain():
+    # 增益越大（1 count 移动越多 px），aim_gain 应越小以防过冲
     low_gain = derive_pid_params(0.4, 0.4, 30)
     high_gain = derive_pid_params(1.5, 1.5, 30)
-    assert low_gain["kp"] > high_gain["kp"]
-    # ★ V1.0.38：返回值是**名义值**（core 把 smooth=9900 交给 Pid1Controller 第5参实现
-    #   那 99% 压缩，见 AimThread.cpp:274-277 / RuntimeProfile.cpp）。
-    #   ⇒ 区间断言放在**生效域**做（折回后再比），口径与物理锚点一致，
-    #   以后再换口径也不用改这条。
-    assert low_gain["kp"] > 0.0
-    assert low_gain["kp"] * SMOOTH_FACTOR <= 1.0 + 1e-9   # 折回生效域仍受 KP_MAX 约束
+    assert low_gain["aim_gain"] > high_gain["aim_gain"]
+    assert low_gain["aim_gain"] > 0.0
+    assert low_gain["aim_gain"] <= 1.0 + 1e-9
 
 
-def test_derive_pid_params_increases_kd_with_delay():
-    low_delay = derive_pid_params(0.65, 0.65, 10)
-    high_delay = derive_pid_params(0.65, 0.65, 60)
-    assert high_delay["kd"] > low_delay["kd"]
-
-
-def test_derive_pid_params_reduces_predict_with_delay():
-    low_delay = derive_pid_params(0.65, 0.65, 10)
-    high_delay = derive_pid_params(0.65, 0.65, 60)
-    assert high_delay["predict"] < low_delay["predict"]
-    assert 0.1 <= high_delay["predict"] <= 0.35
-
-
-def test_derive_pid_params_handles_extreme_gain_delay():
-    # 超高增益 + 高延迟：KP 走保守分支，必须仍给出有效参数
+def test_derive_aim_gain_handles_extreme_gain_delay():
+    # 超高增益 + 高延迟：aim_gain 走保守分支，必须仍给出有效参数
     d = derive_pid_params(1.5, 1.5, 60)
-    # ★ V1.0.38：改为在**生效域**断言（折回后再比），这样区间与物理锚点口径一致，
-    #   不受"返回名义值还是生效值"影响 —— 换口径时这条测试不用再改。
-    assert 0.04 <= d["kp"] * SMOOTH_FACTOR <= 1.0
-    assert 0.04 <= d["kd"] * SMOOTH_FACTOR <= 0.5
-    assert 0.1 <= d["predict"] <= 0.35
+    assert 0.04 <= d["aim_gain"] <= 1.0
 
 
 def test_derive_pid_params_rejects_zero_gain():
@@ -228,9 +207,9 @@ def test_px_denominator_yields_gain_one_for_every_game():
         assert fake.converged is True                 # 它会"成功"，这才是最坑的地方
         assert fake.gain_px_per_count == pytest.approx(1.0)
         kp_nominal = derive_pid_params(fake.gain_px_per_count,
-                                        fake.gain_px_per_count, 12.0)["kp"]
-        # 与游戏无关这一点，用「折回生效域后等于单帧比例」来判
-        assert kp_nominal * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME)
+                                        fake.gain_px_per_count, 12.0)["aim_gain"]
+        # 与游戏无关这一点，用「等于单帧比例」来判（aim_gain = KP_FRACTION/gain，gain=1 ⇒ =KP_FRACTION）
+        assert kp_nominal == pytest.approx(KP_FRACTION_PER_FRAME)
 
 
 def test_real_counts_denominator_makes_kp_track_the_actual_game():
@@ -239,10 +218,9 @@ def test_real_counts_denominator_makes_kp_track_the_actual_game():
     for g in (0.25, 0.4, 0.65, 1.2, 2.0):
         fit = fit_axis_measurements(CalibrationAxis.X, counts_observations(CalibrationAxis.X, g))
         assert fit.gain_px_per_count == pytest.approx(g, rel=1e-9)
-        kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0)["kp"]
-    assert len(set(kps.values())) == len(kps)          # 五个不同的游戏 → 五个不同的 kp
-    # ★ V1.0.38：折回生效域再比（返回值是名义值；derive 保留 4 位小数故用绝对容差）
-    assert kps[0.65] * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME / 0.65, abs=0.005)
+        kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0)["aim_gain"]
+    assert len(set(kps.values())) == len(kps)          # 五个不同的游戏 → 五个不同的 aim_gain
+    assert kps[0.65] == pytest.approx(KP_FRACTION_PER_FRAME / 0.65, abs=0.005)
     assert kps[0.65] != pytest.approx(KP_FRACTION_PER_FRAME)   # 不再是与游戏无关的常数
 
 
@@ -260,32 +238,19 @@ def test_real_counts_denominator_makes_kp_track_the_actual_game():
 # ===========================================================================
 
 
-def test_derived_params_match_board_measured_stable_set():
+def test_derived_aim_gain_matches_board_stable_set():
     d = derive_pid_params(0.686, 0.695, 51.0)
-    # 实测稳定组是 kp=0.10 / kd=0.30（生效值）：允许小幅偏差，但不能差一个量级
-    assert d["kp"] * SMOOTH_FACTOR == pytest.approx(0.10, rel=0.15)
-    assert d["kd"] * SMOOTH_FACTOR == pytest.approx(0.30, rel=0.15)
-    assert d["predict"] <= 0.35
+    # 实测稳定组单帧吃 6.9% ⇒ aim_gain = 0.07/0.686 ≈ 0.10
+    assert d["aim_gain"] * 0.686 == pytest.approx(0.07, rel=0.15)
 
 
-def test_derived_kp_never_lands_in_board_measured_oscillating_band():
-    """旧公式在 51ms 给出 kp=0.2187/delay 比 1.13——落在实测振荡组附近，这里禁止回归。"""
+def test_derived_aim_gain_never_lands_in_oscillating_band():
+    """旧公式在 51ms 给的单帧比例落进振荡组（17%），这里禁止回归。"""
     d = derive_pid_params(0.686, 0.695, 51.0)
-    assert d["kp"] * SMOOTH_FACTOR < 0.15             # 明显低于振荡组 kp=0.25
-    assert d["kd"] / d["kp"] > 2.0            # 阻尼比要够（实测稳定组是 3.0）
+    assert d["aim_gain"] * 0.686 < 0.17   # 单帧吃 < 17%（明显低于振荡组）
 
 
-def test_derived_kp_is_the_nominal_value_core_will_soft_limit():
-    """★ V1.0.38：返回值是**名义值**，core 侧再由 soft-limit 实现那 99% 压缩。
-
-    V1.0.13~V1.0.37 期间 core 删掉了 smooth、kp 直接当生效值用；本次回归 pid1
-    完全移植（业主令「pid 以 pid1 为准完全移植」），smooth 重新接到 Pid1Controller
-    第 5 参（AimThread.cpp:274-277），所以标定必须把生效值折回名义值写进配置，
-    否则控制器会再压一次 ⇒ 实测只发挥预期的 1/2.5 ⇒ "标定成功但自瞄几乎不动"。
-
-    判据：名义值 × SMOOTH_FACTOR 回到「单帧比例 / gain」。
-    """
+def test_derived_aim_gain_is_effective_value():
+    """★ V1.0.41：aim_gain 就是生效值（count/px），无 smooth 折算层。"""
     d = derive_pid_params(0.686, 0.686, 51.0)
-    assert d["kp"] * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)
-    # 且它确实是"名义"而非"生效"——两者差 100 倍，混淆任一方向都会让标定失效
-    assert d["kp"] != pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)
+    assert d["aim_gain"] == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)

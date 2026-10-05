@@ -14,7 +14,7 @@
 #include "mouse/FrozenRect.hpp"     // V1.0.10：冻结落点（腿被切就停更新，yu holding_previous 思路）
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
-#include "aim/Pid1Controller.hpp"
+#include "aim/SmoothAimController.hpp"
 #include "aim/PipelineDebug.hpp"
 #include "aim/PidTrace.hpp"
 #include "mouse/AimTracker.hpp"
@@ -151,8 +151,8 @@ private:
     RuntimeConfig* runtime_config_ = nullptr;
     std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
-    Pid1Controller pid_x_;   // P_PID：X 轴（predict=3.0）
-    Pid1Controller pid_y_;   // P_PID：Y 轴（predict=0.0）
+    SmoothAimController aim_x_;   // 简单瞄准控制器：EMA + 比例 + 限幅 + 框高死区（X 轴）
+    SmoothAimController aim_y_;   // 同上（Y 轴）
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）

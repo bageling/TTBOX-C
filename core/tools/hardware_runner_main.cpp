@@ -162,9 +162,12 @@ int main(int argc, char** argv) {
         profile.mouse.aim_profiles[0].hotkey = 0x03;
         profile.mouse.aim_profiles[0].hotkey2 = 0x00;
         profile.mouse.aim_profiles[0].hotkey_mode = 0;
-        profile.mouse.kp_x = 0.20f;
-        profile.mouse.kp_y = 0.20f;
-        profile.mouse.kd_x = profile.mouse.kd_y = 0.0f;
+        // V1.0.41：pid1 删除，换 SmoothAimController；alpha=1 不平滑、ratio=0 无死区、max_move 大不触发限幅
+        //   ⇒ 纯比例（移动 = 误差 × aim_gain）。
+        profile.mouse.aim_alpha = 1.0f;
+        profile.mouse.aim_gain = 0.20f;
+        profile.mouse.aim_max_move = 10000.0f;
+        profile.mouse.aim_deadzone_ratio = 0.0f;
     }
     runtime_config.update(profile);
     p.runtime_config = &runtime_config;

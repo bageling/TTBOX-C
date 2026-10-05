@@ -261,15 +261,13 @@
             <section id="control-section-pid" class="control-section is-active" data-control-section>
               <div class="assist-grid control-group-grid">
                 <div class="pid-control-block">
-                  <div class="module-title"><strong>跟枪手感（五个数调完基本就定了）</strong></div>
-                  <div class="field-hint">这页决定准星怎么追人：先「拉」过去，再「刹」住不乱晃。左右和上下共用前三项；只有「预判」左右、上下各一个，默认上下不预判（保持 0）。</div>
+                  <div class="module-title"><strong>跟枪手感（四个数调完基本就定了）</strong></div>
+                  <div class="field-hint">这页决定准星怎么追人：拉过去、稳住、别冲过头、靠到一定范围就不追了。四个参数互相独立，调一个不影响别的。</div>
                   <div class="field-grid compact pid-field-grid">
-                    <label class="field"><span class="field-label">拉力（追得有多猛）</span><input id="controller_kp" data-config type="number" step="0.01"><span class="field-hint">准星往人身上拉的力气。追不上人、总跟丢就加；拉过头来回冲、抖就降。★ V1.0.38 起这是 pid1 的<strong>名义值</strong>（出厂 25，实际出力由「缓冲」那一项决定）；自动标定也会写这个数。</span></label>
-                    <label class="field"><span class="field-label">刹车（稳不稳）</span><input id="controller_kd" data-config type="number" step="0.01"><span class="field-hint">快到目标时踩刹车的力度，防冲过头。数值太大反而会抖 —— 觉得画面晃，优先把它降下来。</span></label>
-                    <label class="field"><span class="field-label">左右预判</span><input id="controller_predict" data-config type="number" step="0.1"><span class="field-hint">对左右移动的人提前往前瞄一点（打提前量）。总是慢半拍就加；瞄到前面太多就降。★ 出厂 3.0 是 pid1 原版值，在这套 51ms 延迟下可能发飘，觉得抖就往下调（1.0 左右是实测稳档）。</span></label>
-                    <label class="field"><span class="field-label">上下预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">上下一般不预判，保持 0。只有追上下移动很厉害的目标才考虑加。</span></label>
-                    <label class="field"><span class="field-label">跟随速度</span><input id="controller_rate" data-config type="number" step="0.01"><span class="field-hint">力气涨上来的快慢。觉得反应慢就加一点；觉得一窜一窜就降一点。</span></label>
-                    <label class="field"><span class="field-label">缓冲（防一帧打飞）</span><input id="controller_smooth" data-config type="number" step="10"><span class="field-hint">★ pid1 的大误差保护：差得越远，它把输出压得越狠，避免一帧冲到头再拉回来。出厂 9900 = 压到 1%；<strong>调到 0 会关掉这层保护</strong>，切过去时容易过冲。左右和上下共用。</span></label>
+                    <label class="field"><span class="field-label">拉力（追得有多猛）</span><input id="controller_aim_gain" data-config type="number" step="0.01"><span class="field-hint">准星往人身上拉的力气。追不上、总跟丢就加；拉过头来回冲、抖就降。自动标定也会写这个数。</span></label>
+                    <label class="field"><span class="field-label">平滑（越跟手越抖）</span><input id="controller_aim_alpha" data-config type="number" step="0.01"><span class="field-hint">0~1。越大越跟手（但画面可能微抖），越小越稳（但反应慢）。默认 0.4。</span></label>
+                    <label class="field"><span class="field-label">单帧上限（防打飞）</span><input id="controller_aim_max_move" data-config type="number" step="1"><span class="field-hint">一帧最多挪多少。误差很大时防止一帧冲过头再拉回来（老 pid1「乱飞」就栽在这）。默认 30。</span></label>
+                    <label class="field"><span class="field-label">锁定范围（死区）</span><input id="controller_aim_deadzone_ratio" data-config type="number" step="0.01"><span class="field-hint">误差小于「目标身高 × 这个比例」就不追了。远目标框小→死区小→精确，近目标框大→死区大→不抖，远近手感一致。默认 0.3。</span></label>
                   </div>
                 </div>
                 <article class="module-tile">

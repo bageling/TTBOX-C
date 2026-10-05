@@ -65,8 +65,8 @@ int main() {
     {
         RuntimeConfig cfg;
         auto base = std::make_shared<RuntimeProfile>();
-        base->mouse.kp_x = 10.0f;
-        base->mouse.kp_y = 20.0f;  // 保持 y=2x 不变量（否则读者读 base 快照误报撕裂）
+        base->mouse.aim_gain = 10.0f;
+        base->mouse.aim_max_move = 20.0f;  // 保持 max_move=2×gain 不变量（否则读者读 base 快照误报撕裂）
         cfg.update(base);
         std::atomic<bool> stop{false};
         std::atomic<int> read_errors{0};
@@ -74,8 +74,8 @@ int main() {
         auto writer = [&cfg](float start) {
             for (int i = 0; i < 1000; ++i) {
                 auto p = std::make_shared<RuntimeProfile>();
-                p->mouse.kp_x = start + static_cast<float>(i % 50);
-                p->mouse.kp_y = (start + static_cast<float>(i % 50)) * 2.0f;  // 配对字段：y=2x
+                p->mouse.aim_gain = start + static_cast<float>(i % 50);
+                p->mouse.aim_max_move = (start + static_cast<float>(i % 50)) * 2.0f;  // 配对字段：max_move=2×gain
                 cfg.update(p);
             }
         };
@@ -85,9 +85,9 @@ int main() {
                 if (!s) { ++read_errors; continue; }
                 // 完整性：快照必须是完整 profile——配对字段 y=2x 必须严格成立，
                 // 若出现撕裂（x 来自批次A、y 来自批次B）则断言失败
-                const float kx = s->mouse.kp_x;
-                const float ky = s->mouse.kp_y;
-                if (ky != kx * 2.0f) ++read_errors;
+                const float g = s->mouse.aim_gain;
+                const float mm = s->mouse.aim_max_move;
+                if (mm != g * 2.0f) ++read_errors;
             }
         };
 

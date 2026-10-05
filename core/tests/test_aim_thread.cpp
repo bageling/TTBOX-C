@@ -88,12 +88,11 @@ TEST(aim_thread_out_counts_match_sent_moves) {
     profile->mouse.calibrating = true;          // 标定期无视物理热键强制放行注入
     profile->mouse.calibration_bias_x = 20.0f;  // 参考点像素偏置（控制误差域）
     profile->mouse.aim_profiles[0].hotkey = 0x02;
-    profile->mouse.kp_x = 1.0f;
-    profile->mouse.kp_y = 1.0f;
-    profile->mouse.kd_x = 0.0f;
-    profile->mouse.kd_y = 0.0f;
-    // ★ V1.0.13：smooth 已从参数面删除（折叠进 kp/kd）⇒ 这里 kp=1.0 就是真实增益，
-    // 不会再被削 99%。输出死区仍显式关掉，保证确实产生非零输出。
+    // V1.0.41：pid1 删除，换 SmoothAimController；alpha=1 不平滑、ratio=0 无死区 ⇒ 纯比例。
+    profile->mouse.aim_alpha = 1.0f;
+    profile->mouse.aim_gain = 1.0f;
+    profile->mouse.aim_max_move = 10000.0f;
+    profile->mouse.aim_deadzone_ratio = 0.0f;
     profile->mouse.output_deadzone = 0.0f;
     config.update(profile);
 
@@ -136,8 +135,10 @@ TEST(aim_thread_out_counts_ignore_gated_frames) {
     profile->mouse.enabled = true;
     profile->mouse.calibrating = false;
     profile->mouse.aim_profiles[0].hotkey = 0x02;
-    profile->mouse.kp_x = 1.0f;
-    profile->mouse.kp_y = 1.0f;
+    profile->mouse.aim_alpha = 1.0f;
+    profile->mouse.aim_gain = 1.0f;
+    profile->mouse.aim_max_move = 10000.0f;
+    profile->mouse.aim_deadzone_ratio = 0.0f;
     profile->mouse.output_deadzone = 0.0f;
     config.update(profile);
 

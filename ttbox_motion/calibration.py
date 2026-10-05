@@ -206,68 +206,29 @@ def derive_pid_params(
     gain_y_px_per_count: float,
     response_delay_ms: float,
 ) -> dict:
-    """由标定实测物理量自动推导 PID 参数（自动调参核心）。
+    """由标定实测物理量推导 SmoothAimController 的比例增益 aim_gain（自动调参核心）。
 
-    依据 pid1 控制器数学（见 core/src/aim/Pid1Controller.hpp）：
-      - 单帧准星移动 ≈ 输出 × gain px。
-      - 不过冲约束：单帧移动 < 当前误差 → kp × gain < 1。
-      - 阻尼：系统延迟越大，所需 KD 越大（抑制相位滞后振荡）。
-      - 积分：延迟越大，predict（Ki 通道增益）必须越小（上轮仿真证明
-        predict 过大 + 延迟 → 剧烈振荡）。
+    ★★★ V1.0.41（2026-10-05）：pid1 彻底删除，换 SmoothAimController
+      （EMA+比例+限幅+框高死区，见 core/src/aim/SmoothAimController.hpp）。
+      新控制器只推导 aim_gain（= 误差 px → 移动 count 的比例），
+      alpha / max_move / deadzone_ratio 是手感参数、不进物理推导 ⇒ 调参简单。
 
-    ★★ V1.0.13（2026-09-30）：`smooth` 参数曾被删除 —— core 侧把"削弱倍率"折进了 kp/kd
-      本身，于是这里推导出来的 kp **就是接进环路的生效值** —— 不再有"名义值 × 0.01"那层
-      隐形换算。那层换算是业主"手感跟配置对不上"的主要来源，也是本函数历史上最坑的坑。
+    物理（单帧）：
+      move(count) = error(px) × aim_gain(count/px)
+      准星移动 px  = move × gain = error × aim_gain × gain
+      单帧吃误差比例 = aim_gain × gain
+    ⇒ aim_gain = KP_FRACTION_PER_FRAME / gain（单帧吃 7% 误差）
 
-    ★★★ V1.0.38（2026-10-05）：**口径再翻转，回归 pid1 完全移植**（业主令
-      「pid 以 pid1 为准完全移植，不许有自己的变动」）。core 侧恢复了 smooth 通路
-      （smooth 重新作为 Pid1Controller 第 5 参接入，kp 折算逻辑整段删除），
-      所以本函数**内部仍按生效值做物理计算，但返回前折回名义值**（除以 SMOOTH_FACTOR）。
-      ⇒ 物理推导逻辑（7% 单帧误差、50ms→3.0×kp 阻尼比）与实测锚点**全部不变**，
-        变的只是"写进配置的那个数字该长什么样"。
-
-    ② **单帧误差比例锚点 7%，阻尼比锚点「50ms → 3.0×kp」**。
-       依据是板端 A/B 实测（2026-09-24，gain 实测 x=0.686 / y=0.695，回路延迟 51ms）：
-         - `kp=0.25 / kd=0.25`（⇒ 单帧吃 17% 误差）→ bias 阶跃打进**持续振荡**，
-           准星 ±150px，标定必挂；
-         - `kp=0.10 / kd=0.30`（⇒ 单帧吃 6.9% 误差）→ **16 轮全稳**。
-       旧公式给的是 15%，落在实测**不稳**那一档——
-       也就是"标定成功写回的参数正好是让标定失败的那组"。
-
-    返回 kp/kd/predict 的**生效值**（直接写进 RuntimeProfile 的 mouse 段，无需再折算）。
+    锚点（板端 A/B 实测 2026-09-24）：单帧吃 6.9% ⇒ 16 轮全稳；吃 17% ⇒ 振荡。
     """
     if gain_x_px_per_count <= 0 or gain_y_px_per_count <= 0:
         raise ValueError("增益必须 > 0")
     gain = min(gain_x_px_per_count, gain_y_px_per_count)
     delay = max(0.0, float(response_delay_ms))
-    # KP：目标「单帧吃掉 7% 误差」。锚点见 docstring ②：板端实测稳定组 kp=0.10
-    # （gain=0.686）反推 单帧比例 = 0.10×0.686 = 6.9% ⇒ 取 7%。
-    kp = KP_FRACTION_PER_FRAME / gain
-    # 极端场景（超高增益 + 高延迟）：命令在延迟窗口内过冲是极限环主因，
-    # 仿真扫描证明 g1.5+d60 需要 kp 压到 0.4× 才稳。
+    # aim_gain：目标「单帧吃掉 7% 误差」。
+    aim_gain = KP_FRACTION_PER_FRAME / gain
+    # 极端场景（超高增益 + 高延迟）：命令在延迟窗口内过冲是极限环主因。
     if gain >= 1.2 and delay >= 50.0:
-        kp *= 0.4
-    kp = max(KP_EFF_MIN, min(KP_MAX, kp))
-    # KD：阻尼比随延迟线性增强，锚点「50ms → 3.0×kp」= 板端实测稳定组的 kd/kp。
-    # （旧式 0.7+delay/120 在 51ms 只有 1.13×kp，正是实测会振荡的那一档。）
-    kd_ratio = KD_RATIO_BASE + delay / KD_RATIO_DELAY_DIV
-    kd = max(KD_MIN, min(KD_MAX, kp * kd_ratio))
-    # predict（Ki 通道）：延迟越大越保守；上限 0.35（噪声下 Ki 正反馈
-    # 是振荡主因，见 core/tools/pid_sim 仿真结论），60ms 延迟降为 0.15。
-    # ★ 这个上限仍是保守档，与 core 的 predict 默认 1.0 不同源 —— 见 V1.0.13 交付记录
-    #   「待办」一条：要用 pid_sim 在真实 gain 域重新扫一遍再统一。
-    predict = max(0.1, min(0.35, 0.35 - delay / 300.0))
-    # ★★★ V1.0.38：把 kp/kd 从「生效值」折回「名义值」再返回。
-    #   core 侧 V1.0.38 起把 smooth 交还给 Pid1Controller 第 5 参、且删掉了 kp 折算
-    #   （core/src/model/RuntimeProfile.cpp / AimThread.cpp:274-277），
-    #   所以写进配置的数字必须是**名义值**，由控制器内部 soft-limit 去实现那 99% 压缩。
-    #   折算关系（pid1 原文）：生效 = 名义 × (10000-smooth)/10000 ⇒ 名义 = 生效 / 因子。
-    #   漏掉这一步的后果（实测）：标定写回 kp=0.102，控制器再压一次只剩 0.0408
-    #   ⇒ 比预期弱 2.5 倍 ⇒ "标定成功但自瞄几乎不动"。
-    kp_nominal = kp / SMOOTH_FACTOR
-    kd_nominal = kd / SMOOTH_FACTOR
-    return {
-        'kp': round(kp_nominal, 4),
-        'kd': round(kd_nominal, 4),
-        'predict': round(predict, 3),
-    }
+        aim_gain *= 0.4
+    aim_gain = max(KP_EFF_MIN, min(KP_MAX, aim_gain))
+    return {'aim_gain': round(aim_gain, 4)}
