@@ -13,10 +13,15 @@
 #   ③ 倍率 0 未夹取 ⇒ core 的 fov.radius<=0 撞 RuntimeProfile.cpp:141
 #      「FOV 半径必须在 (0,1]」，整份 SET_CONFIG 被拒（连带丢掉别的字段）。
 #
-# 两侧换算关系（core/src/aim/AimThread.cpp:117）：
-#   fov_range = fov.enabled ? fov.radius × 2 : 1.0
-#   ⇒ 面板倍率 k = fov.radius × 2（enabled 时）；enabled=false ⇒ 倍率视作 1.0
-#   ⇒ 写回必须 radius = k / 2 且 enabled = True（否则 k 被 core 吞掉）
+# 两侧换算关系（core/src/aim/AimThread.cpp:182，V1.0.31 起）：
+#   fov_range = fov.enabled ? fov.radius × fov_scale : 1.0（fov_scale 默认 1.0）
+#   ⇒ 面板倍率 k = fov.radius（enabled 时，radius 本身就是内接圆比例）；enabled=false ⇒ 倍率视作 1.0
+#   ⇒ 写回必须 radius = k 且 enabled = True（否则 k 被 core 吞掉）
+#
+# ★★ V1.0.34 语义对齐（本文件旧断言按「radius = k/2」「k = radius×2」写，对应的是 core
+#   旧「fov_range = radius×2」口径；core 在 V1.0.31 删掉 ×2 后，web 层这套 /2 没同步，
+#   导致真实选靶半径 = 内接圆的一半、预览圈比它大 2 倍。本文件随 core 新口径整体翻转：
+#   不再有 /2 和 ×2，radius 直读直写 = 面板倍率。）
 #
 # 运行：python -m pytest plugins/web/tests/test_web_fov_radius_semantics.py -v
 import importlib.util
@@ -135,17 +140,17 @@ def test_fov_factor_min_is_below_one(web_mod):
 # ===========================================================================
 
 @pytest.mark.parametrize('radius,enabled,expected', [
-    # enabled ⇒ 倍率 = radius × 2（core 的 fov_range 就是 radius×2）
-    (0.5, True, 1.0),
-    (0.4, True, 0.8),
-    (0.25, True, 0.5),
-    (0.05, True, 0.1),
+    # enabled ⇒ 倍率 = radius（V1.0.31 起 core 的 fov_range 就是 radius，无 ×2）
+    (0.5, True, 0.5),
+    (0.4, True, 0.4),
+    (0.25, True, 0.25),
+    (0.05, True, 0.1),     # 0.05 < 下限 0.1 ⇒ 夹到 0.1
     # enabled=False ⇒ core 强制 fov_range=1.0，倍率就是 1.0（内接圆）
     (0.5, False, 1.0),
     (0.05, False, 1.0),
     (0.9, False, 1.0),
     # 越界 / 脏数据一律夹回合法带
-    (1.0, True, 1.0),      # 2.0 → 夹到 1.0
+    (1.0, True, 1.0),      # 1.0 = 内接圆，合法原样
     (0.0, True, 0.1),      # 0.0 → 夹到 0.1
     (None, True, 1.0),
     ('abc', True, 1.0),
@@ -157,32 +162,32 @@ def test_radius_to_factor_matches_core_fov_range(web_mod, radius, enabled, expec
 
 def test_radius_to_factor_defaults_to_enabled(web_mod):
     """只传 radius 时按 enabled 处理（面板回填一律拿到 core 的 enabled 标志）。"""
-    assert web_mod._fov_radius_to_factor(0.4) == pytest.approx(0.8)
+    assert web_mod._fov_radius_to_factor(0.4) == pytest.approx(0.4)
 
 
 # ===========================================================================
 # 3. 翻译层：面板倍率 → core fov（写方向）
 # ===========================================================================
 
-def test_range_factor_1_00_writes_radius_half_and_enabled_true(web_mod, monkeypatch):
-    """★ 最硬的回归点：1.00 必须落成 enabled=True / radius=0.5。
+def test_range_factor_1_00_writes_radius_one_and_enabled_true(web_mod, monkeypatch):
+    """★ 最硬的回归点：1.00 必须落成 enabled=True / radius=1.0（= 内接圆）。
 
     旧实现 `enabled = range_factor < 1.0` 让 1.00 走 enabled=False，
     core 于是把 fov_range 强制成 1.0 —— 看似数值相同，但那是"关"，
-    接下来 0.99 就会变成 1.98×，滑块彻底非单调。
+    接下来 0.99 就会变成非单调。V1.0.34 起 radius 直写 = 倍率：1.0 ⇒ radius=1.0。
     """
     fov = _fov_of(web_mod, monkeypatch, {'range_factor': 1.0})
     assert fov['enabled'] is True
-    assert fov['radius'] == pytest.approx(0.5)
+    assert fov['radius'] == pytest.approx(1.0)
 
 
 def test_range_factor_0_99_does_not_inflate_the_circle(web_mod, monkeypatch):
     """★ 非单调回归点：0.99 只能得到 0.99×，绝不能是 1.98×。"""
     fov = _fov_of(web_mod, monkeypatch, {'range_factor': 0.99})
     assert fov['enabled'] is True
-    assert fov['radius'] == pytest.approx(0.495)
-    # core 侧最终生效倍率 = radius × 2
-    assert fov['radius'] * 2.0 == pytest.approx(0.99)
+    assert fov['radius'] == pytest.approx(0.99)
+    # core 侧最终生效倍率 = radius（V1.0.31 起无 ×2）
+    assert fov['radius'] == pytest.approx(0.99)
 
 
 def test_range_factor_is_monotonic_across_the_slider(web_mod, monkeypatch):
@@ -192,7 +197,7 @@ def test_range_factor_is_monotonic_across_the_slider(web_mod, monkeypatch):
     for k in ks:
         fov = _fov_of(web_mod, monkeypatch, {'range_factor': k})
         assert fov['enabled'] is True, f'k={k} 竟落成"关"'
-        effective.append(fov['radius'] * 2.0)
+        effective.append(fov['radius'])
     for a, b in zip(effective, effective[1:]):
         assert a >= b - 1e-9, f'倍率序列非单调：{effective}'
     assert effective[0] == pytest.approx(1.0)
@@ -200,15 +205,15 @@ def test_range_factor_is_monotonic_across_the_slider(web_mod, monkeypatch):
 
 
 def test_range_factor_zero_is_clamped_and_never_emits_illegal_radius(web_mod, monkeypatch):
-    """倍率 0（前端旧 min=0 能拖出来）必须夹到 0.1 ⇒ radius=0.05，仍在 (0,1]。"""
+    """倍率 0（前端旧 min=0 能拖出来）必须夹到 0.1 ⇒ radius=0.1，仍在 (0,1]。"""
     fov = _fov_of(web_mod, monkeypatch, {'range_factor': 0})
-    assert fov['radius'] == pytest.approx(0.05)
+    assert fov['radius'] == pytest.approx(0.1)
     assert 0.0 < fov['radius'] <= 1.0
 
 
 def test_range_factor_above_one_is_clamped(web_mod, monkeypatch):
     fov = _fov_of(web_mod, monkeypatch, {'range_factor': 1.8})
-    assert fov['radius'] == pytest.approx(0.5)
+    assert fov['radius'] == pytest.approx(1.0)
 
 
 def test_hotkey_fov_scale_is_stored_per_profile_not_baked_into_radius(web_mod, monkeypatch):
@@ -217,13 +222,13 @@ def test_hotkey_fov_scale_is_stored_per_profile_not_baked_into_radius(web_mod, m
     为什么必须拆开：总览半径（range_factor）是全局的，热键卡倍率是按档的。
     多档位之后如果后端一次性乘完，所有档就被锁死在同一个半径上 —— 卡上的旋钮
     看着能拖、实际对别的档毫无作用。乘法改由 core 按当前档做：
-    fov_range = (fov.radius × 2) × aim_profiles[active].fov_scale（AimThread）。
+    fov_range = fov.radius × aim_profiles[active].fov_scale（AimThread，V1.0.31 起无 ×2）。
     """
     prof = web_mod.web_body_to_profile(
         {'range_factor': 1.0, 'aim_profiles': [{'hotkey': 'right', 'fov_scale': 0.5}]})
     assert prof['fov']['enabled'] is True
-    # 基准半径只由总览倍率决定：1.0 ⇒ radius = 0.5（= 内接圆）
-    assert prof['fov']['radius'] == pytest.approx(0.5)
+    # 基准半径只由总览倍率决定：1.0 ⇒ radius = 1.0（= 内接圆）
+    assert prof['fov']['radius'] == pytest.approx(1.0)
     # 档倍率原样落到档里，等 core 再乘
     assert prof['mouse']['aim_profiles'][0]['fov_scale'] == pytest.approx(0.5)
 
@@ -264,22 +269,22 @@ def test_fov_center_and_shape_are_preserved(web_mod, monkeypatch):
     assert fov['shape'] == 1
     assert fov['center_x'] == pytest.approx(0.42)
     assert fov['center_y'] == pytest.approx(0.58)
-    assert fov['radius'] == pytest.approx(0.25)
+    assert fov['radius'] == pytest.approx(0.5)
 
 
 def test_base_radius_and_profile_scale_are_two_independent_layers(web_mod, monkeypatch):
     """两层缩放各归各位：总览倍率 → fov.radius，档倍率 → aim_profiles[i].fov_scale。
 
     后端**不做**乘法（乘法在 core 按当前档做）。所以这里要能看出两层没被压成一层：
-    (总览 0.5, 档 0.5) 的 radius 必须是 0.25 而不是 0.125 —— 写成 0.125 就等于
+    (总览 0.5, 档 0.5) 的 radius 必须是 0.5 而不是 0.25 —— 写成 0.25 就等于
     后端把两层乘掉了，之后用户在卡上改倍率对整个半径不再有任何影响。
     """
     a = web_mod.web_body_to_profile(
         {'range_factor': 0.5, 'aim_profiles': [{'hotkey': 'right', 'fov_scale': 0.5}]})
-    assert a['fov']['radius'] == pytest.approx(0.25)
+    assert a['fov']['radius'] == pytest.approx(0.5)
     assert a['mouse']['aim_profiles'][0]['fov_scale'] == pytest.approx(0.5)
-    # core 侧生效值 = radius×2 × 档倍率（AimThread）
-    effective = a['fov']['radius'] * 2.0 * a['mouse']['aim_profiles'][0]['fov_scale']
+    # core 侧生效值 = radius × 档倍率（AimThread，V1.0.31 起无 ×2）
+    effective = a['fov']['radius'] * a['mouse']['aim_profiles'][0]['fov_scale']
     assert effective == pytest.approx(0.25)
 
 
@@ -307,7 +312,7 @@ def test_per_profile_fov_scale_is_clamped_and_never_leaks_illegal_values(web_mod
 # 4. PUT /api/config：真正写给 core 的那一份 profile
 # ===========================================================================
 
-def test_put_config_writes_radius_half_of_factor(web_mod, monkeypatch):
+def test_put_config_writes_radius_equal_to_factor(web_mod, monkeypatch):
     rec = {}
     client = _client(web_mod, monkeypatch, recorder=rec)
     rv = client.put('/api/config', json={'range_factor': 0.5})
@@ -316,7 +321,7 @@ def test_put_config_writes_radius_half_of_factor(web_mod, monkeypatch):
     assert rec['req_type'] == 'SET_CONFIG'
     fov = rec['params']['profile']['fov']
     assert fov['enabled'] is True
-    assert fov['radius'] == pytest.approx(0.25)
+    assert fov['radius'] == pytest.approx(0.5)
 
 
 def test_put_config_full_range_is_not_turned_off(web_mod, monkeypatch):
@@ -326,7 +331,7 @@ def test_put_config_full_range_is_not_turned_off(web_mod, monkeypatch):
     client.put('/api/config', json={'range_factor': 1.0})
     fov = rec['params']['profile']['fov']
     assert fov['enabled'] is True
-    assert fov['radius'] == pytest.approx(0.5)
+    assert fov['radius'] == pytest.approx(1.0)
 
 
 def test_put_config_untouched_factor_keeps_core_radius(web_mod, monkeypatch):
@@ -355,14 +360,14 @@ def test_put_config_never_sends_illegal_fov_radius(web_mod, monkeypatch, bad):
 # 5. 回填：core profile → 面板（写方向的逆）
 # ===========================================================================
 
-def test_profile_to_web_reports_radius_times_two(web_mod):
+def test_profile_to_web_reports_radius_directly(web_mod):
     prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
     body = web_mod.profile_to_web(prof)
-    assert body['range_factor'] == pytest.approx(0.8)
+    assert body['range_factor'] == pytest.approx(0.4)
 
 
 def test_profile_to_web_disabled_fov_reports_one(web_mod):
-    """core 里 fov 是关的 ⇒ 生效倍率就是 1.0（内接圆），不是 radius×2。"""
+    """core 里 fov 是关的 ⇒ 生效倍率就是 1.0（内接圆），不是 radius。"""
     prof = _base_profile(fov={'enabled': False, 'radius': 0.5})
     body = web_mod.profile_to_web(prof)
     assert body['range_factor'] == pytest.approx(1.0)
@@ -443,9 +448,9 @@ def test_multi_profile_roundtrip_is_stable(web_mod, monkeypatch):
     assert out['fov']['radius'] == pytest.approx(0.4)
 
 
-@pytest.mark.parametrize('radius', [0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
+@pytest.mark.parametrize('radius', [1.0, 0.9, 0.7, 0.5, 0.4, 0.2, 0.1])
 def test_profile_to_web_roundtrip_is_stable_inside_the_band(web_mod, monkeypatch, radius):
-    """合法带内（radius ≤ 0.5 = 内接圆）回填 → 原样存回必须逐值稳定。"""
+    """合法带内（radius ≤ 1.0 = 内接圆）回填 → 原样存回必须逐值稳定。"""
     prof = _base_profile(fov={'enabled': True, 'radius': radius})
     body = web_mod.profile_to_web(prof)
     fov = _fov_of(web_mod, monkeypatch, body, profile=prof)
@@ -453,13 +458,14 @@ def test_profile_to_web_roundtrip_is_stable_inside_the_band(web_mod, monkeypatch
     assert fov['radius'] == pytest.approx(radius, abs=1e-6)
 
 
-@pytest.mark.parametrize('legacy_radius', [0.501, 0.6, 0.75, 0.9, 1.0])
+@pytest.mark.parametrize('legacy_radius', [1.001, 1.1, 1.5, 2.0])
 def test_profile_to_web_clamps_oversized_radius_back_to_inscribed_circle(
         web_mod, monkeypatch, legacy_radius):
-    """★ 唯一一处**故意**破坏往返的地方：radius > 0.5（= 圆已超出截取区）与
-    「截取尺寸内划最大的圆形」口径直接冲突，回填夹到 1.0（内接圆）并如实存回 0.5。
+    """★ 唯一一处**故意**破坏往返的地方：radius > 1.0（= 圆已超出截取区）与
+    「截取尺寸内划最大的圆形」口径直接冲突，回填夹到 1.0（内接圆）并如实存回 1.0。
 
-    历史配置里 radius=1 & enabled=true 意即 2× 内接圆，正是这种越界值。
+    历史配置里 radius=1 & enabled=true 曾意即 2× 内接圆（旧「×2」口径），
+    V1.0.34 起 radius 直读直写，只有越界值 > 1.0 才需要收敛。
     这里是单向收敛（越界 ⇒ 内接圆 ⇒ 从此稳定），不是数据丢失：
     面板从此不可能再写出越界半径，用户看到的就是真实生效的圆。
     """
@@ -467,8 +473,7 @@ def test_profile_to_web_clamps_oversized_radius_back_to_inscribed_circle(
     body = web_mod.profile_to_web(prof)
     assert body['range_factor'] == pytest.approx(1.0)
     fov = _fov_of(web_mod, monkeypatch, body, profile=prof)
-    assert fov['radius'] == pytest.approx(0.5)
-    assert fov['radius'] * 2.0 == pytest.approx(1.0)
+    assert fov['radius'] == pytest.approx(1.0)
     # 收敛后是稳定的：再走一轮不会继续缩
     body2 = web_mod.profile_to_web(_base_profile(fov=fov))
     fov2 = _fov_of(web_mod, monkeypatch, body2, profile=_base_profile(fov=fov))
@@ -546,7 +551,7 @@ def test_html_range_factor_inputs_share_the_legal_band(web_mod, elem_id):
 
 def test_html_overlay_clamp_uses_shared_min_not_zero(web_mod):
     """★ 覆盖层曾是唯一漏改的落点：`clamp(…, 0, 1)` 会让倍率 0 时圆缩成一个点，
-    而后端此时写的是 0.05 半径 —— 画出来的圆与实际生效范围不一致。
+    而后端此时写的是 0.1 半径 —— 画出来的圆与实际生效范围不一致。
     """
     src = _html()
     m = re.search(r'function\s+updateAimRangeOverlay\s*\(\)\s*\{.*?\n\}', src, re.S)

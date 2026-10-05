@@ -44,6 +44,19 @@ cmake_minimum_required(VERSION 3.16)
 #                         resolve_head_box 纯几何配对（面积≤ref×0.5、中心落 ref 上半部、取最小），不靠类别号；
 #                       · 标定参数面板热更新（web 层，core 无感）；
 #                       · 标定摆动幅度 ±32→±96px + 闭环收敛（web 层，core 无感）。
+#   V1.0.34 相对 V1.0.33（2026-10-05）：**修 FOV 预览圈与主页「瞄准范围」滑块不同步（差 2 倍）**。
+#                       · 根因：V1.0.31 起 core 已把 fov_range = fov.radius × 2 改成
+#                         fov.radius × fov_scale（AimThread.cpp，删掉 ×2），但 web 翻译层
+#                         仍按旧口径写 fov.radius = range_factor / 2、回填倍率 = radius × 2，
+#                         没跟着删 ⇒ 真实选靶半径 = search_radius_px × range_factor / 2
+#                         （板端 1.0 时只有 160px），前端预览圈按 cropSize × range_factor
+#                         画直径（= 320px 半径）⇒ 预览圈比真实圈大 2 倍、看起来「不同步」。
+#                       · 修（纯 web 层，core 零改动）：fov.radius = range_factor（去掉 /2）、
+#                         回填倍率 = radius（去掉 ×2）⇒ 选靶半径 = search_radius_px ×
+#                         range_factor × fov_scale（1.0 ⇒ 内接圆 320px），与预览圈逐像素一致，
+#                         符合业主 2026-09-24 钉死的「1.00 = 内接圆」口径。
+#                       · 护栏：test_web_fov_radius_semantics.py 整套断言翻转（radius=k/2 →
+#                         radius=k、越界带 >0.5 → >1.0、roundtrip 下限 0.05 → 0.1）。
 #   V1.0.33 相对 V1.0.31（2026-10-05）：**回退 V1.0.32 的 FOV 基准改动**。
 #                       · V1.0.32 曾把 FOV 半径基准从「截图半宽 search_radius_px」改成「全帧短边
 #                         min(roi_w,roi_h)」想对齐 DecodeNMS，结果圈放大 4.5 倍（板端 fov.radius=0.195
@@ -229,7 +242,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.33 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.34 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)

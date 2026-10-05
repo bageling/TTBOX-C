@@ -71,13 +71,15 @@ def _fov_factor_clamp(v, default=1.0) -> float:
 def _fov_radius_to_factor(radius, enabled=True) -> float:
     """core 的 fov.radius → 面板倍率。
 
-    core 侧 fov_range = fov.radius × 2（AimThread.cpp:117），所以倍率 = radius × 2；
+    ★ V1.0.34 对齐 core 新口径：V1.0.31 起 core 侧 fov_range = fov.radius × fov_scale
+    （AimThread.cpp:182，fov_scale 默认 1.0，**不再有「×2」**），fov.radius 本身就是
+    「内接圆比例」（radius=1.0 ⇒ 内接圆），所以面板倍率 = radius 直读，不再 ×2。
     enabled=False 时 core 强制 fov_range=1.0 ⇒ 倍率就是 1.0（= 内接圆）。
     """
     if not enabled:
         return 1.0
     try:
-        return _fov_factor_clamp(float(radius) * 2.0)
+        return _fov_factor_clamp(float(radius))
     except (TypeError, ValueError):
         return 1.0
 

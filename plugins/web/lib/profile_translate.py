@@ -387,13 +387,15 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
     #    半径基准 = 内接圆半径 × range_factor（总览「FOV 半径」）。
     #    ★ 档位倍率（热键卡的「热键 FOV 缩放」）**不在这里乘**：总览半径是全局的、
     #      倍率是按档的，乘法必须在 core 侧按当前档做 ——
-    #      core AimThread 取 fov_range = (fov.radius × 2) × aim_profiles[active].fov_scale。
-    #      5e8d3a5 曾在这一处一次性乘完；多档位之后那样做会把所有档锁死在同一个半径。
-    #    core 侧 fov_range = fov.enabled ? fov.radius*2 : 1.0（AimThread.cpp:117），
-    #    所以这里必须写 radius = k/2 且 enabled=True。旧实现两处有问题：
-    #      · `enabled = range_factor < 1.0` ⇒ 1.00 走 enabled=False（fov_range 被强制成 1.0）、
-    #        0.99 走 enabled=True（fov_range=1.98）⇒ 滑块往小拖，圆反而几乎翻倍（非单调）；
-    #      · 从不读 fov_scale，回填时又恒写 1.0 ⇒ 热键卡那个旋钮是死的，提示文案却在承诺"乘"。
+    #      core AimThread 取 fov_range = fov.radius × aim_profiles[active].fov_scale。
+    #    ★★ V1.0.34 对齐 core 新口径：V1.0.31 起 core 已删掉「fov_range = fov.radius × 2」
+    #      （AimThread.cpp:182 现为 fov.radius × fov_scale），fov.radius 本身就是**内接圆比例**：
+    #      range_factor=1.0 ⇒ radius=1.0 ⇒ 内接圆（search_radius_px 全额）。故这里直写
+    #      radius = range_factor，**不再 /2**。旧的「radius = k/2」是配 core 旧「×2」用的，
+    #      core 删 ×2 后这套没同步 ⇒ 整体半径少一半（板端 1.0 只剩 160px，而非内接圆 320px），
+    #      预览圈（cropSize × k 直径）因此比真实选靶圈大 2 倍，这就是「预览跟主页不同步」的根因。
+    #    旧实现另两处历史问题（已修，勿回退）：enabled 非单调（`enabled = range_factor < 1.0`）、
+    #    从不读 fov_scale（回填恒写 1.0）。
     fov: dict = {}
     # ★ 沿用值来源优先级：调用方传入的 merge base（update_config / load_preset 都已
     #   读过 Core，绝不在翻译层里二次 GET —— 那既构成 TOCTOU，也曾把"读失败"静默
@@ -415,7 +417,7 @@ def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
         fov['radius'] = prev_fov.get('radius', 0.5)
     else:
         fov['enabled'] = True
-        fov['radius'] = round(_fov_factor_clamp(body['range_factor']) / 2.0, 6)
+        fov['radius'] = round(_fov_factor_clamp(body['range_factor']), 6)
 
     # 9) 预览帧率
     preview: dict = {}
