@@ -164,9 +164,16 @@ bool RuntimeProfile::validate(std::string* error) const {
         return false;
     }
     // ★ 2026-09-26（第四轮审计）：kd 为负 = 阻尼变正反馈，必须挡住。
-    //   （原先这里还校验 smooth 的 [0,9999]；V1.0.13 起 smooth 已从参数面删除。）
+    //   （smooth 的 [0,9999] 校验在 V1.0.13 随字段删除一起去掉了，
+    //     V1.0.38 回归 pid1 完全移植时**一并恢复** —— 越界值会让
+    //     smoothTerm 的 outputScale(=10000-smooth) 变成负数 ⇒ 输出整体反号。）
     if (mouse.kd_x < 0.0f || mouse.kd_y < 0.0f) {
         if (error) *error = "mouse.kd 不能为负";
+        return false;
+    }
+    if (mouse.smooth_x < 0.0f || mouse.smooth_x > 9999.0f ||
+        mouse.smooth_y < 0.0f || mouse.smooth_y > 9999.0f) {
+        if (error) *error = "mouse.smooth 必须在 [0,9999]";
         return false;
     }
     if (mouse.hfov <= 0.0f || mouse.hfov >= 180.0f ||
@@ -392,6 +399,11 @@ JsonValue RuntimeProfile::to_json() const {
     // 对齐参数
     m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
     m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
+    // ★★★ V1.0.38：smooth 回归序列化（V1.0.13 删字段时连to_json 一起去掉了）。
+    //   必须写出去：AimThread 用 frame_profile->mouse.smooth_x 喂 Pid1Controller
+    //   的第 5 参，配置若不落盘则每次重启都只能吃缺省值，用户在面板的调整会丢。
+    m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
+    m.set("smooth_y", JsonValue::number(static_cast<double>(mouse.smooth_y)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
     JsonValue pc = JsonValue::object();
@@ -640,38 +652,19 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         // 热键的唯一真源是 mouse.aim_profiles（见本段末尾的档位解析，老配置在那里合成第 0 档）。
         p.mouse.fov_range = static_cast<float>(obj_num(*m, "fov_range", 1.0));
         p.mouse.confidence = static_cast<float>(obj_num(*m, "confidence", 0.25));
-        // ★ V1.0.13（2026-09-30）：kp/kd 语义改为真实有效值，smooth 从参数面删除。
-        //   老配置（带 smooth_x/smooth_y）必须**原样折算**，否则 kp 会突然放大 100 倍：
-        //     kp_eff = kp * (10000 - smooth) / 10000
-        //   判据用"键是否存在"而不是值 —— 新配置压根不写 smooth，用值判会把默认 9900
-        //   当成"要削 99%"再削一次。
-        //   为什么这么折是等价的：pid1 的 smoothTerm 对小量就是 (v/10000)*(10000-smooth)，
-        //   即纯乘法；离线闭环（core/tools/pid_sim/aim_replay.py）实测移动靶偏差 ≤0.23%、
-        //   静止靶绝对差 0.26px（< 半个 count 量化级）。
-        {
-            const JsonValue* smx = m->find("smooth_x");
-            const JsonValue* smy = m->find("smooth_y");
-            const bool has_smx = smx && smx->is_number();
-            const bool has_smy = smy && smy->is_number();
-            const float kp_dflt_x = has_smx ? 25.0f : 0.25f;
-            const float kp_dflt_y = has_smy ? 25.0f : 0.25f;
-            const float kd_dflt_x = has_smx ? 25.0f : 0.25f;
-            const float kd_dflt_y = has_smy ? 25.0f : 0.25f;
-            p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", kp_dflt_x));
-            p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", kp_dflt_y));
-            p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", kd_dflt_x));
-            p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", kd_dflt_y));
-            if (has_smx) {
-                const float fac = (10000.0f - static_cast<float>(obj_num(*m, "smooth_x", 9900.0))) / 10000.0f;
-                p.mouse.kp_x *= fac;
-                p.mouse.kd_x *= fac;
-            }
-            if (has_smy) {
-                const float fac = (10000.0f - static_cast<float>(obj_num(*m, "smooth_y", 9900.0))) / 10000.0f;
-                p.mouse.kp_y *= fac;
-                p.mouse.kd_y *= fac;
-            }
-        }
+        // ★★★ V1.0.38：**删掉 V1.0.13 的 smooth→kp 折算**，回归 pid1 原始读法。
+        //   V1.0.13 曾在下面把老配置里的 smooth_x/smooth_y 乘进 kp/kd
+        //   （kp_eff = kp×(10000-smooth)/10000），并把 smooth 从参数面删除。
+        //   现在 smooth 字段回来了、Pid1Controller 的第 5 参重新接它（见 AimThread.cpp），
+        //   若保留这段折算就是**双重缩放**（kp 被折一次 + soft-limit 再压一次）
+        //   ⇒ 输出会小 100 倍。业主 2026-10-05 令「pid 完全移植 pid1，不许有自己的变动」，
+        //   故整段删除，kp/kd/smooth 三个键各自独立按 pid1 原义读取。
+        p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", 25.0));
+        p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", 25.0));
+        p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", 25.0));
+        p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", 25.0));
+        p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));
+        p.mouse.smooth_y = static_cast<float>(obj_num(*m, "smooth_y", 9900.0));
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
         p.mouse.hfov = static_cast<float>(obj_num(*m, "hfov", 83.105));
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));
@@ -684,9 +677,11 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
         // 对齐参数
-        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 1.0));
+        // ★★★ V1.0.38：predict 缺省回归 pid1 原文 main() 的原值（X=3.0 / Y=0.0）。
+        //   V1.0.13 曾把 X 降到 1.0（理由：51ms 延迟 + 144fps 下 3.0 会自激），
+        //   业主 2026-10-05 令「pid 完全移植 pid1」⇒ 撤回该降级。
+        p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 3.0));
                 p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
-        // V1.0.13：smooth_x/smooth_y 已删（上面折算进 kp/kd）。旧键不再读取、也不回写。
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
     // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
         if (const JsonValue* pc = m->find("pull_curve"); pc && pc->is_object()) {

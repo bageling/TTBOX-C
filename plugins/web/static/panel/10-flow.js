@@ -2410,6 +2410,9 @@ function populateForm(config) {
   setValue("controller_predict", controller.predict_x ?? CONTROLLER_DEFAULTS.predict);
   setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
   setValue("controller_rate", controller.rate_x ?? CONTROLLER_DEFAULTS.rate);
+  // ★ V1.0.38：smooth（pid1 的大误差保护）也要回填，否则面板看不到当前值。
+  //   两轴共用一个输入框，与 kp/kd/rate 同口径。
+  setValue("controller_smooth", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
@@ -2611,6 +2614,10 @@ function collectConfig() {
         predict_y: getNumber("controller_predict_y", CONTROLLER_DEFAULTS.predict_y),
         rate_x: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
         rate_y: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
+        // ★ V1.0.38：smooth 两轴共用（同 kp/kd/rate 口径）。
+        //   它是 pid1 的 soft-limit 强度，0 = 关闭大误差保护。
+        smooth_x: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
+        smooth_y: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),

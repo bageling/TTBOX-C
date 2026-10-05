@@ -2,6 +2,7 @@ import pytest
 
 from ttbox_motion.calibration import (
     KP_FRACTION_PER_FRAME,
+    SMOOTH_FACTOR,
     CalibrationAxis,
     CalibrationObservation,
     CalibrationState,
@@ -104,7 +105,12 @@ def test_derive_pid_params_scales_kp_inverse_to_gain():
     low_gain = derive_pid_params(0.4, 0.4, 30)
     high_gain = derive_pid_params(1.5, 1.5, 30)
     assert low_gain["kp"] > high_gain["kp"]
-    assert 0.0 < low_gain["kp"] <= 1.0     # V1.0.13：上限换到生效域（KP_MAX）
+    # ★ V1.0.38：返回值是**名义值**（core 把 smooth=9900 交给 Pid1Controller 第5参实现
+    #   那 99% 压缩，见 AimThread.cpp:274-277 / RuntimeProfile.cpp）。
+    #   ⇒ 区间断言放在**生效域**做（折回后再比），口径与物理锚点一致，
+    #   以后再换口径也不用改这条。
+    assert low_gain["kp"] > 0.0
+    assert low_gain["kp"] * SMOOTH_FACTOR <= 1.0 + 1e-9   # 折回生效域仍受 KP_MAX 约束
 
 
 def test_derive_pid_params_increases_kd_with_delay():
@@ -123,8 +129,10 @@ def test_derive_pid_params_reduces_predict_with_delay():
 def test_derive_pid_params_handles_extreme_gain_delay():
     # 超高增益 + 高延迟：KP 走保守分支，必须仍给出有效参数
     d = derive_pid_params(1.5, 1.5, 60)
-    assert 0.04 <= d["kp"] <= 1.0
-    assert 0.04 <= d["kd"] <= 0.5
+    # ★ V1.0.38：改为在**生效域**断言（折回后再比），这样区间与物理锚点口径一致，
+    #   不受"返回名义值还是生效值"影响 —— 换口径时这条测试不用再改。
+    assert 0.04 <= d["kp"] * SMOOTH_FACTOR <= 1.0
+    assert 0.04 <= d["kd"] * SMOOTH_FACTOR <= 0.5
     assert 0.1 <= d["predict"] <= 0.35
 
 
@@ -210,16 +218,19 @@ def _fit_with_px_denominator(axis):
 def test_px_denominator_yields_gain_one_for_every_game():
     """★ 反向锁：分母退回 px 时，**无论真实游戏灵敏度是多少，拟合出的 gain 都是 1.0**。
 
-    gain=1.0 又会让 derive_pid_params 恒返回 kp=KP_FRACTION_PER_FRAME
-    （= 0.07），也就是"标定成功"却写下一个与任何游戏都无关的常数 ——
-    自动调参整个失效。这条用例存在的意义：谁把分母改回 px，它就会红。
+    gain=1.0 又会让 derive_pid_params 恒返回同一个 kp（= KP_FRACTION_PER_FRAME，
+    ★ V1.0.38 起是**名义值** KP_FRACTION_PER_FRAME/SMOOTH_FACTOR），也就是
+    "标定成功"却写下一个与任何游戏都无关的常数 —— 自动调参整个失效。
+    这条用例存在的意义：谁把分母改回 px，它就会红。
     """
     for _ in (0.25, 0.4, 0.65, 1.2, 2.0):            # 五种差异极大的游戏灵敏度
         fake = _fit_with_px_denominator(CalibrationAxis.X)
         assert fake.converged is True                 # 它会"成功"，这才是最坑的地方
         assert fake.gain_px_per_count == pytest.approx(1.0)
-        assert derive_pid_params(fake.gain_px_per_count, fake.gain_px_per_count, 12.0)["kp"] \
-            == pytest.approx(KP_FRACTION_PER_FRAME)
+        kp_nominal = derive_pid_params(fake.gain_px_per_count,
+                                        fake.gain_px_per_count, 12.0)["kp"]
+        # 与游戏无关这一点，用「折回生效域后等于单帧比例」来判
+        assert kp_nominal * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME)
 
 
 def test_real_counts_denominator_makes_kp_track_the_actual_game():
@@ -230,8 +241,8 @@ def test_real_counts_denominator_makes_kp_track_the_actual_game():
         assert fit.gain_px_per_count == pytest.approx(g, rel=1e-9)
         kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0)["kp"]
     assert len(set(kps.values())) == len(kps)          # 五个不同的游戏 → 五个不同的 kp
-    # derive_pid_params 把 kp 保留 4 位小数，故用绝对容差
-    assert kps[0.65] == pytest.approx(KP_FRACTION_PER_FRAME / 0.65, abs=0.005)
+    # ★ V1.0.38：折回生效域再比（返回值是名义值；derive 保留 4 位小数故用绝对容差）
+    assert kps[0.65] * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME / 0.65, abs=0.005)
     assert kps[0.65] != pytest.approx(KP_FRACTION_PER_FRAME)   # 不再是与游戏无关的常数
 
 
@@ -243,30 +254,38 @@ def test_real_counts_denominator_makes_kp_track_the_actual_game():
 #   kp=0.10/kd=0.30 → 同一链路 16 轮全稳
 # 旧公式（单帧 15%）算出 kp=0.219/kd=0.246，几乎就是那个振荡组 ——
 # "标定成功写回的参数正好是让标定失败的那组"。下面两条把它钉死。
+#
+# ★ V1.0.38：derive_pid_params 返回**名义值**（core 侧 smooth 又回到第 5参），
+#   所以下面全部折回生效域（×SMOOTH_FACTOR）再断言 —— 板端实测锚点本身没变。
 # ===========================================================================
 
 
 def test_derived_params_match_board_measured_stable_set():
     d = derive_pid_params(0.686, 0.695, 51.0)
     # 实测稳定组是 kp=0.10 / kd=0.30（生效值）：允许小幅偏差，但不能差一个量级
-    assert d["kp"] == pytest.approx(0.10, rel=0.15)
-    assert d["kd"] == pytest.approx(0.30, rel=0.15)
+    assert d["kp"] * SMOOTH_FACTOR == pytest.approx(0.10, rel=0.15)
+    assert d["kd"] * SMOOTH_FACTOR == pytest.approx(0.30, rel=0.15)
     assert d["predict"] <= 0.35
 
 
 def test_derived_kp_never_lands_in_board_measured_oscillating_band():
     """旧公式在 51ms 给出 kp=0.2187/delay 比 1.13——落在实测振荡组附近，这里禁止回归。"""
     d = derive_pid_params(0.686, 0.695, 51.0)
-    assert d["kp"] < 0.15                     # 明显低于振荡组 kp=0.25
+    assert d["kp"] * SMOOTH_FACTOR < 0.15             # 明显低于振荡组 kp=0.25
     assert d["kd"] / d["kp"] > 2.0            # 阻尼比要够（实测稳定组是 3.0）
 
 
-def test_derived_kp_is_the_effective_value_directly():
-    """★ V1.0.13：返回的 kp 就是**生效值**，不再有"名义值 × 0.01"那层隐形换算。
+def test_derived_kp_is_the_nominal_value_core_will_soft_limit():
+    """★ V1.0.38：返回值是**名义值**，core 侧再由 soft-limit 实现那 99% 压缩。
 
-    旧域里配置写 10.2、实际生效 0.102，中间差 100 倍 —— 业主在面板上看到的数
-    跟手感对不上，正是"参考物太多"的典型。smooth 删掉后这层换算没有了，
-    所以这条用例的判据直接是 kp == 单帧比例 / gain。
+    V1.0.13~V1.0.37 期间 core 删掉了 smooth、kp 直接当生效值用；本次回归 pid1
+    完全移植（业主令「pid 以 pid1 为准完全移植」），smooth 重新接到 Pid1Controller
+    第 5 参（AimThread.cpp:274-277），所以标定必须把生效值折回名义值写进配置，
+    否则控制器会再压一次 ⇒ 实测只发挥预期的 1/2.5 ⇒ "标定成功但自瞄几乎不动"。
+
+    判据：名义值 × SMOOTH_FACTOR 回到「单帧比例 / gain」。
     """
     d = derive_pid_params(0.686, 0.686, 51.0)
-    assert d["kp"] == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)
+    assert d["kp"] * SMOOTH_FACTOR == pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)
+    # 且它确实是"名义"而非"生效"——两者差 100 倍，混淆任一方向都会让标定失效
+    assert d["kp"] != pytest.approx(KP_FRACTION_PER_FRAME / 0.686, rel=0.06)

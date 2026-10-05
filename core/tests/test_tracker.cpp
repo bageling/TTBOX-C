@@ -34,6 +34,29 @@ static constexpr uint64_t kDtUs = 4000;
 static constexpr uint64_t kRefX = 1280;
 static constexpr uint64_t kRefY = 720;
 
+// ★★★ V1.0.38：本文件验证的是 **AimTracker（速度估计 + 预测）**，PID 只是"把预测点
+//   变成鼠标输出"的载体。所以 PID 参数必须**显式钉死**，不能吃 TestPidParams 的默认值。
+//   原因：V1.0.38 回归 pid1 完全移植后，默认值变成 kp=25（名义）+ smooth=9900，
+//   输出量级与 V1.0.13 的折算口径（kp=0.25 / smooth 恒 0）差 100 倍，
+//   会让「误差符号 ⇒ 输出符号」这类断言随 PID 参数漂移 —— 实测 test6_reversal
+//   因目标在 140 帧内没真正穿越参考点（终点仅 -8px，被 One-Euro 平滑与预测超前抵消）
+//   而拿不到负输出，测试变红，但那与 tracker 的正确性无关。
+//   口径：soft-limit 关闭（smooth=0）+ kp=0.25 + 预测关闭 ⇒ 输出与误差严格同号，
+//   断言只反映 tracker 行为，不掺 PID 增益。生产口径由 test_real_model / test_mouse 覆盖。
+static TestPidParams tracker_test_params() {
+    TestPidParams p;
+    p.reference_x = static_cast<float>(kRefX);
+    p.reference_y = static_cast<float>(kRefY);
+    p.kp_x = 0.25f; p.kp_y = 0.25f;
+    p.kd_x = 0.0f;  p.kd_y = 0.0f;
+    p.predict_x = 0.0f; p.predict_y = 0.0f;
+    p.smooth_x = 0.0f; p.smooth_y = 0.0f;   // soft-limit 关闭：输出与误差严格同号
+    p.sensitivity = 1.0f;
+    p.output_scale = 1.0f;
+    p.output_deadzone = 0.0f;              // 不让死区吃掉符号验证
+    return p;
+}
+
 // 运行单帧：更新 tracker + 预测 + controller，返回 MouseCommand
 static MouseCommand run_frame(AimTracker& tr, TestPidController& ctl,
                               float tx, float ty, int tid, uint64_t now_us,
@@ -55,8 +78,7 @@ static MouseCommand run_frame(AimTracker& tr, TestPidController& ctl,
 static void test_static() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float max_abs_out = 0.0f, max_pred_err = 0.0f;
     for (int i = 0; i < 200; ++i) {
@@ -77,8 +99,7 @@ static void test_static() {
 static void test_constant_velocity() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     const float pred_s = 0.05f;       // 预测 50ms
     const int pred_frames = 12;       // 50ms / 4ms ≈ 12 帧
@@ -113,8 +134,7 @@ static void test_constant_velocity() {
 static void test_acceleration() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float max_out = 0.0f, max_pred_err = 0.0f;
     float x = kRefX, v = 0.0f;
@@ -137,8 +157,7 @@ static void test_acceleration() {
 static void test_deceleration() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float max_out = 0.0f, max_pred_err = 0.0f;
     float x = kRefX, v = 0.0f;
@@ -164,8 +183,7 @@ static void test_deceleration() {
 static void test_sudden_stop() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float x = kRefX;
     const float v = 120.0f;  // 120px/s
@@ -192,8 +210,7 @@ static void test_sudden_stop() {
 static void test_direction_reversal() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float x = kRefX;
     const float v = 100.0f;
@@ -217,8 +234,7 @@ static void test_direction_reversal() {
 static void test_target_switch() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     // 目标1 向右运动 60 帧
     float x1 = kRefX;
@@ -246,8 +262,7 @@ static void test_target_switch() {
 static void test_brief_loss() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     float x = kRefX;
     for (int i = 0; i < 60; ++i) {
@@ -275,8 +290,7 @@ static void test_brief_loss() {
 static void test_complete_loss() {
     AimTracker tr;
     TestPidController ctl;
-    TestPidParams p;
-    p.reference_x = kRefX; p.reference_y = kRefY;
+    TestPidParams p = tracker_test_params();
     ctl.configure(p);
     for (int i = 0; i < 60; ++i) {
         run_frame(tr, ctl, kRefX + 50.0f, kRefY, 1, static_cast<uint64_t>(i) * kDtUs, 0.05f);

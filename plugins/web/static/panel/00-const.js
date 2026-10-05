@@ -83,14 +83,18 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
-  // ★ V1.0.13：kp/kd 改为**真实有效值**（旧的 15/25 是被「削弱强度」砍掉 99% 的名义值）。
-  //   上限按离线扫频收敛（core/tools/pid_sim）：51ms 回路 + 144fps 下 kp_eff > 0.3 必自激。
-  //   留到 1.0 是为了容纳低灵敏度玩家的 gain；一旦超过 0.3 就该往下调，不是往上。
-  controller_kp: [0, 1],
-  controller_kd: [0, 2],
-  controller_predict: [0, 2],
-  controller_predict_y: [0, 1],
+  // ★★★ V1.0.38：面板回归 pid1 原文移植（业主令「pid 以 pid1 为准完全移植」）。
+  //   kp/kd/predict 回到**名义值**域 —— V1.0.13~V1.0.37 的 [0,1]/[0,2] 是折算口径
+  //   （kp 生效值上限 1.0），现在 kp=25 出厂、标定写回约 10.2，老上限会直接卡死。
+  //   换算关系：生效 = 名义 × (10000-smooth)/10000（smooth 出厂 9900 ⇒ ×0.01）。
+  //   ⇒ 名义域上限 = 生效域上限 / 0.01 = 100/200。
+  //   ★ smooth=0 会关掉 soft-limit（pid1 的大误差保护），故上限锁 9999 与 core 校验同界。
+  controller_kp: [0, 100],
+  controller_kd: [0, 200],
+  controller_predict: [0, 10],
+  controller_predict_y: [0, 10],
   controller_rate: [0, 1],
+  controller_smooth: [0, 9999],
   controller_output_deadzone: [0, 20],
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_min_distance: [0, 1280],
@@ -111,14 +115,15 @@ const CONTROLLER_DEFAULTS = {
   //   X/Y 的唯一差别恰恰就是 predict ⇒ predict_y 必须独立。
   //   现在：Kp / Kd / Rate 两轴共用（参考实现里两轴本来就同值），
   //         predict_x / predict_y 各自独立。
-  // ★ V1.0.13（2026-09-30）：三项默认值改成与 core 结构体一致的**真实值**，并删掉 smooth：
-  //   旧 kp/kd=25 是"被 smooth 削掉 99% 之后的名义值"（生效 0.25），旧 predict=3.0 是
-  //   pid1 原版值、在我们这套 51ms 回路下会自激。现在面板显示的就是接进环路的那个数。
-  kp: 0.25,
-  kd: 0.25,
-  predict: 1,
+  // ★ V1.0.38：默认值回归 pid1.cpp main() 的 runAxis 原始参数（业主令完全移植）。
+  //   V1.0.13~V1.0.37 曾是 kp=0.25/predict=1.0 且无 smooth（折算口径、soft-limit 恒关）。
+  //   判据：必须与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值一字不差。
+  kp: 25,
+  kd: 25,
+  predict: 3,
   predict_y: 0,
   rate: 0.3,
+  smooth: 9900,
   output_deadzone: 1,
   pull_curve_enabled: true,
   pull_curve_strength: 0.8,

@@ -264,10 +264,13 @@ TEST(real_coord_direction_semantics) {
 TEST(real_pid_direction_semantics) {
     aim::TestPidController pid;
     aim::TestPidParams pp;
-    // kp 用生产真实值 0.25（V1.0.13 后 smooth 已折叠进 kp，直通，不再有软限幅）
-    pp.kp_x = 0.25f; pp.kp_y = 0.25f;
+    // ★ V1.0.38：kp 是**名义值**，soft-limit 由 smooth=9900 实现（pid1 完全移植口径）。
+    //   名义 25.0 经 smooth=9900 后实际生效 ≈ 0.25，与 V1.0.13 的有效增益等价。
+    //   （原先写 0.25 是折算口径、soft-limit 恒 0；两者混用会掉进死区导致方向断言失效。）
+    pp.kp_x = 25.0f; pp.kp_y = 25.0f;
     pp.kd_x = 0.0f; pp.kd_y = 0.0f;
     pp.predict_x = 0.0f; pp.predict_y = 0.0f;  // 关掉预测干扰，方向由 P 主导
+    pp.smooth_x = 9900.0f; pp.smooth_y = 9900.0f;
     pp.sensitivity = 1.0f;
     pp.output_scale = 1.0f;
     pp.output_deadzone = 0.5f;
@@ -441,9 +444,15 @@ TEST(real_coord_direction_semantics) {
 TEST(real_pid_direction_semantics) {
     aim::TestPidController pid;
     aim::TestPidParams pp;
-    pp.kp_x = 0.25f; pp.kp_y = 0.25f;          // 生产真实值（V1.0.13 后 smooth 已折叠进 kp，直通）
+    // ★★★ V1.0.38：回归 pid1 完全移植 —— kp 是**名义值**，soft-limit 由 smooth=9900 实现。
+    //   原先这里写 kp=0.25（V1.0.13 折算口径，soft-limit 恒 0）。
+    //   若沿用 0.25 又带上默认 smooth=9900 ⇒ 实际只发挥 0.0025，远低于死区 0.5
+    //   ⇒ 输出全被归零 ⇒ 方向断言全部失效（2026-10-05 实测 a/b/c/d 全 0）。
+    //   名义 25.0 经 smooth=9900 后实际生效 ≈ 0.25，与 V1.0.13 的有效增益等价。
+    pp.kp_x = 25.0f; pp.kp_y = 25.0f;
     pp.kd_x = 0.0f;  pp.kd_y = 0.0f;
     pp.predict_x = 0.0f; pp.predict_y = 0.0f;  // 关预测，方向由 P 主导
+    pp.smooth_x = 9900.0f; pp.smooth_y = 9900.0f;  // pid1 原值（soft-limit 开启）
     pp.sensitivity = 1.0f; pp.output_scale = 1.0f; pp.output_deadzone = 0.5f;
     pid.configure(pp);
     pid.set_reference(0, 0);

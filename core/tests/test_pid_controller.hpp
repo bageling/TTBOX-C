@@ -21,16 +21,23 @@
 
 namespace ttbox::core::aim {
 
-// 双轴 PID 参数（测试专用，默认 = 生产真实值）
+// 双轴 PID 参数（测试专用，默认 = pid1.cpp main() 原始值）
 struct TestPidParams {
-    float kp_x = 0.25f;       // X 比例增益（生产真实值）
-    float kp_y = 0.25f;
-    float kd_x = 0.25f;       // 微分增益（pid1 刹车）
-    float kd_y = 0.25f;
-    float predict_x = 1.0f;   // X 前馈（追左右移动目标）
-    float predict_y = 0.0f;   // Y 不带前馈
+    // ★★★ V1.0.38：回归 pid1 原文 runAxis 的原始参数（V1.0.13~V1.0.37 曾是
+    //   kp=0.25 / predict_x=1.0 / smooth 恒 0，那是"折算口径"，本次全部撤回）。
+    //   判据：与 core/src/mouse/MouseTypes.hpp 的 MouseProfile 默认值保持一致。
+    float kp_x = 25.0f;       // X 比例增益（pid1 原始值，未折算）
+    float kp_y = 25.0f;
+    float kd_x = 25.0f;       // 微分增益（pid1 刹车）
+    float kd_y = 25.0f;
+    float predict_x = 3.0f;   // X 前馈（pid1 原始值）
+    float predict_y = 0.0f;   // Y 不带前馈（pid1 原始值）
     float rate_x = 0.3f;      // 输出速率（pid1 kp_gain_rate）
     float rate_y = 0.3f;
+    // ★ smooth 恢复进测试桩：此前 configure() 硬编码传 0.0，等于让所有 PID 行为测试
+    //   都跑在「soft-limit 关闭」的口径上，与生产不符（生产 V1.0.38 起传 9900）。
+    float smooth_x = 9900.0f; // pid1 soft-limit 强度
+    float smooth_y = 9900.0f;
     float sensitivity = 1.0f;     // 全局灵敏度
     float output_scale = 1.0f;    // 输出缩放
     float output_deadzone = 1.0f; // 输出死区（低于此值归零）
@@ -38,23 +45,32 @@ struct TestPidParams {
     float reference_y = 0.0f;
 };
 
-// 双轴 PID 控制器（测试专用）。行为与旧 controller/PidController 一致，
-// 仅参数默认换生产真实值 + smooth 恒 0（V1.0.13 已折叠进 kp/kd）。
+// 双轴 PID 控制器（测试专用）。行为与 core 的 Pid1Controller 一致，
+// ★ V1.0.38：smooth 不再硬编码 0，改由 params 传入（与生产 AimThread 接线同口径）。
 class TestPidController {
 public:
     TestPidController() {
-        // 与 AimThread 构造一致：init 用 pid1.cpp 原始演示值（马上被 configure 覆盖）
+        // 与 AimThread::start() 构造一致：pid1.cpp main() 原始演示值
         pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
         pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
+        // ★ V1.0.38：紧接着按默认 params configure 一次。
+        //   生产里 AimThread 每帧都会用 frame_profile 调 configure()，从不存在
+        //   "只有 init、没 configure"的状态；而本桩的 init 值（pid1 演示用 predict=3.0）
+        //   与默认 params（predict_x=3.0 但 kp/kd/smooth 走 params）不一定同源。
+        //   不补这一次 ⇒ 不调 configure() 的用例（如 test_tracker 全部场景）
+        //   会一直跑在 init 的演示参数上，params_ 里的死区/灵敏度等根本没生效。
+        configure(params_);
     }
 
     void configure(const TestPidParams& params) {
         params_ = params;
-        // smooth 恒 0：直通（V1.0.13 后 smooth 已从参数面删除，折叠进 kp/kd）
+        // ★ V1.0.38：第 5 参传真实 smooth（生产 AimThread.cpp:274-277 同款），
+        //   不再恒传 0.0 —— 否则本桩跑的是"soft-limit 关闭"口径，
+        //   与生产不一致，所有 PID 行为断言都建立在错误前提上。
         pid_x_.configure(params.kp_x, params.kd_x, params.predict_x,
-                         params.rate_x, 0.0);
+                         params.rate_x, params.smooth_x);
         pid_y_.configure(params.kp_y, params.kd_y, params.predict_y,
-                         params.rate_y, 0.0);
+                         params.rate_y, params.smooth_y);
     }
 
     void set_reference(float rx, float ry) {

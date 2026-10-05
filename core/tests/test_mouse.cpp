@@ -662,6 +662,12 @@ TEST(mouse_profile_fields_roundtrip) {
     CHECK(q.mouse.predict_y == 0.7f);
     CHECK(q.mouse.kp_x == 0.42f);
     CHECK(q.mouse.kd_y == 0.19f);
+    // ★ V1.0.38：smooth 字段回归后也要锁往返（它现在是独立参数，不再折算进 kp）
+    p.mouse.smooth_x = 7777.0f;
+    p.mouse.smooth_y = 8888.0f;
+    const RuntimeProfile r = RuntimeProfile::from_json(p.to_json());
+    CHECK(std::fabs(r.mouse.smooth_x - 7777.0f) < 1e-3f);
+    CHECK(std::fabs(r.mouse.smooth_y - 8888.0f) < 1e-3f);
     CHECK(q.mouse.output_deadzone == 1.5f);
     CHECK(q.mouse.pull_curve.enabled);
     CHECK(q.mouse.pull_curve.strength == 0.9f);
@@ -670,11 +676,15 @@ TEST(mouse_profile_fields_roundtrip) {
 
 
 // ---------------------------------------------------------------------------
-// V1.0.13 编译期守卫：三个「多余的落点/增益参考物」不许回来
-//   · AimPointProfile::aim_offset_x/y  —— 准星像素偏移（第二个落点入口）
-//   · CaptureProfile::offset_x/y       —— 裁剪区偏移（第三个落点入口）
-//   · MouseProfile::smooth_x/y         —— pid1 的"削弱倍率"（把 kp/kd 暗削 99%）
-// 加回来 = 编译失败。这是最强形式的反向验证：测试跑不起来就说不了谎。
+// V1.0.38 编译期守卫：smooth 字段**必须存在**（pid1 完全移植的硬要求）
+//   V1.0.13 曾断言它不得存在（当时被折算进 kp/kd 并从参数面删除）。
+//   业主 2026-10-05 令「pid 以 pid1 为准完全移植」⇒ 断言方向反转：
+//   MouseProfile::smooth_x/y 是 pid1 的 soft-limit 强度（9900 = 把 P/D 压到 1%），
+//   它由 Pid1Controller::update() 的 `if (smooth)` 第 5 参直接消费，
+//   缺了它就等于把 pid1 的大误差保护整条关掉。
+//   仍然保留的两个守卫（与本次改动无关、结论不变）：
+//   · AimPointProfile::aim_offset_x/y —— 准星像素偏移（第二个落点入口）
+//   · CaptureProfile::offset_x/y     —— 裁剪区偏移（第三个落点入口）
 // ---------------------------------------------------------------------------
 template <typename T, typename = void>
 struct has_aim_offset_field : std::false_type {};
@@ -697,15 +707,17 @@ static_assert(!has_aim_offset_field<aim::AimPointProfile>::value,
               "V1.0.13：AimPointProfile 不得再有 aim_offset_x（落点只留瞄点一个入口）");
 static_assert(!has_capture_offset_field<CaptureProfile>::value,
               "V1.0.13：CaptureProfile 不得再有 offset_x（裁剪区恒居中）");
-static_assert(!has_smooth_field<aim::MouseProfile>::value,
-              "V1.0.13：MouseProfile 不得再有 smooth_x（已折叠进 kp/kd）");
+static_assert(has_smooth_field<aim::MouseProfile>::value,
+              "V1.0.38：MouseProfile 必须有 smooth_x —— pid1 完全移植，soft-limit 不可缺");
 
 // ---------------------------------------------------------------------------
-// smooth 折叠：老配置（带 smooth_x/smooth_y）必须折算成同一套真实 kp/kd，
-// 且写回时不再产出 smooth_* —— 否则老盒子升级后 kp 会突然放大 100 倍。
+// ★★★ V1.0.38：smooth 折叠**已删除**，回归 pid1 原始读法。
+//   V1.0.13 时期这里是"折算测试"：老配置 kp_x=15 + smooth=9900 ⇒ 真实 kp_x=0.15。
+//   现在 kp/kd/smooth 三个键**各自独立**按 pid1 原义读取（RuntimeProfile.cpp 里的
+//   ×(10000-smooth)/10000 折算整段已删）⇒ kp_x 必须原样停在 15，smooth 独立停在 9900。
+//   ⚠ 这条测试同时钉住"不再双重缩放"：若有人把折算逻辑加回来，kp_x 会变 0.15 而红。
 // ---------------------------------------------------------------------------
-TEST(mouse_smooth_folds_into_kp_and_never_written_back) {
-    // 板端真实老配置：kp_x=15 / kd_x=6 / smooth=9900 ⇒ 真实 kp_x=0.15 / kd_x=0.06
+TEST(mouse_smooth_is_independent_and_never_folded_into_kp) {
     auto lp = json_parse(
         R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":9900,"smooth_y":9900,)"
         R"("predict_x":0,"predict_y":0}})");
@@ -713,42 +725,55 @@ TEST(mouse_smooth_folds_into_kp_and_never_written_back) {
     if (!lp.ok) return;
     const RuntimeProfile legacy = RuntimeProfile::from_json(lp.value);
 
-    CHECK(std::fabs(legacy.mouse.kp_x - 0.15f) < 1e-6f);
-    CHECK(std::fabs(legacy.mouse.kd_x - 0.06f) < 1e-6f);
-    // 折叠确实发生了：没折算的话 kp_x 会原样停在 15
-    CHECK(legacy.mouse.kp_x < 1.0f);
+    // kp/kd 原样读，**没有**被 smooth 折算（V1.0.13 时这里是 0.15 / 0.06）
+    CHECK(std::fabs(legacy.mouse.kp_x - 15.0f) < 1e-6f);
+    CHECK(std::fabs(legacy.mouse.kd_x - 6.0f) < 1e-6f);
+    // smooth 独立读自己的值
+    CHECK(std::fabs(legacy.mouse.smooth_x - 9900.0f) < 1e-3f);
+    CHECK(std::fabs(legacy.mouse.smooth_y - 9900.0f) < 1e-3f);
 
-    // 写回不再产出 smooth_*，且写回来的就是折算后的真实值（再读一遍不变大）
-    // 注意：humanize.smooth_factor / global_wave.smooth 里也含 "smooth"，所以只找键名。
+    // 写回要产出 smooth_*（Pid1Controller 第 5 参要读它），且往返不漂移
     const std::string out = legacy.to_json().dump();
-    CHECK(out.find("\"smooth_x\"") == std::string::npos);
-    CHECK(out.find("\"smooth_y\"") == std::string::npos);
+    CHECK(out.find("\"smooth_x\"") != std::string::npos);
+    CHECK(out.find("\"smooth_y\"") != std::string::npos);
     const RuntimeProfile back = RuntimeProfile::from_json(legacy.to_json());
     CHECK(std::fabs(back.mouse.kp_x - legacy.mouse.kp_x) < 1e-6f);
     CHECK(std::fabs(back.mouse.kd_x - legacy.mouse.kd_x) < 1e-6f);
-    CHECK(std::fabs(back.mouse.kp_x - 15.0f) > 1.0f);
+    CHECK(std::fabs(back.mouse.smooth_x - legacy.mouse.smooth_x) < 1e-3f);
 }
 
-// smooth=0（明说过"不削"）同样按 0 算，不能把默认 9900 拿来削一遍。
-TEST(mouse_smooth_zero_means_no_attenuation) {
+// ★ V1.0.38：smooth=0 = pid1 原义的「关闭 soft-limit」，kp 原样不动。
+//   （V1.0.13 时这条测的是"折算系数为 1 所以 kp 不变"；现在根本没有折算，
+//     kp 不变是理所当然，但**必须继续钉住 smooth 自己读到 0**——
+//     它是 Pid1Controller 第 5 参，钉错会让 soft-limit 静默恢复成 9900。）
+TEST(mouse_smooth_zero_means_soft_limit_disabled) {
     auto p = json_parse(R"({"mouse":{"enabled":true,"kp_x":15,"kd_x":6,"smooth_x":0}})");
     CHECK(p.ok);
     if (!p.ok) return;
     const RuntimeProfile t = RuntimeProfile::from_json(p.value);
     CHECK(std::fabs(t.mouse.kp_x - 15.0f) < 1e-6f);
     CHECK(std::fabs(t.mouse.kd_x - 6.0f) < 1e-6f);
+    // ★ 关键：smooth 必须真的是 0（= soft-limit 关闭），不能被缺省 9900 顶回来
+    CHECK(std::fabs(t.mouse.smooth_x - 0.0f) < 1e-6f);
 }
 
-// 不带 smooth 键的老配置（键不存在 ≠ smooth=0）：默认 kp/kd 就是真实值，不得再折算。
-TEST(mouse_without_smooth_key_uses_true_kp_default) {
+// ★★★ V1.0.38：缺省值回归 pid1 原文 main() 的 runAxis 参数。
+//   kp=25 / kd=25 / predict_x=3.0 / predict_y=0.0 / smooth=9900（V1.0.13 曾改成
+//   kp=0.25 / predict_x=1.0 且删掉 smooth —— 本次全部撤回）。
+//   ⚠ 业主 2026-10-05 决定不写迁移：老配置升级后需**重跑标定**，不保兼容。
+TEST(mouse_defaults_are_pid1_original) {
     auto p = json_parse(R"({"mouse":{"enabled":true}})");
     CHECK(p.ok);
     if (!p.ok) return;
     const RuntimeProfile t = RuntimeProfile::from_json(p.value);
-    CHECK(std::fabs(t.mouse.kp_x - 0.25f) < 1e-6f);   // 结构体默认 = 真实有效值
-    CHECK(std::fabs(t.mouse.kd_x - 0.25f) < 1e-6f);
-    CHECK(std::fabs(t.mouse.predict_x - 1.0f) < 1e-6f);  // V1.0.13 新默认（离线扫出的安全上限）
-    CHECK(t.to_json().dump().find("\"smooth_x\"") == std::string::npos);
+    CHECK(std::fabs(t.mouse.kp_x - 25.0f) < 1e-6f);      // pid1 原始比例增益
+    CHECK(std::fabs(t.mouse.kd_x - 25.0f) < 1e-6f);
+    CHECK(std::fabs(t.mouse.predict_x - 3.0f) < 1e-6f);  // pid1 X 前馈原始值
+    CHECK(std::fabs(t.mouse.predict_y - 0.0f) < 1e-6f);  // pid1 Y 无前馈
+    // smooth 缺省 = 9900（soft-limit 开启），且能被序列化出去给第 5 参读
+    CHECK(std::fabs(t.mouse.smooth_x - 9900.0f) < 1e-3f);
+    CHECK(std::fabs(t.mouse.smooth_y - 9900.0f) < 1e-3f);
+    CHECK(t.to_json().dump().find("\"smooth_x\"") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

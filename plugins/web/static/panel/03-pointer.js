@@ -16,6 +16,8 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_predict", controller.predict);
   setValue("controller_predict_y", controller.predict_y);
   setValue("controller_rate", controller.rate);
+  // ★ V1.0.38：smooth 一并恢复默认（pid1 的大误差保护，0 = 关闭）。
+  setValue("controller_smooth", controller.smooth);
   setValue("controller_output_deadzone", controller.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);

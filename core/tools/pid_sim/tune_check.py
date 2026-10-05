@@ -22,8 +22,14 @@ STEPS = 900
 
 def sim(kp, kd, predict, delay, gain, dist=40.0, noise=2.0, seed=11):
     random.seed(seed)
-    # ★ V1.0.13：kp/kd 已是生效值 ⇒ 仿真里 smooth 必须传 0（传 9900 等于再削 99%）
-    p = Pid1(kp, kd, predict, 0.2, 0)
+    # ★★★ V1.0.38：口径回归 pid1 完全移植 —— 生产现在把 smooth=9900 交给
+    #   Pid1Controller 第 5 参（见 core/src/aim/AimThread.cpp:274-277），
+    #   且 kp 折算逻辑已删（core/src/model/RuntimeProfile.cpp）。
+    #   ⇒ 仿真必须**传 9900 且用名义 kp**，否则会得到比生产弱 100 倍的假象。
+    #   （V1.0.13~V1.0.37 期间这里是"传 0 + 传折算后的生效 kp"，与当时生产一致；
+    #     现在生产口径翻转，这里必须跟着翻，否则仿真结论全部作废。）
+    from ttbox_motion.calibration import BOARD_SMOOTH
+    p = Pid1(kp, kd, predict, 0.2, BOARD_SMOOTH)
     err = float(dist)
     es = []
     os = []

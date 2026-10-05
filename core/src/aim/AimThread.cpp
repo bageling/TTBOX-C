@@ -266,11 +266,15 @@ void AimThread::loop() {
                 personal_traj_cfg = frame_profile->mouse.personal_trajectory;
                 lock_confirm_cfg = frame_profile->mouse.lock_confirm;
                 recoil_cfg = frame_profile->mouse.recoil;
-                // V1.0.13：smooth 已从参数面删除（折叠进 kp/kd）⇒ 第 5 参恒 0（直通）。
+                // ★★★ V1.0.38：**smooth 接回 Pid1Controller 第 5 参**（pid1 完全移植）。
+                //   V1.0.13 起这里恒传 0.0 ⇒ `if (smooth)` 恒假 ⇒ pid1 的 soft-limit
+                //   （smoothTerm：把大误差下的 P/D 输出压成亚线性，防止一帧打飞）
+                //   被整体关掉，只剩裸 K_p + K_i + K_d。
+                //   现按 pid1 原文 main() 的 runAxis(..., smooth=9900.0) 接回原值。
                 pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
-                                 frame_profile->mouse.rate_x, 0.0);
+                                 frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
-                                 frame_profile->mouse.rate_y, 0.0);
+                                 frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
             }
             // V1.0.11：开火期禁切靶（照 yu 的 fire_switch_guarded）——
             // 扳机激活中若丢掉锁定，不去第 2/3 层另选目标（宁可本帧不瞄，
