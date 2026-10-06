@@ -375,7 +375,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.48 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.49 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -916,6 +916,57 @@ set_target_properties(ttbox_web PROPERTIES
   BUILD_RPATH   "\$ORIGIN/../lib"
   INSTALL_RPATH "\$ORIGIN/../lib"
   INSTALL_RPATH_USE_LINK_PATH FALSE)
+
+# ★ V1.0.49：httplib 开 SSL —— 访问云端 https（OTA check / announcement）必需。
+#   旧版没开 SSL ⇒ httplib::Client 构造 https 时抛异常 ⇒ /api/update/check 返回 500
+#   （V1.0.48 板端实测故障）。这里单独 find OpenSSL（不受 AUTH=OFF 影响）。
+#
+#   ★ 交叉编译要点：toolchain-aarch64.cmake 只设了 CMAKE_SYSROOT、**没设**
+#     CMAKE_FIND_ROOT_PATH ⇒ FindOpenSSL 只会搜 host 默认路径（/usr/include 等），
+#     找不到 sysroot 里的 aarch64 OpenSSL ⇒ OPENSSL_FOUND=FALSE、SSL 静默没开
+#     （V1.0.49 首编实测踩到：configure 打出「未找到 OpenSSL」）。
+#     修法：把 sysroot 显式喂给 find_package（OPENSSL_ROOT_DIR / _INCLUDE_DIR /
+#     _SSL_LIBRARY / _CRYPTO_LIBRARY），交叉时它们优先于默认搜索。
+find_package(OpenSSL QUIET)
+if(NOT OPENSSL_FOUND AND CMAKE_CROSSCOMPILING AND CMAKE_SYSROOT)
+  # aarch64 sysroot 的多架构布局：头在 <sysroot>/usr/include，库在 <sysroot>/usr/lib/< triplet>
+  find_path(TTBOX_SSL_INCLUDE_DIR openssl/ssl.h
+            PATHS "${CMAKE_SYSROOT}/usr/include" NO_DEFAULT_PATH)
+  find_library(TTBOX_SSL_LIBRARY NAMES ssl
+            PATHS "${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}"
+                  "${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu"
+            NO_DEFAULT_PATH)
+  find_library(TTBOX_CRYPTO_LIBRARY NAMES crypto
+            PATHS "${CMAKE_SYSROOT}/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}"
+                  "${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu"
+            NO_DEFAULT_PATH)
+  if(TTBOX_SSL_INCLUDE_DIR AND TTBOX_SSL_LIBRARY AND TTBOX_CRYPTO_LIBRARY)
+    set(OPENSSL_FOUND TRUE)
+    set(OPENSSL_INCLUDE_DIR "${TTBOX_SSL_INCLUDE_DIR}")
+    set(OPENSSL_SSL_LIBRARY "${TTBOX_SSL_LIBRARY}")
+    set(OPENSSL_CRYPTO_LIBRARY "${TTBOX_CRYPTO_LIBRARY}")
+    if(NOT TARGET OpenSSL::SSL)
+      add_library(OpenSSL::SSL UNKNOWN IMPORTED)
+      set_target_properties(OpenSSL::SSL PROPERTIES
+        IMPORTED_LOCATION "${TTBOX_SSL_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${TTBOX_SSL_INCLUDE_DIR}")
+    endif()
+    if(NOT TARGET OpenSSL::Crypto)
+      add_library(OpenSSL::Crypto UNKNOWN IMPORTED)
+      set_target_properties(OpenSSL::Crypto PROPERTIES
+        IMPORTED_LOCATION "${TTBOX_CRYPTO_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${TTBOX_SSL_INCLUDE_DIR}")
+    endif()
+  endif()
+endif()
+
+if(OPENSSL_FOUND)
+  target_compile_definitions(ttbox_web PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+  target_link_libraries(ttbox_web PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+  message(STATUS "ttbox_web: httplib SSL 已启用（ssl=${OPENSSL_SSL_LIBRARY} crypto=${OPENSSL_CRYPTO_LIBRARY}）")
+else()
+  message(WARNING "ttbox_web: 未找到 OpenSSL ⇒ 云端 https 请求会失败（/api/update/check 将 500）")
+endif()
 
 # ---- IPC 命令行工具 ----
 if(TTBOX_CORE_BUILD_TOOLS)

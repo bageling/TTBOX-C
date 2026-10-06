@@ -54,33 +54,6 @@ std::pair<std::string, int> preview_upstream() {
     return {host, port};
 }
 
-// IPC 帧源：GET_PREVIEW 轮询 → base64 解码 → multipart 帧。
-bool preview_ipc_frame(IpcClient& ipc, httplib::DataSink& sink,
-                       std::shared_ptr<int64_t> last_seq) {
-    const JsonValue r = ipc.call("GET_PREVIEW", JsonValue::object(), 2000);
-    if (ipc_status(r) == 0) {
-        const JsonValue* d = r.find("data");
-        if (d != nullptr && d->is_object()) {
-            const std::string b64 = json_field(*d, "jpeg_base64").as_string("");
-            const int64_t seq = json_field(*d, "seq").as_int(0);
-            if (!b64.empty() && seq != *last_seq) {
-                std::vector<uint8_t> px;
-                if (ttbox::core::auth::license_base64_decode(b64, &px) && !px.empty()) {
-                    *last_seq = seq;
-                    std::string frame =
-                        "--ttboxframe\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-                        std::to_string(px.size()) + "\r\n\r\n";
-                    frame.append(reinterpret_cast<const char*>(px.data()), px.size());
-                    frame += "\r\n";
-                    if (!sink.write(frame.data(), frame.size())) return false;
-                }
-            }
-        }
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    return sink.is_writable();
-}
-
 // socket 透传代理状态（跨 provider 调用复用同一条上游连接）。
 struct PreviewProxy {
     int sock = -1;
@@ -150,18 +123,6 @@ void register_preview_routes(httplib::Server& svr, IpcClient& ipc) {
     svr.Get("/api/preview.mjpg", [&ipc](const httplib::Request&, httplib::Response& res) {
         res.set_header("Cache-Control", "no-store, no-cache");
         res.set_header("X-Accel-Buffering", "no");
-        // 启动时探测一次：GET_PREVIEW 可达且带 jpeg_base64 ⇒ IPC 模式，否则 8001 代理。
-        bool ipc_mode = false;
-        {
-            const JsonValue r = ipc.call("GET_PREVIEW", JsonValue::object(), 2000);
-            if (ipc_status(r) == 0) {
-                const JsonValue* d = r.find("data");
-                if (d != nullptr && d->is_object() &&
-                    !json_field(*d, "jpeg_base64").as_string("").empty()) {
-                    ipc_mode = true;
-                }
-            }
-        }
         auto last_seq = std::make_shared<int64_t>(-1);
         auto [phost, pport] = preview_upstream();
         auto proxy = std::make_shared<PreviewProxy>();
@@ -169,9 +130,35 @@ void register_preview_routes(httplib::Server& svr, IpcClient& ipc) {
         proxy->port = pport;
         res.set_chunked_content_provider(
             "multipart/x-mixed-replace; boundary=ttboxframe",
-            [&ipc, ipc_mode, last_seq, proxy](size_t, httplib::DataSink& sink) -> bool {
-                if (ipc_mode) return preview_ipc_frame(ipc, sink, last_seq);
-                return preview_proxy_frame(proxy, sink);
+            [&ipc, last_seq, proxy](size_t, httplib::DataSink& sink) -> bool {
+                // ★ V1.0.49：动态判断（不再启动时冻结一次 ipc_mode）。
+                //   IPC 可达 ⇒ 走直出；即便此刻暂无帧（预览未开）也只 sleep 重试、不回退
+                //   proxy —— 这样面板开着时「开启预览」下一 tick 即出图，无需刷新页面
+                //   （V1.0.48 实测：启动探测冻结成 proxy 后，开启预览要刷新一次才出图）。
+                //   IPC 完全不可达（core 未运行）才回退 8001 proxy。
+                const JsonValue r = ipc.call("GET_PREVIEW", JsonValue::object(), 2000);
+                if (ipc_status(r) != 0) {
+                    return preview_proxy_frame(proxy, sink);
+                }
+                const JsonValue* d = r.find("data");
+                if (d != nullptr && d->is_object()) {
+                    const std::string b64 = json_field(*d, "jpeg_base64").as_string("");
+                    const int64_t seq = json_field(*d, "seq").as_int(0);
+                    if (!b64.empty() && seq != *last_seq) {
+                        std::vector<uint8_t> px;
+                        if (ttbox::core::auth::license_base64_decode(b64, &px) && !px.empty()) {
+                            *last_seq = seq;
+                            std::string frame =
+                                "--ttboxframe\r\nContent-Type: image/jpeg\r\nContent-Length: " +
+                                std::to_string(px.size()) + "\r\n\r\n";
+                            frame.append(reinterpret_cast<const char*>(px.data()), px.size());
+                            frame += "\r\n";
+                            if (!sink.write(frame.data(), frame.size())) return false;
+                        }
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                return sink.is_writable();
             });
     });
 }
