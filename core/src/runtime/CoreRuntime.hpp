@@ -62,6 +62,9 @@ public:
         // 第13阶段：PID Trace 采集（config 控制；默认关闭，只记录不改变行为）
         bool pid_trace_enabled = false;
         std::string pid_trace_path;
+        // V1.0.46：逐帧原始检测框记录（回放数据源）
+        bool det_trace_enabled = false;
+        std::string det_trace_path;
         // 第15阶段：目标预测时域（秒；0=关闭预测，保持原行为）
         float prediction_time_s = 0.0f;
     };
@@ -113,6 +116,8 @@ private:
     uint32_t pipeline_debug_interval_ = 60;
     bool pid_trace_enabled_ = false;           // 第13阶段：PID Trace
     std::string pid_trace_path_;
+    bool det_trace_enabled_ = false;           // V1.0.46：逐帧检测框记录
+    std::string det_trace_path_;
     std::string mouse_event_socket_;
     float prediction_time_s_ = 0.0f;           // 第15阶段：目标预测时域
     // ★ M2.03：特性级启停态（会话边界由 Application 下传；start() 据此逐模块启停）。

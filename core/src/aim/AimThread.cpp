@@ -368,6 +368,10 @@ void AimThread::loop() {
             //   排除「非人目标」（球/武器/烟雾）改由选靶层做：类别筛选 + 几何兜底。
             const DetectionBox& aim_box_src = selected.box;
             const AimPointProfile& prof_ub = aim_point;
+            // V1.0.46：块外快照（供块外的 DetTrace 落点用 —— have_frozen/clipped_h_over_w/
+            // aim_box 都在 if (target_ok) 内声明，块外不可见）。默认「无冻结、未外推」。
+            int dt_box_source = 0;   // 0=selected 1=frozen 2=clip 外推
+            DetectionBox dt_aim_box = selected.box;  // 控制链实际用的框
             if (target_ok) {
                 // ---- V1.0.09：框底被裁剪区下边界截断时的身高反推比（按目标自校准）----
                 // V1.0.10 起降级为**兜底**：只在「目标一出现就被截、没有可冻结的框」时使用。
@@ -405,6 +409,9 @@ void AimThread::loop() {
                 // ★ V1.0.23：aim_box 的未冻结分支取收缩框 aim_box_src（frozen_rect
                 //   观察的也是收缩框 ⇒ 冻结域与实时域同域，切换不跳）。
                 const DetectionBox& aim_box = have_frozen ? frozen_box : aim_box_src;
+                // V1.0.46：块外快照（DetTrace 用；回放时必须知道走的是哪条落点分支）
+                dt_aim_box = aim_box;
+                dt_box_source = have_frozen ? 1 : (clipped_h_over_w > 0.0f ? 2 : 0);
                 // ★ V1.0.23：落点用收缩框 + 换算后的 prof_ub（offset 等比例量已 ÷k，
                 //   ty 与不收缩时同一像素）。aim_point_at / constrain 内部不改。
                 if (!aim_point_at(aim_box, selected.box.class_id, prof_ub, &tx, &ty,
@@ -870,6 +877,59 @@ void AimThread::loop() {
                 e.target_lost = selected.valid ? 0 : 1;
                 e.confidence = selected.valid ? selected.box.score : 0.0f;
                 pid_trace_.record(e);
+            }
+            // ---- V1.0.46：逐帧原始检测框记录（自测自动化数据源）----
+            // 与 PidTrace 独立开关。记的是**未经关联/平滑的原始检测框**（task.detections），
+            // 外加选中框 / 实际控制框（可能是冻结框）+ box_source 标记 ——
+            // 回放时必须知道用的是哪个框、走的哪条落点分支，否则复刻不出板端行为。
+            if (det_trace_.enabled()) {
+                DetTrace::Entry de;
+                de.timestamp_us = task.timestamp_us;
+                de.frame_number = task.frame_number;
+                de.frame_w = static_cast<int>(task.frame_width);
+                de.frame_h = static_cast<int>(task.frame_height);
+                de.dt_ms = dt_ms;
+                de.target_id = selected.target_id;
+                // box_source: 0=selected / 1=frozen（腿被裁切⇒冻结上一帧可看全的框）
+                //             2=selected 但走了 clip 外推
+                de.box_source = dt_box_source;
+                if (selected.valid) {
+                    de.sel_x1 = selected.box.x1; de.sel_y1 = selected.box.y1;
+                    de.sel_x2 = selected.box.x2; de.sel_y2 = selected.box.y2;
+                    de.sel_cls = selected.box.class_id;
+                    de.sel_score = selected.box.score;
+                }
+                // 控制链实际用的框（frozen 分支下与 sel 不同 —— 这是回放的关键）
+                de.aim_x1 = dt_aim_box.x1; de.aim_y1 = dt_aim_box.y1;
+                de.aim_x2 = dt_aim_box.x2; de.aim_y2 = dt_aim_box.y2;
+                de.tx = tx; de.ty = ty; de.ref_x = ref_x; de.ref_y = ref_y;
+                de.smooth_x = tracker_.state().x; de.smooth_y = tracker_.state().y;
+                de.vel_x = tracker_.state().vx;   de.vel_y = tracker_.state().vy;
+                de.ctrl_x = control_x; de.ctrl_y = control_y;
+                de.move_x = move_x; de.move_y = move_y;
+                // 全帧原始检测框：先按 x1 升序（回放侧好对齐），再取前 8 个。
+                // nbox 记**真实总数**（可能 >8），让回放侧知道被截断。
+                de.nbox = static_cast<int>(task.detections.size());
+                if (!task.detections.empty()) {
+                    std::vector<const DetectionBox*> sorted;
+                    sorted.reserve(task.detections.size());
+                    for (const auto& d : task.detections) sorted.push_back(&d);
+                    std::sort(sorted.begin(), sorted.end(),
+                              [](const DetectionBox* a, const DetectionBox* b) {
+                                  return a->x1 < b->x1;
+                              });
+                    const int m = de.nbox < kDetTraceMaxBoxes
+                                      ? de.nbox : kDetTraceMaxBoxes;
+                    for (int i = 0; i < m; ++i) {
+                        de.box[i][0] = static_cast<float>(sorted[i]->class_id);
+                        de.box[i][1] = sorted[i]->x1;
+                        de.box[i][2] = sorted[i]->y1;
+                        de.box[i][3] = sorted[i]->x2;
+                        de.box[i][4] = sorted[i]->y2;
+                        de.score[i] = sorted[i]->score;
+                    }
+                }
+                det_trace_.record(de);
             }
             last_timestamp_us_ = task.timestamp_us;
             std::lock_guard<std::mutex> lk(status_mutex_);

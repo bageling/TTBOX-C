@@ -16,6 +16,7 @@
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
 #include "aim/FittsAimController.hpp"
+#include "aim/DetTrace.hpp"
 #include "aim/PipelineDebug.hpp"
 #include "aim/PidTrace.hpp"
 #include "mouse/AimTracker.hpp"
@@ -137,6 +138,21 @@ public:
     void set_prediction_time(float seconds) {
         prediction_time_s_ = seconds > 0.0f ? seconds : 0.0f;
     }
+
+    // V1.0.46：逐帧原始检测框记录（自测自动化的数据源）。
+    // 与 PidTrace 独立开关：它每帧带全帧框（最多 8×5 字段），数据量大一个量级。
+    void set_det_trace(bool enabled, const std::string& path = "") {
+        if (enabled) {
+            if (!det_trace_.open(path)) {
+                std::fprintf(stderr, "[DetTrace] 打开检测框记录文件失败: %s\n",
+                             path.empty() ? "/tmp/det_trace.csv" : path.c_str());
+                return;
+            }
+        } else {
+            det_trace_.close();
+        }
+    }
+    void flush_det_trace() { det_trace_.flush(); }
     Status status() const;
 
 private:
@@ -161,6 +177,10 @@ private:
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）
+    // V1.0.46：逐帧**原始检测框**记录（自测自动化数据源；板端录一份 → PC 离线回放）。
+    // PidTrace 只有控制量、没有框几何，无法在 PC 上重放「目标当时在哪」——
+    // 历史遗留的板端 Python 录制器是 10Hz IPC 轮询，控制链 144fps ⇒ 丢 90% 帧。
+    DetTrace det_trace_;
     AimTracker tracker_;            // 第15阶段：目标跟踪器（速度估计+预测）
     PullCurve pull_curve_;          // 拉枪曲线：远距离拉枪时附加弧线/抖动（deadzone 前生效）
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）

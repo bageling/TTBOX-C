@@ -40,6 +40,8 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
     pipeline_debug_interval_ = p.pipeline_debug_interval;
     pid_trace_enabled_ = p.pid_trace_enabled;
     pid_trace_path_ = p.pid_trace_path;
+    det_trace_enabled_ = p.det_trace_enabled;
+    det_trace_path_ = p.det_trace_path;
     prediction_time_s_ = p.prediction_time_s;
     mailbox_ = std::make_unique<aim::AimTargetMailbox>(p.workers.worker_cores.size());
     capture_ = std::make_unique<V4L2Capture>();
@@ -198,6 +200,7 @@ bool CoreRuntime::start(std::string* error) {
         }
         aim_thread_.set_pipeline_debug(pipeline_debug_enabled_, pipeline_debug_interval_);
         if (pid_trace_enabled_) aim_thread_.set_pid_trace(true, pid_trace_path_);
+        if (det_trace_enabled_) aim_thread_.set_det_trace(true, det_trace_path_);
         aim_thread_.set_prediction_time(prediction_time_s_);
     } else {
         TTBOX_LOG_INFO("feature 'aim' 未启用：跳过 AimThread（无瞄准/输出）");

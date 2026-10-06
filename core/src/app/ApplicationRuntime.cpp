@@ -289,6 +289,10 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
     // 第13阶段：PID Trace 采集（默认关闭；开启后逐帧写 CSV，只记录不改变行为）
     out_params.pid_trace_enabled = config_.get_bool("pid_trace_enabled", false);
     out_params.pid_trace_path = config_.get_string("pid_trace_path", "/tmp/pid_trace.csv");
+    // V1.0.46：逐帧原始检测框记录（自测自动化数据源）。默认关 —— 每帧带全帧框，
+    // 数据量大一个量级；只在「要录一段真实轨迹回 PC 回放」时才开。
+    out_params.det_trace_enabled = config_.get_bool("det_trace_enabled", false);
+    out_params.det_trace_path = config_.get_string("det_trace_path", "/tmp/det_trace.csv");
     // 第15阶段：目标预测时域（秒；0=关闭预测，保持原行为）
     out_params.prediction_time_s =
         static_cast<float>(config_.get_double("prediction_time_s", 0.0));
