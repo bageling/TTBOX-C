@@ -298,11 +298,9 @@ ENV_PATS = [
 
 
 # D-ENV-1 TEST 域验收脚本（登记表 §2.5）：显式点名，不做通配豁免；新增须刻意加入。
-TEST_DOMAIN_SCRIPTS = {
-    "scripts/ttbox_m207_accept.py",
-    "scripts/ttbox_m207_b21_expire.py",
-    "scripts/ttbox_m2xx_console_accept.py",
-}
+# ★ V1.0.61：随「去 Python」批次删除 m207/m2xx 一次性验收脚本后，本集合已空 ——
+#   env_scan_excluded() 对空集合天然退化为「只按 tests/ 与 test_* 前缀排除」，行为不变。
+TEST_DOMAIN_SCRIPTS = set()
 
 
 def env_scan_excluded(p):

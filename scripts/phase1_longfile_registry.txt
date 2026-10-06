@@ -2,7 +2,6 @@
 1943|usbproxy/proxy.cpp
 1397|tools/converter/convert_onnx_to_rknn.py
 1240|core/src/ipc/IpcServer.cpp
-1216|scripts/ttbox_m207_accept.py
 1116|plugins/web/bin/ttbox-web.py
 1072|usbproxy/mouse_control.cpp
 1040|core/src/model/ModelRegistry.cpp
@@ -24,7 +23,6 @@
 649|scripts/ttbox_release_install.sh
 622|plugins/web/lib/profile_translate.py
 609|scripts/ttbox_fhs_init.sh
-609|scripts/ttbox_m2xx_console_accept.py
 605|plugins/web/api/hardware.py
 600|plugins/web/tests/test_web_fov_radius_semantics.py
 582|core/src/preview/PreviewModule.cpp
@@ -33,7 +31,6 @@
 531|plugins/web/tests/test_web_cloud_client.py
 522|core/src/auth/LicenseDaemon.cpp
 518|core/src/common/Json.cpp
-496|scripts/legacy/ttbox_m2_license_accept_v1_authflow.py
 479|core/src/auth/ed25519/ed25519_verify.cpp
 475|plugins/web/tests/test_web_brand.py
 434|plugins/web/api/models.py

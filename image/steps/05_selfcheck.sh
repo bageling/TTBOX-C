@@ -52,8 +52,10 @@ python3 - <<'PY'
 import ast, importlib.util, os, sys
 ROOT = "/opt/ttbox/current"
 STDLIB = set(sys.stdlib_module_names)
+# ★ V1.0.61：system_host / system_common 已随「去 Python」批次删除，故从 LOCAL 移除。
+#   （该集合是"出货树内自带模块"的宽容名单，多留无害、少留更准。）
 LOCAL = {"edid", "lib", "preview_contract", "ttbox_motion", "framework", "plugins",
-         "system_host", "system_common", "fan", "wifi", "lan_blocklist", "module_registry"}
+         "fan", "wifi", "lan_blocklist", "module_registry"}
 mods = set()
 for dp, dn, fn in os.walk(ROOT):
     dn[:] = [d for d in dn if d != "__pycache__"]
