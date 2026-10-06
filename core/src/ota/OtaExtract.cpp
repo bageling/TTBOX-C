@@ -92,11 +92,15 @@ ExtractResult extract_package(const std::string& tgz_path, const std::string& st
     // ② 展开 payload/（剥掉首层前缀）——只取这一类成员
     const std::string q = shell_quote(tgz_path);
     const std::string c = shell_quote(staging);
-    // ★ --wildcards 不可省（V1.0.57 板端真机实测踩到）：GNU tar 对成员名参数**默认不做
-    //   通配**，传 'payload/*' 会被当成字面成员名 ⇒ "payload/*: Not found in archive"。
-    //   这个 bug 在 host 上无论怎么测都发现不了 —— 只有真 tar 才报这句。
+    // ★★ 两个开关都不可省（V1.0.57/59 板端真机实测连踩两次）：
+    //   --wildcards            GNU tar 对成员名参数**默认不做通配** ⇒ 'payload/*' 被当成
+    //                         字面成员名 ⇒ "payload/*: Not found in archive"。
+    //   --wildcards-match-slash 默认通配的 '*' **不跨 '/'** ⇒ 只匹配到 payload/ 第一层，
+    //                         scripts/ plugins/*/ ttbox_motion/ 等深层文件**全部漏解**
+    //                         （表现为 install 时几十条「staging 缺失 manifest 声明文件」）。
+    //   这两条在 host 上无论怎么测都发现不了 —— 只有真 tar 才报。
     if (run_quiet_cmd("tar -xzf " + q + " -C " + c +
-                      " --strip-components=1 --wildcards 'payload/*'") != 0) {
+                      " --strip-components=1 --wildcards --wildcards-match-slash 'payload/*'") != 0) {
         r.state = "extract_failed";
         r.detail = "展开 payload/ 失败";
         return r;
