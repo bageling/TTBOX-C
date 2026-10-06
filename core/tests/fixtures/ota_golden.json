@@ -918,5 +918,107 @@
    "state": "unsafe_field",
    "err": "unsafe_field: 非法 test: 'a|b'"
   }
+ ],
+ "F_safe_members": [
+  {
+   "in": "RELEASE_MANIFEST.json",
+   "ok": true
+  },
+  {
+   "in": "payload",
+   "ok": true
+  },
+  {
+   "in": "payload/",
+   "ok": true
+  },
+  {
+   "in": "payload/bin/ttbox_core_main",
+   "ok": true
+  },
+  {
+   "in": "payload/plugins/web/static/panel/10-flow.js",
+   "ok": true
+  },
+  {
+   "in": "payload/a/../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/a/../b'"
+  },
+  {
+   "in": "payload/./x",
+   "ok": true
+  },
+  {
+   "in": "./payload/y",
+   "ok": true
+  },
+  {
+   "in": "",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: ''"
+  },
+  {
+   "in": ".",
+   "ok": true
+  },
+  {
+   "in": "..",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '..'"
+  },
+  {
+   "in": "/abs/path",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '/abs/path'"
+  },
+  {
+   "in": "/",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '/'"
+  },
+  {
+   "in": "../escape",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '../escape'"
+  },
+  {
+   "in": "payload/../../etc/passwd",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/../../etc/passwd'"
+  },
+  {
+   "in": "payload/../..",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/../..'"
+  },
+  {
+   "in": "a/../../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'a/../../b'"
+  },
+  {
+   "in": "./../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: './../b'"
+  },
+  {
+   "in": "payload//double",
+   "ok": true
+  },
+  {
+   "in": "payload/子目录/文件.txt",
+   "ok": true
+  }
  ]
 }

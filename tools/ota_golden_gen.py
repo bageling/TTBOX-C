@@ -121,6 +121,62 @@ def gen_meta():
     }
 
 
+def gen_safe_members():
+    """F. _safe_members 的成员名判定 —— 解包环节的安全命门。
+
+    ★ 为什么这条最该单测：更新器以 **root** 身份解**不可信**的 tar，
+      一个 `payload/../../etc/x` 成员就是 RCE 面。Python 侧用 realpath 判定越界。
+
+    本段**不复制判定逻辑**，而是现场造一个真 tar（含指定成员名）交给现役
+    `_safe_members` —— 这样基准反映的是真实现，而不是我对它的理解。
+    """
+    import io
+    import tarfile
+
+    def probe(name):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            ti = tarfile.TarInfo(name)
+            ti.size = 0
+            tf.addfile(ti)
+        buf.seek(0)
+        with tarfile.open(fileobj=buf, mode="r") as tf:
+            try:
+                u.OtaUpdater._safe_members(tf, "/tmp/ota_dest_probe")
+                return {"ok": True}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "state": getattr(e, "state", ""), "err": str(e)}
+
+    names = [
+        "RELEASE_MANIFEST.json",
+        "payload",
+        "payload/",
+        "payload/bin/ttbox_core_main",
+        "payload/plugins/web/static/panel/10-flow.js",
+        "payload/a/../b",          # realpath 归一后仍在 dest 内 ⇒ 合法
+        "payload/./x",             # 归一后合法
+        "./payload/y",
+        "",                        # 空名 → 拒
+        ".",                       # 指向 dest 本身 → 合法
+        "..",                      # 逃出 → 拒
+        "/abs/path",               # 绝对路径 → 拒
+        "/",                       # 根 → 拒
+        "../escape",               # 逃出 → 拒
+        "payload/../../etc/passwd",  # 逃出（两级）→ 拒
+        "payload/../..",           # 逃出 → 拒
+        "a/../../b",
+        "./../b",                  # 归一后逃出 → 拒
+        "payload//double",         # 双斜杠归一后合法
+        "payload/子目录/文件.txt",   # 非 ASCII 合法
+    ]
+    out = []
+    for n in names:
+        r = {"in": n}
+        r.update(probe(n))
+        out.append(r)
+    return out
+
+
 def main():
     out_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         REPO, "core", "tests", "fixtures", "ota_golden.json")
@@ -131,16 +187,15 @@ def main():
         "B_version_key": gen_version_key(),
         "C_is_downgrade": gen_is_downgrade(),
         "D_check_safe_id": gen_check_safe_id(),
+        "F_safe_members": gen_safe_members(),
     }
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=1)
     print("OTA 黄金样本已写出: %s" % out_path)
-    print("  A canonical      : %d 例" % len(data["A_canonical"]))
-    print("  B version_key    : %d 例" % len(data["B_version_key"]))
-    print("  C is_downgrade   : %d 例" % len(data["C_is_downgrade"]))
-    print("  D check_safe_id  : %d 例" % len(data["D_check_safe_id"]))
-    print("  E meta           : SIGNED_FIELDS=%s" % data["E_meta"]["SIGNED_FIELDS"])
+    for k in ("A_canonical", "B_version_key", "C_is_downgrade", "D_check_safe_id", "F_safe_members"):
+        print("  %-16s: %d 例" % (k, len(data[k])))
+    print("  E_meta           : SIGNED_FIELDS=%s" % data["E_meta"]["SIGNED_FIELDS"])
 
 
 if __name__ == "__main__":

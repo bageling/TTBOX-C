@@ -15,6 +15,7 @@
 #include "common/Json.hpp"
 #include "ota/OtaCanonical.hpp"
 #include "ota/OtaCrypto.hpp"
+#include "ota/OtaExtract.hpp"
 #include "ota/OtaVersion.hpp"
 #include "test_util.hpp"
 
@@ -280,4 +281,25 @@ TEST(ota_real_signature_roundtrip) {
     const size_t p = bad_canon.find("V1.0.55");
     if (p != std::string::npos) bad_canon[p + 1] = '9';
     EXPECT(!verify_ed25519(sig.data(), bad_canon, pk), "篡改消息后仍验签通过 —— 严重缺陷");
+}
+
+// ============ 9. 解包成员名安全（★ 解包环节的 RCE 命门）============
+TEST(ota_golden_safe_members) {
+    REQUIRE_GOLDEN(root);
+    const JsonValue* arr = root->find("F_safe_members");
+    EXPECT(arr != nullptr && arr->is_array(), "F_safe_members 缺失");
+    if (arr == nullptr || !arr->is_array()) return;
+    int n_ok = 0, n_bad = 0;
+    for (const JsonValue& row : arr->as_array()) {
+        const std::string in = jstr(row, "in");
+        const bool want_ok = jbool(row, "ok", false);
+        const bool got_ok = ttbox::core::ota::safe_member_name(in);
+        EXPECT(got_ok == want_ok, "safe_member_name('" + in + "') = " +
+                                      (got_ok ? "合法" : "拒绝") + " 期望 " +
+                                      (want_ok ? "合法" : "拒绝"));
+        if (want_ok) n_ok++; else n_bad++;
+    }
+    // 两类都必须覆盖：合法名能过、穿越名被拒
+    EXPECT(n_ok > 0, "F 段无合法例");
+    EXPECT(n_bad >= 7, "F 段拒绝例偏少（应含 ../escape、/abs、payload/../../etc/passwd 等）");
 }

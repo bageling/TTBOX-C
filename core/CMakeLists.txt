@@ -659,7 +659,8 @@ list(APPEND CORE_SOURCES
   src/ota/OtaVersion.cpp
   # 验签与摘要：复用 auth/ed25519（TweetNaCl 自包含，零外部依赖）+ 自实现 SHA-256。
   # ★ 不引 OpenSSL：出货向量强制 AUTH=OFF，且随包 ELF 的运行期依赖闭集已冻结。
-  src/ota/OtaCrypto.cpp)
+  src/ota/OtaCrypto.cpp
+  src/ota/OtaExtract.cpp)
 
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
