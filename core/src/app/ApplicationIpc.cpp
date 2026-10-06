@@ -656,7 +656,14 @@ bool Application::handle_hardware_action(const std::string& action, const JsonVa
     if (action == "apply_edid") {
         const std::string root = hw_root();
         const std::string cfg_path = root + "/config/hardware_display.json";
-        const std::string edid_bin = root + "/bin/ttbox_edid";
+        // ★ V1.0.55 修复（板端实测「EDID 报错」）：必须经 **current/** 派生。
+        //   板端 /opt/ttbox 顶层只有 plugins/ 与 scripts/ 两个「迁移期过渡软链」
+        //   （见 ttbox_release_install.sh 的 TRANSITIONAL_LINKS 清单），**没有 bin/**。
+        //   V1.0.54 写的是 root + "/bin/ttbox_edid" = /opt/ttbox/bin/ttbox_edid ⇒ 不存在
+        //   ⇒ 面板「保存并应用」必然失败（run_script 找不到可执行文件）。
+        //   ★ 为什么旧代码 `root + "/scripts/edid/edid_apply.sh"` 曾是好的：
+        //     scripts/ 恰好在过渡软链清单里 —— 换成 bin/ 后就踩空了。
+        const std::string edid_bin = root + "/current/bin/ttbox_edid";
 
         // 1) 合并白名单键写配置（防注入：只接受这几个键）
         JsonValue cur = JsonValue::object();
@@ -719,7 +726,9 @@ bool Application::handle_hardware_action(const std::string& action, const JsonVa
         // 透传模式真源 = systemd 单元的 USB_PROXY_MODE（Python 版同口径，见
         // web/infra/mouse 的说明）。core 是 root ⇒ 可以改单元 + daemon-reload。
         const std::string root = hw_root();
-        const std::string unit = root + "/deploy/systemd/ttbox-usbproxy.service";
+        // ★ V1.0.55：同 EDID 那处 —— deploy/ **不在**过渡软链清单里（板端 /opt/ttbox/deploy
+        //   不存在），fallback 必须经 current/ 派生，否则主路径一失败就必然也失败。
+        const std::string unit = root + "/current/deploy/systemd/ttbox-usbproxy.service";
         const std::string script = root + "/scripts/ttbox_usb_mode.sh";
 
         // 优先用官方脚本（它负责改单元 + reload + 重启 + 健康检查）
