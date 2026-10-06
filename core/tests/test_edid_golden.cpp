@@ -14,6 +14,7 @@
 
 #include "common/Json.hpp"
 #include "edid/EdidBuilder.hpp"
+#include "edid/EdidConfig.hpp"
 #include "edid/EdidTiming.hpp"
 #include "edid/EdidValidator.hpp"
 #include "test_util.hpp"
@@ -274,7 +275,66 @@ TEST(edid_golden_build) {
     EXPECT(n_fail > 0, "D 段失败例为 0（基准应含 1440p165 超限与非法 product_id）");
 }
 
-// ============ 6. PnP 编解码 ============
+// ============ 7. E 段：native_mode 保护（edid_apply.sh::PYEOF 逻辑）============
+TEST(edid_golden_native_mode_guard) {
+    REQUIRE_GOLDEN(root);
+    const JsonValue* arr = root->find("E_native_mode_guard");
+    EXPECT(arr != nullptr && arr->is_array(), "E_native_mode_guard 缺失");
+    if (arr == nullptr || !arr->is_array()) return;
+    for (const JsonValue& row : arr->as_array()) {
+        const std::string profile = jstr(row, "profile");
+        const std::string nm_in = jstr(row, "native_mode_in");
+        const std::string want = jstr(row, "resolved");
+        const std::string got = ttbox::core::edid::resolve_native_mode(profile, nm_in);
+        EXPECT(got == want, "resolve_native_mode(profile='" + profile + "', nm='" + nm_in +
+                                "') = '" + got + "' 期望 '" + want + "'");
+    }
+}
+
+// ============ 8. F 段：字段归一工具（safe_ascii / hex_text / bool_value）============
+TEST(edid_golden_helpers) {
+    REQUIRE_GOLDEN(root);
+    const JsonValue* h = root->find("F_helpers");
+    EXPECT(h != nullptr, "F_helpers 缺失");
+    if (h == nullptr) return;
+    const JsonValue* arr = h->find("helpers");
+    EXPECT(arr != nullptr && arr->is_array(), "helpers 段缺失");
+    if (arr == nullptr || !arr->is_array()) return;
+    for (const JsonValue& row : arr->as_array()) {
+        const std::string fn = jstr(row, "fn");
+        const JsonValue* in = row.find("in");
+        std::string got;
+        // ★ 期望值口径：字符串类 helper 的 out 是 JSON 字符串；_bool_value 的 out 是
+        //   JSON **布尔**（Python bool）⇒ 归一成 "True"/"False" 再比，否则读成空串假失败。
+        const JsonValue* outv = row.find("out");
+        const std::string want = (outv != nullptr && outv->is_bool())
+                                     ? (outv->as_bool(false) ? std::string("True")
+                                                            : std::string("False"))
+                                     : jstr(row, "out");
+        if (fn == "_safe_ascii") {
+            const std::string s = (in == nullptr) ? std::string() : in->as_string("");
+            got = ttbox::core::edid::safe_ascii(s, static_cast<size_t>(jint(row, "limit", 0)),
+                                                jstr(row, "fallback"));
+        } else if (fn == "_hex_text") {
+            const std::string s = (in == nullptr) ? std::string() : in->as_string("");
+            got = ttbox::core::edid::hex_text(s, static_cast<int>(jint(row, "width", 0)),
+                                              jstr(row, "fallback"));
+        } else if (fn == "_bool_value") {
+            JsonValue placeholder = JsonValue::null();
+            const JsonValue& v = (in == nullptr) ? placeholder : *in;
+            got = ttbox::core::edid::bool_value(v, jbool(row, "fallback", false)) ? "True" : "False";
+        } else {
+            EXPECT(false, "未知 helper: " + fn);
+            continue;
+        }
+        EXPECT(got == want, fn + "(in=" + (in == nullptr ? std::string("null") : in->is_string()
+                                                                  ? "\"" + in->as_string("") + "\""
+                                                                  : std::string("scalar")) +
+                              ") = '" + got + "' 期望 '" + want + "'");
+    }
+}
+
+// ============ 9. PnP 编解码 ============
 TEST(edid_golden_pnp) {
     REQUIRE_GOLDEN(root);
     const JsonValue* h = root->find("F_helpers");
