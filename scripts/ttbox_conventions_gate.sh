@@ -450,9 +450,13 @@ def check_crosslang():
     # （= 屏幕黑一次）；12 轮意味着最坏 12 次黑屏，客户体感"开机黑屏多次"。
     # 板端实测首轮 7~8s 即 lock ok，2 轮足够覆盖"源端一次没枚举完"的情形。
     # 配套：deploy/systemd/ttbox-edid.service 的 timeout 同步 20s→45s（否则跑不完一轮）。
-    edid = read("scripts/edid/edid_apply.sh")
-    if int_const(edid, "ATTEMPTS_DEFAULT") != 2:
-        bad("⑤ EDID ATTEMPTS_DEFAULT 非 2（V-09 单一真源被破坏）")
+    # ★ V1.0.53：EDID 应用入口由 shell 脚本换成 C++ 二进制 ⇒ 判据随之迁移。
+    #   必须一起改的原因：read() 对缺失文件返回空串 ⇒ int_const 得 None ⇒ **永久假红**
+    #   （去读一个已删除的 edid_apply.sh）。现真源 = ApplyOptions::attempts。
+    attempts = hpp_int_const(read("core/src/edid/EdidApply.hpp"), "attempts")
+    if attempts != 2:
+        bad("⑤ EDID 重协商轮数默认值非 2（V-09 单一真源被破坏；"
+            "现真源 = core/src/edid/EdidApply.hpp::ApplyOptions::attempts，实得 %r）" % attempts)
     # ★ V1.0.52：原「ttbox-web.py 不得覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS」回归检查随该文件移除；
     #   现 web 侧不直连 EDID（一律经 core IPC HARDWARE_ACTION），该覆写路径天然不存在。
 

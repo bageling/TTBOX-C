@@ -648,13 +648,15 @@ bool write_json_atomic(const std::string& path, const JsonValue& value) {
 
 // APPLY_EDID：应用 EDID（对齐 Python api/hardware.py::update_display_hardware 的 apply 分支）。
 //   1) 写 config/hardware_display.json（合并白名单键，core 有权限）
-//   2) 调 scripts/edid/edid_apply.sh（TTBOX_EDID_REHANDSHAKE=1）
+//   2) 调 bin/ttbox_edid（TTBOX_EDID_REHANDSHAKE=1）
+//      ★ V1.0.53：由 scripts/edid/edid_apply.sh 改为 C++ 二进制（业主令「去掉所有 Python」）。
+//        契约未变：argv[1] 仍是设备、环境变量同名、stdout 仍是一行 JSON、退出码语义一致。
 bool Application::handle_hardware_action(const std::string& action, const JsonValue& params,
                                          JsonValue* data, std::string* error) {
     if (action == "apply_edid") {
         const std::string root = hw_root();
         const std::string cfg_path = root + "/config/hardware_display.json";
-        const std::string script = root + "/scripts/edid/edid_apply.sh";
+        const std::string edid_bin = root + "/bin/ttbox_edid";
 
         // 1) 合并白名单键写配置（防注入：只接受这几个键）
         JsonValue cur = JsonValue::object();
@@ -689,9 +691,11 @@ bool Application::handle_hardware_action(const std::string& action, const JsonVa
             return false;
         }
 
-        // 2) 调 EDID 应用脚本（root 身份，HPD 重协商）
+        // 2) 调 EDID 应用入口（root 身份，HPD 重协商）
+        //    ★ V1.0.53：target 由 shell 脚本换成 C++ 二进制；仍走 run_script（core 已是 root，
+        //      需要的是「以 root 起一个独立进程」这一语义，而非脚本本身）。超时 60s 不变。
         std::string out;
-        const int rc = run_script("env TTBOX_EDID_REHANDSHAKE=1 bash " + script + " " +
+        const int rc = run_script("env TTBOX_EDID_REHANDSHAKE=1 " + edid_bin + " " +
                                       cur.find("device")->as_string("/dev/video0"),
                                   &out, 60);
         JsonValue res = JsonValue::object();

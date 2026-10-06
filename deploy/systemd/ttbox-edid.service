@@ -29,7 +29,13 @@ Type=oneshot
 #     · ttbox_dtb_fix.sh 从 edid_apply.sh 入口移出（改挂 ttbox_ensure_services.sh，
 #       DTB 修复本就需要重启才生效，晚一点无影响）
 #   正常路径（源端已接、一轮即锁）实测 3~9 秒内自行退出，45s 只是上界，不会拖慢开机。
-ExecStart=/bin/sh -c 'timeout 45s /opt/ttbox/current/scripts/edid/edid_apply.sh || echo "[ttbox-edid][WARN] EDID 注入失败或超时（可选步骤，非致命；core 照常启动并推理）"'
+# ★ V1.0.53：入口由 shell 脚本换成 C++ 二进制（业主令「去掉所有 Python 代码」）。
+#   原 scripts/edid/edid_apply.sh 内含 **4 段内嵌 python3**（生成 EDID / 回读比对 / 读配置），
+#   连同 scripts/edid/*.py 已全部移植到 core/src/edid/ 并删除。
+#   参数与环境变量契约**未变**（仍可用 TTBOX_EDID_REHANDSHAKE=0 退回纯注入、
+#   TTBOX_EDID_REHANDSHAKE_ATTEMPTS / TTBOX_EDID_LOCK_TIMEOUT_SEC / TTBOX_EDID_HPD_SETTLE_SEC 同名）；
+#   45s 超时预算与「非致命」包裹原样保留（理由见上一段，与实现语言无关）。
+ExecStart=/bin/sh -c 'timeout 45s /opt/ttbox/current/bin/ttbox_edid || echo "[ttbox-edid][WARN] EDID 注入失败或超时（可选步骤，非致命；core 照常启动并推理）"'
 RemainAfterExit=yes
 
 [Install]

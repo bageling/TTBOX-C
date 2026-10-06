@@ -85,7 +85,7 @@ printf '   bin/ttbox_core_main   %s\n' "$(stat -c %a "$STAGE/payload/bin/ttbox_c
 printf '   usbproxy/usb-proxy    %s\n' "$(stat -c %a "$STAGE/payload/usbproxy/usb-proxy")"
 printf '   lib/librknnrt.so      %s\n' "$(stat -c %a "$STAGE/payload/lib/librknnrt.so")"
 BAD_EXEC=""
-for f in bin/ttbox_core_main plugins/web/bin/ttbox-web \
+for f in bin/ttbox_core_main bin/ttbox_web bin/ttbox_edid \
          usbproxy/usb-proxy usbproxy/board/run-ttbox-usb-proxy.sh; do
     m="$(stat -c %a "$STAGE/payload/$f" 2>/dev/null || echo missing)"
     [ "$m" = "755" ] || BAD_EXEC="$BAD_EXEC\n     $f = $m (期望 755)"
@@ -97,7 +97,7 @@ if [ -n "$BAD_EXEC" ]; then
     find "$STAGE/payload" -type f \( -name '*.sh' -o -path '*/scripts/*' -o -path '*/bin/*' \) \
          -exec chmod 0755 {} +
     chmod 0755 -- "$STAGE/payload/usbproxy/usb-proxy"
-    for f in bin/ttbox_core_main plugins/web/bin/ttbox-web \
+    for f in bin/ttbox_core_main bin/ttbox_web bin/ttbox_edid \
              usbproxy/usb-proxy usbproxy/board/run-ttbox-usb-proxy.sh; do
         printf '   %-46s -> %s\n' "$f" "$(stat -c %a "$STAGE/payload/$f")"
     done

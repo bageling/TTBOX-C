@@ -438,15 +438,18 @@ sync_tree() {
     install -d "${payload}/bin" "${payload}/lib" "${payload}/plugins" \
                "${payload}/scripts" "${payload}/deploy/systemd" "${payload}/deploy/config"
 
-    # bin/：M1 payload bin/ 为【白名单闭集】= { ttbox_core_main, ttbox_web }（禁通配，防 .bak-* 混入）
-    #   Web 迁 C++（V1.0.47）后新增 ttbox_web（C++ 版 Web 后端，systemd ttbox-web 切 cpp 默认）。
+    # bin/：M1 payload bin/ 为【白名单闭集】= { ttbox_core_main, ttbox_web, ttbox_edid }
+    #   （禁通配，防 .bak-* 混入）。V1.0.47 加 ttbox_web；V1.0.53 加 ttbox_edid
+    #   （EDID 应用入口由 scripts/edid/edid_apply.sh 换成 C++ 二进制）。
     install -m 0755 "${build_dir}/ttbox_core_main" "${payload}/bin/ttbox_core_main"
-    if [ -f "${build_dir}/ttbox_web" ]; then
-        install -m 0755 "${build_dir}/ttbox_web" "${payload}/bin/ttbox_web"
-    else
-        echo "  [✗] 缺交叉编译产物 ttbox_web（Web 迁 C++ 后必须随包）——中止。" >&2
-        exit 1
-    fi
+    for _b in ttbox_web ttbox_edid; do
+        if [ -f "${build_dir}/${_b}" ]; then
+            install -m 0755 "${build_dir}/${_b}" "${payload}/bin/${_b}"
+        else
+            echo "  [✗] 缺交叉编译产物 ${_b}（V1.0.53 起必须随包）——中止。" >&2
+            exit 1
+        fi
+    done
 
     # lib/：仅 release 作用域库 librknnrt.so（F1 / lib-scope-ruling.md §6）
     #   ★ 铁律：必须与【链接期所用那份】逐字节同源 —— 来源 = TTBOX_RKNNRT_SO（可覆盖）

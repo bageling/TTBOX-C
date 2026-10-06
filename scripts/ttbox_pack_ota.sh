@@ -100,6 +100,18 @@ readelf -d "$WEB_BIN" 2>/dev/null | grep -q 'RUNPATH' \
 readelf -d "$WEB_BIN" 2>/dev/null | grep 'RUNPATH' | grep -q '\$ORIGIN' \
     || die "${WEB_BIN} RUNPATH 不含 \$ORIGIN"
 
+# ttbox_edid：EDID 应用入口（★ V1.0.53 由 scripts/edid/edid_apply.sh 换成 C++ 二进制）。
+#   纯算法 + popen/sysfs，不依赖 RKNN/RGA/OpenCV/JPEG/OpenSSL ⇒ 与 ttbox_web 同规格校验。
+#   ★ 它必须随包：面板「保存并应用」与开机 ttbox-edid.service 都指向它，
+#     缺了它 EDID 功能整体失效（且开机服务会 203/EXEC）。
+EDID_BIN="${BUILD_DIR}/ttbox_edid"
+[ -f "$EDID_BIN" ] || die "缺交叉编译产物: ${EDID_BIN}（EDID 应用入口必须随包）"
+file "$EDID_BIN" | grep -q 'ELF' || die "${EDID_BIN} 不是 ELF"
+readelf -d "$EDID_BIN" 2>/dev/null | grep -q 'RUNPATH' \
+    || die "${EDID_BIN} 无 RUNPATH 段"
+readelf -d "$EDID_BIN" 2>/dev/null | grep 'RUNPATH' | grep -q '\$ORIGIN' \
+    || die "${EDID_BIN} RUNPATH 不含 \$ORIGIN"
+
 # librknnrt.so：链接期同源铁律（与 fhs_init resolve_rknnrt_so 同一判据；禁拷仓库 lib/）
 RKNNRT_SO="${TTBOX_RKNNRT_SO:-}"
 if [ -z "$RKNNRT_SO" ]; then
@@ -118,6 +130,7 @@ mkdir -p "${PAYLOAD}/bin" "${PAYLOAD}/lib"
 
 install -m 0755 "$CORE_BIN" "${PAYLOAD}/bin/ttbox_core_main"
 install -m 0755 "$WEB_BIN" "${PAYLOAD}/bin/ttbox_web"
+install -m 0755 "$EDID_BIN" "${PAYLOAD}/bin/ttbox_edid"
 install -m 0644 "$RKNNRT_SO" "${PAYLOAD}/lib/librknnrt.so"
 
 # ── 清单解析：双列 <源> -> <目标>（与 fhs_init sync_tree 同一份清单、同一套语义）──
@@ -239,11 +252,13 @@ DEVHIT="$(cd "$PAYLOAD" && { grep -rIlE "$DEV_PATH_PAT" . 2>/dev/null || true; }
 ${DEVHIT}"
 ok "断言2b 无开发机绝对路径泄漏"
 
-# ---- 断言 3：bin/ 闭集 = 恰 2 文件 ttbox_core_main + ttbox_web ----
+# ---- 断言 3：bin/ 闭集 = 恰 3 文件 ttbox_core_main + ttbox_web + ttbox_edid ----
+# ★ V1.0.53：EDID 应用入口由 shell 脚本改为 C++ 二进制 ⇒ 闭集从 2 变 3。
 BIN_N="$(find "${PAYLOAD}/bin" -type f | wc -l)"
-[ "$BIN_N" = 2 ] && [ -f "${PAYLOAD}/bin/ttbox_core_main" ] && [ -f "${PAYLOAD}/bin/ttbox_web" ] \
-    || die "bin/ 应恰 2 个文件 ttbox_core_main + ttbox_web，实得 ${BIN_N} 个"
-ok "断言3 bin/ 闭集: 恰 2 文件 ttbox_core_main + ttbox_web"
+[ "$BIN_N" = 3 ] && [ -f "${PAYLOAD}/bin/ttbox_core_main" ] && [ -f "${PAYLOAD}/bin/ttbox_web" ] \
+    && [ -f "${PAYLOAD}/bin/ttbox_edid" ] \
+    || die "bin/ 应恰 3 个文件 ttbox_core_main + ttbox_web + ttbox_edid，实得 ${BIN_N} 个"
+ok "断言3 bin/ 闭集: 恰 3 文件 ttbox_core_main + ttbox_web + ttbox_edid"
 
 # ---- 断言 4：双列映射双向核对（混入必现、漏装必现）----
 #   P1-2026-10-01 重写：旧版按「源路径 = 目标路径」恒等假设做核对，

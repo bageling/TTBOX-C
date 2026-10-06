@@ -979,6 +979,21 @@ else()
   message(WARNING "ttbox_web: 未找到 OpenSSL ⇒ 云端 https 请求会失败（/api/update/check 将 500）")
 endif()
 
+# ---- EDID 应用入口（V1.0.53：替代 scripts/edid/edid_apply.sh 与其中的 4 段内嵌 python）----
+# 与 ttbox_web 同类：纯算法 + popen/sysfs，不依赖 RKNN/RGA/OpenCV/JPEG/OpenSSL
+#   ⇒ 不做 TTBOX_CORE_HAS_RKNN 门禁，host 也能构建（本机只验编译；真正注入需要 Linux 的
+#     sysfs 与 v4l2-ctl，本机跑不了 —— 这是有意的，便于快速验证编译）。
+# ★ 刻意不用 fork+execvp：那会引入 sys/wait.h，使本机 MSYS **编不了**（system.cpp 的前车之鉴）。
+# ★ 也刻意不加平台条件：无条件构建 ⇒ 板端与 host 同源编译，减少"只在板端才编到"的盲区。
+add_executable(ttbox_edid src/edid/main.cpp)
+target_link_libraries(ttbox_edid PRIVATE ttbox_core)
+# 自包含 RUNPATH（形态 A = 仅 $ORIGIN/../lib 一段，与 ttbox_core_main / ttbox_web 同规格）。
+# $ORIGIN 必须转义 "\$ORIGIN"，否则生成器命令行会被 shell 把 $ORIGIN 展开为空 ⇒ 变成 /../lib。
+set_target_properties(ttbox_edid PROPERTIES
+  BUILD_RPATH   "\$ORIGIN/../lib"
+  INSTALL_RPATH "\$ORIGIN/../lib"
+  INSTALL_RPATH_USE_LINK_PATH FALSE)
+
 # ---- IPC 命令行工具 ----
 if(TTBOX_CORE_BUILD_TOOLS)
   add_executable(ipc_ping tools/ipc_ping.cpp)

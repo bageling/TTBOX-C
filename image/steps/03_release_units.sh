@@ -35,7 +35,7 @@ fi
 
 echo
 echo "########## 2. payload 可执行位预检 ##########"
-for f in bin/ttbox_core_main plugins/web/bin/ttbox-web \
+for f in bin/ttbox_core_main bin/ttbox_web bin/ttbox_edid \
          usbproxy/usb-proxy usbproxy/board/run-ttbox-usb-proxy.sh; do
     printf '  %-46s %s\n' "$f" "$(stat -c %a "$BAKE/payload/$f" 2>/dev/null || echo 缺失)"
 done
@@ -57,7 +57,8 @@ chk "release 根可遍历 (0755)"        "test \"\$(stat -c %a $REL)\" = 755"
 chk "过渡软链 plugins -> current/plugins" 'test "$(readlink /opt/ttbox/plugins)" = current/plugins'
 chk "过渡软链 scripts -> current/scripts" 'test "$(readlink /opt/ttbox/scripts)" = current/scripts'
 chk "core 二进制可执行"               'test -x /opt/ttbox/current/bin/ttbox_core_main'
-chk "web 入口可执行"                  'test -x /opt/ttbox/current/plugins/web/bin/ttbox-web'
+chk "web 后端可执行"                  'test -x /opt/ttbox/current/bin/ttbox_web'
+chk "EDID 入口可执行"                 'test -x /opt/ttbox/current/bin/ttbox_edid'
 chk "usbproxy ELF 可执行"             'test -x /opt/ttbox/current/usbproxy/usb-proxy'
 chk "usbproxy 启动脚本可执行"         'test -x /opt/ttbox/current/usbproxy/board/run-ttbox-usb-proxy.sh'
 chk "librknnrt.so 随版本就地交付"     'test -f /opt/ttbox/current/lib/librknnrt.so'
