@@ -6,7 +6,11 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include "common/Json.hpp"
 #include "httplib.h"
@@ -82,6 +86,55 @@ JsonValue default_usb_cfg() {
     return cfg;
 }
 
+// ---- USB 鼠标 sysfs 探测（V1.0.51；对齐 Python _probe_usb_mouse）----
+// 扫 /sys/bus/usb/devices/*，bInterfaceClass==03（HID）⇒ 判定接入。
+// 接口子目录（如 3-1:1.1）没有 vid/pid，要向上剥 ':' 找父设备（3-1）。
+// 读不到不抛：一律返回 connected=false（面板显示「未接入」），不能因此 500。
+struct UsbMouseProbe {
+    bool connected = false;
+    std::string device;
+    std::string iface;
+    std::string name;
+    std::string vid;
+    std::string pid;
+};
+
+UsbMouseProbe probe_usb_mouse() {
+    UsbMouseProbe r;
+    std::error_code ec;
+    const std::string base = "/sys/bus/usb/devices";
+    if (!std::filesystem::is_directory(base, ec)) return r;
+    std::vector<std::string> entries;
+    for (const auto& e : std::filesystem::directory_iterator(base, ec)) {
+        entries.push_back(e.path().filename().string());
+    }
+    std::sort(entries.begin(), entries.end());
+    auto slurp = [](const std::string& p) -> std::string {
+        std::ifstream in(p);
+        if (!in) return "";
+        std::string s;
+        std::getline(in, s);
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
+        return s;
+    };
+    for (const auto& nm : entries) {
+        if (nm.find('-') == std::string::npos) continue;
+        const std::string dir = base + "/" + nm;
+        if (slurp(dir + "/bInterfaceClass") != "03") continue;  // 只认 HID
+        r.connected = true;
+        r.iface = nm;
+        std::string parent = nm;
+        const size_t colon = parent.rfind(':');
+        if (colon != std::string::npos) parent = parent.substr(0, colon);
+        r.device = parent;
+        r.name = slurp(base + "/" + parent + "/product");
+        r.vid = slurp(base + "/" + parent + "/idVendor");
+        r.pid = slurp(base + "/" + parent + "/idProduct");
+        break;  // 取第一个 HID（对齐 Python：找到就停）
+    }
+    return r;
+}
+
 }  // namespace
 
 void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
@@ -106,15 +159,19 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
         timing.set("mouse_settle_delay_sec",
                    JsonValue::number(json_field(mouse, "mouse_settle_delay_sec").as_number(8.0)));
 
+        // ★ V1.0.51：真实 sysfs 探测（此前硬编码 false ⇒ 面板恒显「未连接」，
+        //   板端实测确实插着 HID 鼠标 3-1:1.x）。对齐 Python _probe_usb_mouse。
+        const UsbMouseProbe probe = probe_usb_mouse();
+
         JsonValue physical = JsonValue::object();
-        physical.set("device", JsonValue::string(""));
-        physical.set("interface", JsonValue::string(""));
-        physical.set("name", JsonValue::string(""));
+        physical.set("device", JsonValue::string(probe.device));
+        physical.set("interface", JsonValue::string(probe.iface));
+        physical.set("name", JsonValue::string(probe.name));
 
         JsonValue data = JsonValue::object();
         data.set("config", default_usb_cfg());
         data.set("config_source", JsonValue::string("default"));
-        data.set("connected", JsonValue::boolean(false));  // T04 接 sysfs 探测
+        data.set("connected", JsonValue::boolean(probe.connected));  // V1.0.51：真实 sysfs 探测
         data.set("mode", JsonValue::string(requested));
         data.set("effective_mode", JsonValue::string(requested));
         data.set("mode_degraded", JsonValue::boolean(false));

@@ -601,9 +601,15 @@ std::string hw_root() {
 
 // 跑一个脚本，捕获合并输出（stdout+stderr），返回 exit code。
 // 不用 std::system：它走 /bin/sh 且不回传 stdout，错误文案无法回传给 web。
+//
+// ★ 命令拼装踩坑（V1.0.50 板端实测 exit 2）：初版写成 `{ <cmd> ; } 2>&1`，
+//   在 dash 下 `{` 之后紧跟环境变量前置赋值（TTBOX_EDID_REHANDSHAKE=1 ...）会被
+//   当成独立词，报 `sh: 1: Syntax error: "}" unexpected`，脚本根本没跑起来。
+//   正确做法：用 `env VAR=val <cmd>` 传环境变量（POSIX 通用），shell 一重定向即可，
+//   不需要 brace group。
 int run_script(const std::string& cmd, std::string* output, int timeout_sec) {
-    std::string wrapped = "{ " + cmd + " ; } 2>&1";
-    FILE* p = ::popen(("timeout " + std::to_string(timeout_sec) + " " + wrapped).c_str(), "r");
+    const std::string wrapped = "timeout " + std::to_string(timeout_sec) + " " + cmd + " 2>&1";
+    FILE* p = ::popen(wrapped.c_str(), "r");
     if (p == nullptr) {
         if (output) *output = "popen 失败";
         return -1;
@@ -685,7 +691,7 @@ bool Application::handle_hardware_action(const std::string& action, const JsonVa
 
         // 2) 调 EDID 应用脚本（root 身份，HPD 重协商）
         std::string out;
-        const int rc = run_script("TTBOX_EDID_REHANDSHAKE=1 bash " + script + " " +
+        const int rc = run_script("env TTBOX_EDID_REHANDSHAKE=1 bash " + script + " " +
                                       cur.find("device")->as_string("/dev/video0"),
                                   &out, 60);
         JsonValue res = JsonValue::object();
