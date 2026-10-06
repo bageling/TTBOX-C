@@ -92,7 +92,11 @@ ExtractResult extract_package(const std::string& tgz_path, const std::string& st
     // ② 展开 payload/（剥掉首层前缀）——只取这一类成员
     const std::string q = shell_quote(tgz_path);
     const std::string c = shell_quote(staging);
-    if (run_quiet_cmd("tar -xzf " + q + " -C " + c + " --strip-components=1 'payload/*'") != 0) {
+    // ★ --wildcards 不可省（V1.0.57 板端真机实测踩到）：GNU tar 对成员名参数**默认不做
+    //   通配**，传 'payload/*' 会被当成字面成员名 ⇒ "payload/*: Not found in archive"。
+    //   这个 bug 在 host 上无论怎么测都发现不了 —— 只有真 tar 才报这句。
+    if (run_quiet_cmd("tar -xzf " + q + " -C " + c +
+                      " --strip-components=1 --wildcards 'payload/*'") != 0) {
         r.state = "extract_failed";
         r.detail = "展开 payload/ 失败";
         return r;

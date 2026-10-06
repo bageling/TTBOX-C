@@ -16,6 +16,6 @@ inline constexpr const char* kAppName = "ttbox_core";
 //     （is_downgrade=true）⇒ 更新器直接拒装、面板也只显示「已是最新」，永远升不上来。
 //     ★ V1.0.52：原第三处同源实现（plugins/web/bin/ttbox-web.py）随 Python 死代码清理移除，
 //       现只余上列两处；面板侧版本改由 C++ ttbox_web 直读 kCoreVersion。
-inline constexpr const char* kCoreVersion = "V1.0.57";
+inline constexpr const char* kCoreVersion = "V1.0.58";
 
 }  // namespace ttbox::core
