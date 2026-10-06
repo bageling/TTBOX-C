@@ -1,10 +1,10 @@
 {
   "id": "web",
   "name": "TTBOX Web",
-  "version": "1.0.0",
-  "description": "TTBOX 网页控制面板",
+  "version": "1.0.52",
+  "description": "TTBOX 网页控制面板。★V1.0.52：后端为 C++ 二进制 bin/ttbox_web（systemd 直接拉起），本目录仅提供前端资源（static/ 与 templates/，由 TTBOX_ROOT 派生）。原 Python 入口 bin/ttbox-web.py 已随「去 Python」批次 1 移除，故 entry 改指 C++ 二进制。",
   "api_version": "1",
-  "entry": "bin/ttbox-web",
+  "entry": "bin/ttbox_web",
   "type": "process",
   "autostart": true,
   "enabled": true,
