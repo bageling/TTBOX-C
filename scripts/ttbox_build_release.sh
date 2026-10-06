@@ -484,6 +484,10 @@ while IFS= read -r _f; do
     case "$_need" in
       libc.so*|libm.so*|libstdc++.so*|libgcc_s.so*|ld-linux*) : ;;
       librga.so*|libjpeg.so*|libopencv_*.so*) : ;;      # 基础镜像作用域（板端系统提供）
+      # ★ V1.0.49：httplib 开 SSL 后 ttbox_web 依赖 libssl/libcrypto。
+      #   板端实测 /usr/lib/aarch64-linux-gnu/{libssl.so.3,libcrypto.so.3} 已由系统
+      #   提供（2026-09-17 安装，非本仓交付物）⇒ 属基础镜像作用域，不随包。
+      libssl.so*|libcrypto.so*) : ;;
       *)
         if [ ! -e "${STAGE}/lib/${_need}" ]; then
           NEED_MISSING_N=$(( NEED_MISSING_N + 1 ))
