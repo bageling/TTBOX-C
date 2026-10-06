@@ -50,7 +50,7 @@ find /etc -newermt '2024-11-01' -type f 2>/dev/null | grep -vE '^/etc/(ssl|ssh/s
 
 echo
 echo "########## 10. 当前运行的服务状态 ##########"
-systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy ttbox-edid ttbox-ota.path ttbox-ota.service ttbox-ensure.timer 2>&1 | paste -d' ' <(echo "core web preview usbproxy edid ota.path ota.service ensure.timer" | tr ' ' '\n') -
+systemctl is-active ttbox-core ttbox-web ttbox-usbproxy ttbox-edid ttbox-ota.path ttbox-ota.service ttbox-ensure.timer 2>&1 | paste -d' ' <(echo "core web usbproxy edid ota.path ota.service ensure.timer" | tr ' ' '\n') -
 
 echo
 echo "########## 11. hdmirx sysfs 节点当前权限 ##########"

@@ -263,3 +263,7 @@ tools/license/.testkeys/
 # 自检：`git check-ignore -v plugins/.registry.json`（期望命中本行）
 .registry.json
 perf-record/
+
+# ── 临时备份与审计脚本（不入库；2026-10-06 V1.0.52 补）──
+.backup-*/
+.audit_pid.py

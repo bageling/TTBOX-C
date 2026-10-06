@@ -12,7 +12,7 @@
 #   · 源路径可以是：目录 / 单个文件 / 末段带通配符（如 deploy/systemd/*.service）。
 #   · 目标路径写法由源决定，二选一，写错即打包失败（fail-closed）：
 #       源不含 "*"  → 目标是【精确落点】，不得以 "/" 结尾。
-#                     源是目录 ⇒ 整树落到该目录名（即允许改名，如 platform -> ttbox_platform）
+#                     源是目录 ⇒ 整树落到该目录名（V1.0.52 起已无改名条目，规则保留）
 #                     源是文件 ⇒ 该文件落到该路径
 #       源含 "*"    → 目标是【目录前缀】，必须以 "/" 结尾；
 #                     每个匹配项落到  目标前缀 + 匹配项的文件名（basename）
@@ -29,26 +29,24 @@
 #   docs/ tools/ modules/ tests/ —— 内部文档与工具，绝不出货（定案 H-26 / S1）
 #   任何 *.priv.pem / .testkeys —— 私钥绝不上板（板端自检逐条扫）
 #
-# ── 数据结构口径（冻结，2026-10-01 业主拍定）──────────────────────────────────
-#   · 物理目录名 = Python 包名；平台层包名 ttbox_platform（**不叫 platform**：
-#     叫 platform 会遮蔽标准库 platform，pytest/werkzeug 启动即崩）
-#   · framework / plugins / ttbox_motion 不改名
-#   · 板端 /opt/ttbox/current/ 布局冻结：顶层闭集 = bin deploy framework lib plugins
-#     scripts ttbox_motion ttbox_platform usbproxy
+# ── 数据结构口径（冻结，2026-10-01 业主拍定；2026-10-06 V1.0.52 修订）──────────
+#   ★ V1.0.52：framework/ 与 ttbox_platform/ 已随「去 Python」批次 1 移除，不再随包。
+#     原口径「物理目录名 = Python 包名」对剩余内容仍适用（ttbox_motion 等）。
+#   · plugins / ttbox_motion 不改名
+#   · 板端 /opt/ttbox/current/ 布局冻结：顶层闭集 = bin deploy lib plugins
+#     scripts ttbox_motion usbproxy
 # ------------------------------------------------------------------------------
 
-# ---- 运行树（systemd 单元 / web 导入硬依赖；引用审计 2026-09-19）----
-#   systemd 引用：plugins/preview、plugins/web（ExecStart）；usbproxy/board（ExecStart）
-#   ttbox-web.py 用根锚发现（A-PATH-3）把树根加进 sys.path 后导入 ttbox_motion；framework 为历史保留域包
+# ---- 运行树（systemd 单元 / 前端资源硬依赖；引用审计 2026-09-19，2026-10-06 修订）----
+#   systemd 引用：plugins/web（ExecStart → C++ bin/ttbox_web，前端资源在其 static/）；
+#                 usbproxy/board（ExecStart）
+#   ★ V1.0.52：plugins/preview 已下线（Python 预览服务移除，预览改由 core IPC 单源提供）；
+#     plugins/web 下已无任何 .py —— 仅 static/ 与 templates/ 随包供 C++ 伺服。
+#   · ttbox_motion：保留 Python 实现，作为 C++ 移植对拍的金丝雀基准
+#     （core/tools/calibration_math_canary.cpp 用它算黄金值），故仍随包。
 plugins             -> plugins
-framework           -> framework
 ttbox_motion        -> ttbox_motion
 usbproxy            -> usbproxy
-#   平台层包 ttbox_platform：目录名 = 包名（P3 已从 platform 改名）。
-#   ★ 为什么不叫 platform：仓库根一旦在 sys.path 上，本地 platform/ 包会**遮蔽**
-#     标准库 platform ⇒ pytest 在 sessionstart 调 platform.python_version()、
-#     werkzeug 调 platform.system() 全部 AttributeError。改名后此冲突消失。
-ttbox_platform      -> ttbox_platform
 
 # ---- scripts：systemd 引用 + ttbox.sh 子命令 + OTA 调用链 ----
 #   systemd：edid/edid_apply.sh、ttbox_ensure_services.sh、ttbox_ota_updater.py

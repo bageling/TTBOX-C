@@ -109,10 +109,9 @@ make_payload() { # $1=dir $2=rpath [$3=real_core_main]
   # ★ E3：可选以**真实交叉产物**替换合成 core_main（对真货跑 verify，而非合成夹具）。
   if [ -n "$real" ]; then cp -f "$real" "$p/bin/ttbox_core_main"; chmod +x "$p/bin/ttbox_core_main"; fi
   printf '#!/bin/sh\nexit 0\n' > "$p/plugins/web/bin/ttbox-web";           chmod +x "$p/plugins/web/bin/ttbox-web"
-  printf '#!/bin/sh\nexit 0\n' > "$p/plugins/preview/bin/ttbox-preview";   chmod +x "$p/plugins/preview/bin/ttbox-preview"
   printf '#!/bin/sh\nexit 0\n' > "$p/scripts/edid/edid_apply.sh";          chmod +x "$p/scripts/edid/edid_apply.sh"
   local u
-  for u in ttbox-core ttbox-web ttbox-preview; do
+  for u in ttbox-core ttbox-web; do
     sed 's/\r$//' "$REPO/deploy/systemd/$u.service" > "$p/deploy/systemd/$u.service"
   done
   gen_manifest "$p" "$(basename "$p")"
@@ -171,7 +170,6 @@ V="$WORK/a08.log"
 grep -q 'manifest 全量 sha256 通过' "$V";                       record "A09 verify: manifest 全量 sha256 通过" $?
 grep -q 'ttbox-core.service: ExecStart 可执行' "$V";           record "A10 verify: core ExecStart 可执行" $?
 grep -q 'ttbox-web.service: ExecStart 可执行' "$V";            record "A11 verify: web ExecStart 可执行" $?
-grep -q 'ttbox-preview.service: WorkingDirectory 存在' "$V";   record "A12 verify: preview WorkingDirectory 存在" $?
 grep -q 'RUNPATH 自包含' "$V";                                 record "A13 verify: RUNPATH 自包含 OK" $?
 grep -q 'ttbox-core.service: StartLimitBurst=5 且位于 \[Unit\]' "$V";        record "A14 verify: core StartLimitBurst=5 [Unit]" $?
 grep -q 'ttbox-core.service: StartLimitIntervalSec=300 且位于 \[Unit\]' "$V"; record "A15 verify: core StartLimitIntervalSec=300 [Unit]" $?

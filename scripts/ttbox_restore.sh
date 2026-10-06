@@ -34,7 +34,7 @@ tar -C "$STAGE" -xzf "$BK"
 
 # 3) 逐项恢复
 log "停服务后恢复（避免运行中写入与恢复内容打架）"
-systemctl stop ttbox-core ttbox-web ttbox-preview ttbox-usbproxy 2>/dev/null || true
+systemctl stop ttbox-core ttbox-web ttbox-usbproxy 2>/dev/null || true
 for rel in etc/ttbox var/lib/ttbox opt/ttbox/releases; do
     if [ -d "${STAGE}/data/${rel}" ]; then
         log "恢复 /${rel}"
@@ -44,6 +44,6 @@ for rel in etc/ttbox var/lib/ttbox opt/ttbox/releases; do
     fi
 done
 systemctl daemon-reload 2>/dev/null || true
-systemctl start ttbox-core ttbox-web ttbox-preview ttbox-usbproxy 2>/dev/null || true
+systemctl start ttbox-core ttbox-web ttbox-usbproxy 2>/dev/null || true
 
 log "恢复完成。健康检查：systemctl --failed；或 ttbox.sh doctor"

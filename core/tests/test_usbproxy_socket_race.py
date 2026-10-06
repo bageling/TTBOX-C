@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from plugins.web.lib.paths import discover_root
+from _ttbox_paths import discover_root
 
 REPO = Path(discover_root(__file__))
 READER = REPO / 'core' / 'src' / 'input' / 'PhysicalMouseReader.cpp'

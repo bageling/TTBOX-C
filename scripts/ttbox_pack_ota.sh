@@ -200,7 +200,7 @@ ok "断言0 无 world-writable"
 
 # ---- 断言 1：顶层闭集（docs/tools/modules/tests/config 等禁入）----
 #   ★ ttbox_platform = 冻结口径：仓库 platform 包出货时落 ttbox_platform（见清单头注释）
-EXPECT_TOP="bin deploy framework lib plugins scripts ttbox_motion ttbox_platform usbproxy"
+EXPECT_TOP="bin deploy lib plugins scripts ttbox_motion usbproxy"
 ACTUAL_TOP="$(cd "$PAYLOAD" && ls -A | sort | tr '\n' ' ' | sed 's/ $//')"
 EXPECT_TOP_E="$(printf '%s\n' $EXPECT_TOP | sort | tr '\n' ' ' | sed 's/ $//')"
 [ "$ACTUAL_TOP" = "$EXPECT_TOP_E" ] \

@@ -7,7 +7,7 @@
 #
 # 断言（任一 FAIL 即退出非 0）：
 #   ① 路径字面量单点化：/run/ttbox/core.sock、/run/ttbox-mouse-passthrough/{cmd,event}.sock、
-#      /etc/ttbox/license.key 只允许出现在真源文件（Paths.hpp / paths.py / usb-proxy.cpp / systemd / deploy config）
+#      /etc/ttbox/license.key 只允许出现在真源文件（Paths.hpp / usb-proxy.cpp / systemd / deploy config）
 #   ② 无未登记 RUNTIME/BUILD 环境变量（allowlist = docs/protocols/config-path-env-registry.md §二/§三）
 #   ③ 无同义异名 env：TTBOX_CONFIG_PATH / TTBOX_MODEL_ROOT / TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT / TTBOX_WEB_HOST
 #   ④ V-03 共享键同值：config/default.json 与 deploy/config/default.json.prod ↔ deploy/config/00-factory.json
@@ -17,7 +17,7 @@
 #   ⑦ 无补丁残迹：hardware_display.json 单点（V-19）；systemd_units.py / runner.py / test_systemd_units.py 已删（V-15/16）
 #   ⑧ V-07 无绝对路径注入：出货 Python 禁 `sys.path.insert(0, '/opt/…')`（散落字面量 + insert(0) 遮蔽 stdlib）
 #   ⑨ TTBOX_PROJECT_ROOT 兜底清零：`#define TTBOX_PROJECT_ROOT` 出现次数必须为 0（强制由 CMake -D 注入）
-#   ⑩ 无层级硬编码：禁 `parents[N]` / `"../.."` 相对跳目录（改用 paths.py::discover_root 根锚发现）
+#   ⑩ 无层级硬编码：禁 `parents[N]` / `"../.."` 相对跳目录（改用根锚发现 / C++ 侧单点）
 #   ⑪ 无开发机绝对路径：禁 `/mnt/g/WORKBUDDY…` / `/mnt/c/Users/<名字>/…` / `C:/Users/…` / `G:/WORKBUDDY…`
 #      （这类路径在别人机器上必然不存在、且看起来像正常配置；改脚本自身位置派生或必填项报错）
 #
@@ -140,14 +140,11 @@ def strip_comment(line, ext):
 LIT_ALLOW = {
     "/run/ttbox/core.sock": {
         "core/src/common/Paths.hpp",
-        "plugins/web/lib/paths.py",
         "deploy/systemd/ttbox-core.service",
-        "deploy/systemd/ttbox-preview.service",
         "deploy/systemd/ttbox-web.service",
     },
     "/run/ttbox-mouse-passthrough/cmd.sock": {
         "core/src/common/Paths.hpp",
-        "plugins/web/lib/paths.py",
         "usbproxy/usb-proxy.cpp",
         "deploy/config/10-device.json",
         "deploy/config/default.json.prod",
@@ -158,7 +155,6 @@ LIT_ALLOW = {
     },
     "/run/ttbox-mouse-passthrough/event.sock": {
         "core/src/common/Paths.hpp",
-        "plugins/web/lib/paths.py",
         "usbproxy/usb-proxy.cpp",
         "deploy/config/10-device.json",
         "deploy/config/default.json.prod",
@@ -170,9 +166,9 @@ LIT_ALLOW = {
 }
 # 每个字面量必须在其 SSOT 文件里被真正定义（防「一刀切删除」把真源也删了）
 LIT_SSOT = {
-    "/run/ttbox/core.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
-    "/run/ttbox-mouse-passthrough/cmd.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
-    "/run/ttbox-mouse-passthrough/event.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
+    "/run/ttbox/core.sock": ["core/src/common/Paths.hpp"],
+    "/run/ttbox-mouse-passthrough/cmd.sock": ["core/src/common/Paths.hpp"],
+    "/run/ttbox-mouse-passthrough/event.sock": ["core/src/common/Paths.hpp"],
     "/etc/ttbox/license.key": ["core/src/common/Paths.hpp"],
 }
 
@@ -222,9 +218,9 @@ ENV_ALLOW = {
     "TTBOX_LOG_DIR",
     # 2026-10-01 登记（批次 1.4）：日志级别（debug|info|warn|error|fatal|off）。
     #   §5.1「级别必须可在配置里调，不用重编译」—— core 侧对应 --log-level，
-    #   web 侧（plugins/web/lib/logging_setup.py）用本变量，取值集合与 core 完全相同。
+    #   web 侧（C++ ttbox_web）用本变量，取值集合与 core 完全相同。
     "TTBOX_LOG_LEVEL",
-    # ---- Web / preview (Python) ----
+    # ---- Web / preview ----
     "TTBOX_ROOT", "TTBOX_PREFIX", "TTBOX_SCRIPTS_DIR", "TTBOX_PRESETS_DIR",
     "TTBOX_HDMIRX_EDID", "TTBOX_MOTION_PROFILES_DIR", "TTBOX_CONFIG_DIR",
     "TTBOX_WEB_CREDENTIALS", "TTBOX_PLUGINS_ROOT", "TTBOX_PLUGIN_REPOSITORY_ROOT",
@@ -352,7 +348,7 @@ def check_env():
     #   carve-out = env_scan_excluded（**仅 TEST 域**：tests/、test_*.py、TEST_DOMAIN_SCRIPTS 点名的验收脚本、
     #   *_verify.sh / *_selftest.sh）。唯一理由：回归/验收脚本必须**点名**同义异名，才能断言其
     #   "绝迹"（B27 断言 TTBOX_MODEL_ROOT 残留=False、B29 断言 TTBOX_WEB_HOST/PORT 无残留）。
-    #   范围严格限定 TEST 域 —— 生产源码（core/src、core/include、plugins/web/bin、scripts/*.py
+    #   范围严格限定 TEST 域 —— 生产源码（core/src、core/include、scripts/*.py
     #   非验收件等）**不在**豁免内，仍逐行扫。
     for p in iter_files():
         if env_scan_excluded(p):
@@ -404,28 +400,27 @@ def hpp_const(text, name):
     return m.group(1) if m else None
 
 
-def py_const(text, name):
-    m = re.search(r'(?m)^' + re.escape(name) + r'\s*=\s*"([^"]*)"', text)
-    return m.group(1) if m else None
-
-
 def int_const(text, name):
     m = re.search(r'(?m)^' + re.escape(name) + r'\s*=\s*(\d+)', text)
     return int(m.group(1)) if m else None
 
 
+def hpp_int_const(text, name):
+    """C++ 常量取值。★ 与 int_const 的区别：C++ 声明带修饰符
+    （`inline constexpr int kDefaultPort = 8000;`），行首不是常量名 ⇒ 不能用 `^` 锚定，
+    改用 `\\b` 词边界。V1.0.52 引入（web 端口真源从 Python 迁到 C++ 时踩到）。"""
+    m = re.search(r'\b' + re.escape(name) + r'\s*=\s*(\d+)', text)
+    return int(m.group(1)) if m else None
+
+
 def check_crosslang():
     hpp = read("core/src/common/Paths.hpp")
-    py = read("plugins/web/lib/paths.py")
     usb = read("usbproxy/usb-proxy.cpp")
-    for hn, pn in (("kIpcSocketDefault", "IPC_SOCKET_DEFAULT"),
-                   ("kMouseCmdSocketDefault", "MOUSE_CMD_SOCK_DEFAULT"),
-                   ("kMouseEventSocketDefault", "MOUSE_EVENT_SOCK_DEFAULT")):
-        hv, pv = hpp_const(hpp, hn), py_const(py, pn)
-        if hv is None or pv is None:
-            bad("⑤ 跨语言常量缺定义：%s=%r / %s=%r" % (hn, hv, pn, pv))
-        elif hv != pv:
-            bad("⑤ 跨语言常量异值：%s=%r != %s=%r" % (hn, hv, pn, pv))
+    # ★ V1.0.52：原「Paths.hpp ↔ plugins/web/lib/paths.py」跨语言同值检查随 Python 后端移除。
+    #   socket 路径现由 C++ 单点持有（Paths.hpp），脚本与 systemd 单元只做引用（A-PATH-5 白名单已同步）。
+    for hn in ("kIpcSocketDefault", "kMouseCmdSocketDefault", "kMouseEventSocketDefault"):
+        if hpp_const(hpp, hn) is None:
+            bad("⑤ socket 常量缺定义：%s（core/src/common/Paths.hpp）" % hn)
     # usb-proxy.cpp 与 Paths.hpp 逐字符相等
     m1 = re.search(r'std::string\s+mouse_cmd_socket\s*=\s*"([^"]*)"', usb)
     m2 = re.search(r'std::string\s+mouse_event_socket\s*=\s*"([^"]*)"', usb)
@@ -434,27 +429,21 @@ def check_crosslang():
     if not m2 or m2.group(1) != hpp_const(hpp, "kMouseEventSocketDefault"):
         bad("⑤ usb-proxy.cpp mouse_event_socket 与 Paths.hpp::kMouseEventSocketDefault 不一致")
 
-    # web 端口：paths.py / wifi_manager.py / release_install.sh 三镜像同值，且 LISTEN_PORT 派生自真源
-    port_py = int_const(py, "WEB_PORT_DEFAULT")
+    # web 端口：★ V1.0.52 真源从 paths.py 迁到 C++ —— WebServer.hpp::kDefaultPort；
+    #   镜像点三处：main.cpp 的默认串 / scripts/wifi_manager.py / scripts/ttbox_release_install.sh。
+    port_hpp = hpp_int_const(read("core/src/web/WebServer.hpp"), "kDefaultPort")
+    m = re.search(r'env_or\("TTBOX_WEB_PORT",\s*"(\d+)"\)', read("core/src/web/main.cpp"))
+    port_main = int(m.group(1)) if m else None
     port_wifi = int_const(read("scripts/wifi_manager.py"), "WEB_PORT_DEFAULT")
     m = re.search(r'WEB_PORT="\$\{TTBOX_WEB_PORT:-(\d+)\}"', read("scripts/ttbox_release_install.sh"))
     port_inst = int(m.group(1)) if m else None
-    web_py = read("plugins/web/bin/ttbox-web.py")
-    # ★ 2026-10-03（S9/S10 后）：LISTEN_PORT 已搬进 lib/settings.py，入口只import。
-    #   判据跟着搬 —— 原来只 grep 入口文件，重构后必然 FAIL（假红）。
-    #   ★ 但不能只查 settings：还要确认**入口确实 import 了它**，
-    #     否则「settings 里定义了、入口没用」同样是真源漂移（判据只查一半是半个守卫）。
-    settings_py = read("plugins/web/lib/settings.py")
-    derived = "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" in settings_py
-    imported = re.search(r'^\s*LISTEN_PORT,\s*$', web_py, re.M) is not None
-    if not (derived and imported):
-        bad("⑤ LISTEN_PORT 未派生自 paths.py::WEB_PORT_DEFAULT（派生=%s 入口import=%s）"
-            % (derived, imported))
-    if port_py is None or port_wifi != port_py or port_inst != port_py:
-        bad("⑤ web 端口跨语言异值：paths.py=%r wifi_manager.py=%r release_install.sh=%r"
-            % (port_py, port_wifi, port_inst))
-    if port_py is not None and port_py == port_wifi == port_inst and derived and imported:
-        ok("⑤ 跨语言同值：socket×3 / web 端口 %d / usb-proxy socket 全部一致" % port_py)
+    if port_hpp is None:
+        bad("⑤ web 端口真源缺失（core/src/web/WebServer.hpp::kDefaultPort）")
+    elif not (port_main == port_wifi == port_inst == port_hpp):
+        bad("⑤ web 端口异值：WebServer.hpp=%r main.cpp=%r wifi_manager.py=%r release_install.sh=%r"
+            % (port_hpp, port_main, port_wifi, port_inst))
+    else:
+        ok("⑤ 同值：socket×3 / web 端口 %d（C++ 真源 + 3 处镜像）/ usb-proxy socket" % port_hpp)
 
     # EDID 重协商 attempts：单一真源 = 2（★ 2026-09-28 由 12 下调；V-09 的"单一真源"约束不变，
     # 变的是那个真源的值）。为什么下调：每一轮重协商都要拉低/拉高一次 HPD，源端就重新枚举一次
@@ -464,9 +453,8 @@ def check_crosslang():
     edid = read("scripts/edid/edid_apply.sh")
     if int_const(edid, "ATTEMPTS_DEFAULT") != 2:
         bad("⑤ EDID ATTEMPTS_DEFAULT 非 2（V-09 单一真源被破坏）")
-    for n, line in enumerate(web_py.splitlines(), 1):
-        if "TTBOX_EDID_REHANDSHAKE_ATTEMPTS" in strip_comment(line, ".py"):
-            bad("⑤ ttbox-web.py:%d 仍覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS（V-09 回归）" % n)
+    # ★ V1.0.52：原「ttbox-web.py 不得覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS」回归检查随该文件移除；
+    #   现 web 侧不直连 EDID（一律经 core IPC HARDWARE_ACTION），该覆写路径天然不存在。
 
     # 心跳 60/180：唯一定义在 LicenseConstants.hpp，其余引用
     lc = read("core/src/auth/LicenseConstants.hpp")
@@ -536,7 +524,7 @@ def check_no_patch():
 # ⑧ V-07：出货 Python 禁绝对路径 sys.path 注入
 # ---------------------------------------------------------------------------
 # 反模式：sys.path.insert(0, '/opt/ttbox/scripts') —— 既散落绝对路径字面量（A-PATH-3/5 违背），
-# 又把目录顶到 sys.path 最前（insert(0)）有遮蔽 stdlib 的风险（见 ttbox-web.py 头部 platform 冲突）。
+# 又把目录顶到 sys.path 最前（insert(0)）有遮蔽 stdlib 的风险（该冲突场景随 Python 后端移除已消失）。
 # 正解：经 lib.paths 相对派生 + append（受单点真源约束）。
 _ABS_INSERT = re.compile(r'sys\.path\.insert\(\s*0\s*,\s*[\'"](/[^\'"]*)[\'"]')
 
@@ -587,7 +575,7 @@ def check_project_root_injected():
 #     "某个文件找不到"，排障成本极高；
 #   · 把 parents[3] 改成 parents[4] 只是把错的深度换成另一个错的深度，不是修复。
 # 正解：根锚发现 —— 向上找**最近一层**同时含 plugins/framework/scripts/deploy 的目录
-#   （唯一实现 = plugins/web/lib/paths.py::discover_root）。
+#   （唯一实现 = core/src/common 下的路径单点）。
 # 豁免：注释行；以及含反引号的说明行（文档式内联引用，如 “原 ``parents[1]``”）。
 _PARENTS_HOP = re.compile(r'\.parents\[[0-9]+\]')
 # 三种"相对跳目录"写法：① 整串就是 "../.." 或 "../../"；② `"..", ".."` 逗号分段；
@@ -611,7 +599,7 @@ def check_no_depth_hardcode():
                     or _JOIN_HOP.search(body) or _SYSPATH_HOP.search(body)):
                 hits.append("%s:%d" % (p, n))
     for h in hits:
-        bad("⑩ 层级硬编码（parents[N] / \"../..\"）@ %s —— 改用 paths.py::discover_root 根锚发现" % h)
+        bad("⑩ 层级硬编码（parents[N] / \"../..\"）@ %s —— 改用根锚发现 / C++ 侧单点" % h)
     if not hits:
         ok("⑩ 无层级硬编码（parents[N] / \"../..\" 出货面全绿）")
 

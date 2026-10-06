@@ -13,7 +13,8 @@
 
 namespace ttbox::core::web {
 
-// 面板监听默认值（与 plugins/web/lib/settings.py 同值：0.0.0.0:8000，threads=64）。
+// 面板监听默认值（0.0.0.0:8000，threads=64）。★ V1.0.52：原与 plugins/web/lib/settings.py
+// 同值，该文件已随 Python 后端移除 ⇒ 此处成为唯一真源（env TTBOX_WEB_PORT 可覆盖）。
 inline constexpr const char* kDefaultHost = "0.0.0.0";
 inline constexpr int kDefaultPort = 8000;
 inline constexpr int kDefaultThreads = 64;  // 对齐旧 waitress serve(threads=64)

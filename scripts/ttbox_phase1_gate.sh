@@ -20,7 +20,7 @@ ok()  { echo "[gate][PASS] $*"; }
 bad() { echo "[gate][FAIL] $*"; FAIL=1; }
 warn(){ echo "[gate][WARN] $*"; }
 
-SRC_DIRS="core/src core/include usbproxy plugins framework ttbox_platform ttbox_motion scripts tools tests"
+SRC_DIRS="core/src core/include usbproxy plugins ttbox_motion scripts tools tests"
 find_src() {
   for d in $SRC_DIRS; do
     find "$d" -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \

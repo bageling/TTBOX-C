@@ -16,7 +16,7 @@ set -euo pipefail
 log()  { printf '[uninstall] %s\n' "$*"; }
 
 UNITS=(
-    ttbox-core.service ttbox-web.service ttbox-preview.service
+    ttbox-core.service ttbox-web.service
     ttbox-usbproxy.service ttbox-edid.service
     ttbox-ensure.service ttbox-ensure.timer
     ttbox-ota.path ttbox-ota.service

@@ -4,15 +4,15 @@
 #   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 import socket, struct, os, sys, subprocess, json
 # 路径默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py，禁止在此散写 socket 字面量。
-# 根锚发现（P6）：向上找同时含 plugins/framework/scripts/deploy 的目录，
+# 根锚发现（P6）：向上找同时含 plugins/usbproxy/scripts/deploy 的目录，
 # 不写死 "../../" 相对跳目录（换一次布局就静默指错根）。
 _root = os.path.dirname(os.path.abspath(__file__))
 while _root != os.path.dirname(_root) and not all(
         os.path.isdir(os.path.join(_root, _n))
-        for _n in ("plugins", "framework", "scripts", "deploy")):
+        for _n in ("plugins", "usbproxy", "scripts", "deploy")):
     _root = os.path.dirname(_root)
 sys.path.append(_root)
-from plugins.web.lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT, MOUSE_CMD_SOCK_DEFAULT as _MOUSE_CMD_DEFAULT
+from _ttbox_paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT, MOUSE_CMD_SOCK_DEFAULT as _MOUSE_CMD_DEFAULT
 
 # 1. cmd.sock test
 print("=== cmd.sock SEQPACKET test ===")

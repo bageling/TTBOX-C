@@ -20,7 +20,7 @@
 |---|---|---|
 | 1 | 它是 **C++ 源码** 吗？ | `core/src/<层>/`（跨模块接口进 `core/include/ttbox/core/`） |
 | 2 | 它是 **C++ 的测试/工具** 吗？ | 单测 `core/tests/`；板端/仿真工具 `core/tools/` |
-| 3 | 它是 **随包运行的 Python** 吗（被 web/core/fhs 运行期加载）？ | 插件 `plugins/<name>/`；框架 `framework/`；运动 `ttbox_motion/` |
+| 3 | 它是 **随包运行的 Python** 吗（被 web/core/fhs 运行期加载）？ | 插件 `plugins/<name>/`；运动 `ttbox_motion/`（★V1.0.52 起框架 `framework/` 已移除） |
 | 4 | 它是 **构建/发布/运维脚本**，且被 FHS 或发布门禁引用？ | `scripts/`（★**不得**外移；被 fhs 引用还要同步改 `ttbox_fhs_init.sh`） |
 | 5 | 它是 **离线/开发期工具**（不在板端跑）？ | `tools/`（模型转换/签发类） |
 | 6 | 它是 **部署描述**（unit/toolchain/出厂配置）？ | `deploy/{systemd,cmake,config}/` |
@@ -39,7 +39,7 @@ flowchart TD
   B -- 工具 --> B3[core/tools/]
   B -- 否 --> C{随包运行?}
   C -- 插件 --> C1[plugins/name/]
-  C -- 框架/领域包 --> C2[framework/ 或 ttbox_motion/]
+  C -- 框架/领域包 --> C2[ttbox_motion/ 领域包]
   C -- 否 --> D{被 FHS/发布门禁引用?}
   D -- 构建/发布/运维脚本 --> D1[scripts/  不可外移]
   D -- 部署描述 --> D2[deploy/  systemd|cmake|config]
@@ -59,11 +59,11 @@ flowchart TD
 
 | 对象 | 规则 | 现状示例 |
 |---|---|---|
-| 目录名（代码包） | 小写、`snake_case`、单数；包必有 `__init__.py` | ✅ `framework/`、`ttbox_motion/` |
+| 目录名（代码包） | 小写、`snake_case`、单数；包必有 `__init__.py` | ✅ `ttbox_motion/`、`plugins/` |
 | 目录名（文档） | 小写英文 `kebab-case` 主题名（`architecture/`、`ops/`、`protocols/`、`performance/`…） | ✅ 本轮已建；旧 `架构/` 已迁移 |
 | C++ 文件 | 类名同 `PascalCase.hpp/.cpp`；实现类与接口分离（`Xxx.hpp` / `Xxx_stub.cpp`） | ✅ `ICapture.hpp` / `V4L2Capture.hpp`、`PreviewModule_stub.cpp` |
 | 插件 | `plugins/<name>/{bin/{ttbox-<name>, ttbox-<name>.py},config/,…}`；`bin/ttbox-<name>` 为 **bash launcher** | ✅ `plugins/web/bin/ttbox-web` |
-| pytest 文件 | `test_*.py`，就近包内 `tests/` | ✅ `framework/tests/` |
+| pytest 文件 | `test_*.py`，就近包内 `tests/` | ✅ `core/tests/`、就近包内 `tests/` |
 | C++ 测试 | `test_*.cpp`（CTest 注册名 = 去掉 `test_`） | ✅ `core/tests/test_pipeline.cpp` |
 | shell 测试 | `test_*.sh`；集成脚本按域分目录 `tests/<域>/` | ✅ `tests/api/`、`tests/monitor/` |
 | 文档命名 | **活真源**：`主题.md`；**一次性报告**：`主题-YYYY-MM-DD.md`；**版本化**：`主题-vX.Y.Z.md` | ✅ `交付前Web实测报告-2026-09-19.md` |
@@ -94,10 +94,13 @@ docs/
 **一份文档是否入库，取决于有没有"非文档的引用方"** —— 源码、脚本、测试、systemd/CMake/HTML 都算。
 没有任何代码引用的介绍类、盘点类、过程类文档一律不入库。
 
-现状（2026-09-19 清理后）：`docs/` 下 17 份 + `deploy/DEPENDENCIES.md` + `ttbox_platform/supervisor/README.md`
-+ 根 `README.md`，共 **20 份**。谁引用谁见 [`README.md`](README.md) §二。
+现状（2026-09-19 清理后）：`docs/` 下 17 份 + `deploy/DEPENDENCIES.md`
++ 根 `README.md`，共 **18 份**。谁引用谁见 [`README.md`](README.md) §二。
 > **2026-10-01（P3）**：平台层包 `platform/` 已改名 `ttbox_platform/`（目录名 = Python 包名，
 > 且不再遮蔽标准库 `platform`）；上文那份 README 随之改路径。
+> **★ 2026-10-06（V1.0.52）**：`ttbox_platform/supervisor/README.md` 已随「去 Python」批次 1
+> 与 `ttbox_platform/` 整个目录一起删除 ⇒ 服务用户/组约定的实际载体改为
+> `scripts/ttbox_fhs_init.sh` 的建号段本身（`docs/README.md` 索引已同步）。
 
 > **2026-09-18 清理**：`docs/archive/`（历史快照 / 旧性能报告 / 阶段报告，41 个文件）与四个旧路径指针目录
 > （`架构/` `开发/` `规划/` `验证/`）已删除。

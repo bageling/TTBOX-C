@@ -33,7 +33,8 @@ int64_t file_mtime(const std::string& path) {
     return static_cast<int64_t>(sec.count());
 }
 
-// OTA 分发服务器（与 plugins/web/bin/ttbox-web.py 同值；env 可覆盖）。
+// OTA 分发服务器。★ V1.0.52：原与 plugins/web/bin/ttbox-web.py 同值，该文件随 Python
+// 清理移除 ⇒ 现只与 scripts/ttbox.sh::OTA_SERVER_URL 保持同值（仍是 env 可覆盖）。
 std::string ota_server_url() {
     const char* v = std::getenv("TTBOX_OTA_SERVER_URL");
     return (v != nullptr && *v != '\0') ? std::string(v) : "https://47.104.18.178:10086/ota";

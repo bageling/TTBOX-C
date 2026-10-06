@@ -16,12 +16,12 @@ from typing import Any
 def _ttbox_tree_root() -> Path:
     cur = Path(__file__).resolve().parent
     while True:
-        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+        if all((cur / _n).is_dir() for _n in ("plugins", "usbproxy", "scripts", "deploy")):
             return cur
         if cur.parent == cur:
             raise RuntimeError(
                 "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
-                "plugins/framework/scripts/deploy 的目录" % __file__
+                "plugins/usbproxy/scripts/deploy 的目录" % __file__
             )
         cur = cur.parent
 
@@ -40,7 +40,8 @@ DEFAULT_CONNECTION_PREFIX = os.environ.get("TTBOX_WIFI_DEFAULT_CONNECTION_PREFIX
 USER_CONNECTION_PREFIX = os.environ.get("TTBOX_WIFI_USER_CONNECTION_PREFIX", "ttbox-wifi-")
 AP_CONNECTION = os.environ.get("TTBOX_WIFI_AP_CONNECTION", "ttbox-ap-hotspot")
 WIFI_BOOTSTRAP_SERVICE = os.environ.get("TTBOX_WIFI_BOOTSTRAP_SERVICE", "ttbox-wifi-bootstrap.service")
-# 面板端口默认（B-CONST-1 / V-06）：跨语言同值真源 = plugins/web/lib/paths.py::WEB_PORT_DEFAULT，
+# 面板端口默认（B-CONST-1 / V-06）：真源 = core/src/web/WebServer.hpp::kDefaultPort（V1.0.52 起
+# 由 Python paths.py 迁至 C++），本文件与 main.cpp、ttbox_release_install.sh 为三处镜像，由门禁 ⑤ 断言同值。
 # 门禁 scripts/ttbox_conventions_gate.sh 断言本值与之一致。运行时覆盖名 = TTBOX_WEB_PORT（**唯一名**；
 # 旧 TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT 属同义异名，已删除，不保留兼容读 —— D-ENV-3/D-ENV-5）。
 WEB_PORT_DEFAULT = 8000

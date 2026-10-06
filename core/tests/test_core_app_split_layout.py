@@ -16,7 +16,7 @@
 import re
 from pathlib import Path
 
-from plugins.web.lib.paths import discover_root
+from _ttbox_paths import discover_root
 
 # ★ 根锚用 paths.discover_root（门禁⑩ 禁 parents[N] / "../.."）：从本文件逐级向上找
 #   含 core/src/app 与 plugins 的目录，找不到就抛 —— 不静默指错根。

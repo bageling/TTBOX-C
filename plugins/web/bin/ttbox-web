@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export TTBOX_ROOT="${TTBOX_ROOT:-$PLUGIN_DIR}"
-exec python3 "$PLUGIN_DIR/bin/ttbox-web.py"

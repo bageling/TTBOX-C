@@ -46,12 +46,12 @@ from pathlib import Path
 def _ttbox_tree_root() -> Path:
     cur = Path(__file__).resolve().parent
     while True:
-        if all((cur / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+        if all((cur / _n).is_dir() for _n in ("plugins", "usbproxy", "scripts", "deploy")):
             return cur
         if cur.parent == cur:
             raise RuntimeError(
                 "找不到 TTBOX 树根：从 %s 向上未发现同时含 "
-                "plugins/framework/scripts/deploy 的目录" % __file__
+                "plugins/usbproxy/scripts/deploy 的目录" % __file__
             )
         cur = cur.parent
 

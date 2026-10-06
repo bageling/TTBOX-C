@@ -35,7 +35,7 @@ fi
 
 echo
 echo "########## 2. payload 可执行位预检 ##########"
-for f in bin/ttbox_core_main plugins/web/bin/ttbox-web plugins/preview/bin/ttbox-preview \
+for f in bin/ttbox_core_main plugins/web/bin/ttbox-web \
          usbproxy/usb-proxy usbproxy/board/run-ttbox-usb-proxy.sh; do
     printf '  %-46s %s\n' "$f" "$(stat -c %a "$BAKE/payload/$f" 2>/dev/null || echo 缺失)"
 done
@@ -58,7 +58,6 @@ chk "过渡软链 plugins -> current/plugins" 'test "$(readlink /opt/ttbox/plugi
 chk "过渡软链 scripts -> current/scripts" 'test "$(readlink /opt/ttbox/scripts)" = current/scripts'
 chk "core 二进制可执行"               'test -x /opt/ttbox/current/bin/ttbox_core_main'
 chk "web 入口可执行"                  'test -x /opt/ttbox/current/plugins/web/bin/ttbox-web'
-chk "preview 入口可执行"              'test -x /opt/ttbox/current/plugins/preview/bin/ttbox-preview'
 chk "usbproxy ELF 可执行"             'test -x /opt/ttbox/current/usbproxy/usb-proxy'
 chk "usbproxy 启动脚本可执行"         'test -x /opt/ttbox/current/usbproxy/board/run-ttbox-usb-proxy.sh'
 chk "librknnrt.so 随版本就地交付"     'test -f /opt/ttbox/current/lib/librknnrt.so'
@@ -73,7 +72,7 @@ echo "########## 5. 安装 systemd 单元（调用 ensure 真脚本）##########
 TTBOX_SYSTEMD=0 bash /opt/ttbox/current/scripts/ttbox_ensure_services.sh
 echo "  ensure 退出码=$?"
 
-UNITS="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path ttbox-ota.service"
+UNITS="ttbox-core.service ttbox-web.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path ttbox-ota.service"
 for u in $UNITS; do
     chk "/etc/systemd/system/$u 已安装" "test -f /etc/systemd/system/$u"
 done
@@ -109,7 +108,7 @@ echo "########## 6. enable 单元（chroot 内无 PID1，逐条核对落链）##
 # 板端实测的 enable 集合：multi-user.target.wants 6 个 + timers.target.wants 1 个。
 # ttbox-ota.service 【无 [Install] 段】⇒ 本就不该被 enable（由 .path 触发）；
 # ttbox-ensure.service 同理不由自己 enable（由 timer 拉起），故均不在清单内。
-MU="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path"
+MU="ttbox-core.service ttbox-web.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path"
 enable_unit() {
     local u="$1" tgt="$2"
     if systemctl enable "$u" >/dev/null 2>&1 && [ -L "/etc/systemd/system/${tgt}.wants/$u" ]; then

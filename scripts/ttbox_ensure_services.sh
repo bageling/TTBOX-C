@@ -42,7 +42,7 @@ SYSTEMD_MODE="${TTBOX_SYSTEMD:-auto}"
 # 受管 unit（收敛后每 unit 全仓仅一份，见 T1.05；此处为按依赖顺序的显式清单）
 # OTA 特权通道两个 unit（2026-09-18 定案）：path 负责监听触发，service 是 root 执行端。
 #   path unit 无 ExecStart ⇒ ExecStart 预检自然放行（unit_execstart_bin 返回空）。
-UNITS="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path ttbox-ota.service"
+UNITS="ttbox-core.service ttbox-web.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path ttbox-ota.service"
 UNIT_SRC_REL="deploy/systemd"
 
 log()  { printf '[ensure] %s\n' "$*"; }

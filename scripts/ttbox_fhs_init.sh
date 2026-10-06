@@ -35,7 +35,8 @@ trap cleanup_payload EXIT
 echo "== TTBOX FHS 初始化（幂等）=="
 echo "仓库根: ${REPO_ROOT}"
 
-# ---- 1. 系统用户/组（与 ttbox_platform/supervisor/README.md 约定一致）----
+# ---- 1. 系统用户/组（约定即本节；原记录于 ttbox_platform/supervisor/README.md，
+#        该目录已随 V1.0.52「去 Python」批次 1 移除）----
 if ! getent group ttbox >/dev/null; then
     groupadd --system ttbox
     echo "  [+] 创建系统组 ttbox"

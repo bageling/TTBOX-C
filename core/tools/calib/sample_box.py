@@ -36,12 +36,16 @@ def _resolve_sock() -> str:
     # 只能静默走空串兜底。改为根锚发现（P6/A-PATH-3）。
     _root = Path(__file__).resolve().parent
     while _root != _root.parent and not all(
-            (_root / _n).is_dir() for _n in ("plugins", "framework", "scripts", "deploy")):
+            (_root / _n).is_dir() for _n in ("plugins", "usbproxy", "scripts", "deploy")):
         _root = _root.parent
-    if str(_root) not in sys.path:
-        sys.path.append(str(_root))          # append：防遮蔽 stdlib
+    # V1.0.52：原从 plugins/web/lib/paths.py 取 socket 常量，该文件已随
+    #   「去 Python」批次 1 删除 ⇒ 改用 core/tools/_ttbox_paths.py（开发侧替代，
+    #   常量仍从 core/src/common/Paths.hpp 解析，保持单一真源）。
+    _tools = _root / "core" / "tools"
+    if str(_tools) not in sys.path:
+        sys.path.append(str(_tools))         # append：防遮蔽 stdlib
     try:
-        from plugins.web.lib.paths import ipc_socket
+        from _ttbox_paths import ipc_socket
         return ipc_socket()
     except Exception:
         return ""

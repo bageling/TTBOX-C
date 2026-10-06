@@ -6,8 +6,9 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
     "evdev>=1.7,<2.0",
-    "Flask>=3.1,<4",
 ]
+# ★ V1.0.52：Flask 依赖已移除 —— Web 面板后端由 C++ ttbox_web 提供（V1.0.47 起基线），
+#   本批（批次 1「去 Python」）已删除 plugins/web 下全部 .py，Flask 不再被任何代码引用。
 
 [project.optional-dependencies]
 rknn = ["rknn-toolkit-lite2>=2.3.0"]
@@ -18,13 +19,12 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["framework*", "plugins*", "ttbox_platform*", "ttbox_motion*"]
+# ★ V1.0.52：framework* / ttbox_platform* 已随「去 Python」批次 1 删除，不再声明。
+include = ["plugins*", "ttbox_motion*"]
 
 [tool.pytest.ini_options]
-# 三套 Python 用例都是"正常入口"的一部分：裸 `python -m pytest` 即跑全量
-# （P6-2026-10-01：原先只列 2 套 ⇒ 裸入口漏跑 plugins/web/tests 的 482 条）。
-# ★ core/tests 也在内（2026-10-04）：那里放的是 **C++ 代码的结构守卫**
-#   （如 test_core_app_split_layout.py锁 Application 四 TU 的成员归属）。
-#   它们是 pytest 用例但不在 plugins/web 下，漏列就会"没人跑"——
-#   而没跑过的检查等于没有检查。
-testpaths = ["framework/tests", "ttbox_platform/tests", "plugins/web/tests", "core/tests"]
+# ★ V1.0.52：framework/tests 与 ttbox_platform/tests 与 plugins/web/tests 已随
+#   「去 Python」批次 1 删除（第三者原来还有 482 条用例，随之移除）。
+#   现只余 core/tests —— 那里放的是 **C++ 代码的结构守卫**
+#   （如 test_core_app_split_layout.py 锁 Application 四 TU 的成员归属）。
+testpaths = ["core/tests"]

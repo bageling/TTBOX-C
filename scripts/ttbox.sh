@@ -4,8 +4,9 @@
 # 一站式转发既有脚本；所有子命令都可在板端 root 下直接执行。
 #
 # ★ 分发服务器地址（单点纪律）：OTA_SERVER_URL 写死在这里，必须与
-#   plugins/web/bin/ttbox-web.py 的 OTA_SERVER_URL **同值**——改一处必须同步改另一处；
-#   `ttbox.sh doctor` 会比对两处是否漂移。
+#   C++ 侧 core/src/web/domain/ota_query.cpp::ota_server_url() 的默认值 **同值**
+#   ——改一处必须同步改另一处；`ttbox.sh doctor` 会从 ttbox_web 二进制提取地址比对漂移。
+#   （V1.0.52 前对照物是 plugins/web/bin/ttbox-web.py，该文件已随 Python 后端移除。）
 #   正式服务器（2026-09-27 起）：**IP 直连** https://47.104.18.178:10086/ota。
 #   2026-09-27 实锤：业主移动宽带按「域名家族+IP」过滤 cctv2.top/xiaotian.help
 #   （80 端口回 ICP 拦截页、TLS 全端口掐真域名 SNI），域名访问必须等 ICP 备案通过；
@@ -38,7 +39,7 @@ cmd_install() {
 cmd_status() {
     log "== 服务状态 =="
     systemctl --no-pager --full status ttbox-core.service ttbox-web.service \
-        ttbox-usbproxy.service ttbox-preview.service 2>&1 | grep -E '●|Active:' || true
+        ttbox-usbproxy.service 2>&1 | grep -E '●|Active:' || true
     log "== current 版本 =="
     readlink -f /opt/ttbox/current 2>/dev/null || warn "current 断链"
     log "== OTA 状态 =="

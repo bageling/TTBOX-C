@@ -24,7 +24,7 @@
 | 输出后端设计 | [`research/OUTPUT_BACKEND_DESIGN.md`](research/OUTPUT_BACKEND_DESIGN.md) | `core/src/output/OutputBackend.hpp` 的设计依据 |
 | 构建可复现 | [`build/build-reproducibility.md`](build/build-reproducibility.md) | 可复现锚（CMake / 发布脚本按 §N 引用） |
 | 板端依赖 | [`../deploy/DEPENDENCIES.md`](../deploy/DEPENDENCIES.md) | 板端依赖清单 |
-| 服务用户/组约定 | [`../ttbox_platform/supervisor/README.md`](../ttbox_platform/supervisor/README.md) | `scripts/ttbox_fhs_init.sh` 按此约定建号 |
+| 服务用户/组约定 | [`../scripts/ttbox_fhs_init.sh`](../scripts/ttbox_fhs_init.sh) | ★V1.0.52：原记录于 `ttbox_platform/supervisor/README.md`，该目录已随「去 Python」批次 1 移除；现约定即该脚本自身（建号处） |
 
 ### 交付前过程报告（被源码或测试引用，故保留）
 
@@ -68,7 +68,6 @@
 | `handover/2026-09-17/控制台布局冻结基线-2026-09-18.md` | `plugins/web/tests/test_web_console_parity.py` |
 | `handover/2026-09-17/控制台1比1采用-架构设计-2026-09-18.md` | `scripts/ttbox_m2xx_console_accept.py:5` |
 | `../deploy/DEPENDENCIES.md` | `deploy/systemd/ttbox-edid.service` |
-| `../ttbox_platform/supervisor/README.md` | `scripts/ttbox_fhs_init.sh:38` |
 
 > 注：`core/src/output/OutputBackend.hpp:6` 与 `scripts/ttbox_m2xx_console_accept.py:5` 里写的文件名
 > 与磁盘上的实际名有出入（`OUTPUT_BACKEND_RESEARCH.md` / `控制台1:1采用`），按精确路径匹配抓不到，

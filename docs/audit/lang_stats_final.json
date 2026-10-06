@@ -1,21 +1,21 @@
 {
-  "product_code_lines": 74813,
+  "product_code_lines": 83129,
   "test_code_lines": 27035,
-  "thirdparty_code_lines": 12921,
-  "doc_lines": 5496,
-  "test_to_product_ratio": 0.3614,
+  "thirdparty_code_lines": 20805,
+  "doc_lines": 7145,
+  "test_to_product_ratio": 0.3252,
   "product_by_language": {
     "C++": {
-      "files": 199,
-      "code": 29472,
-      "comment": 6575,
-      "blank": 3382
+      "files": 254,
+      "code": 37005,
+      "comment": 7172,
+      "blank": 4265
     },
     "Python": {
-      "files": 149,
-      "code": 18908,
-      "comment": 1986,
-      "blank": 3356
+      "files": 152,
+      "code": 19350,
+      "comment": 1999,
+      "blank": 3417
     },
     "JavaScript": {
       "files": 15,
@@ -25,9 +25,9 @@
     },
     "Shell": {
       "files": 86,
-      "code": 7175,
-      "comment": 2084,
-      "blank": 891
+      "code": 7193,
+      "comment": 2099,
+      "blank": 892
     },
     "CSS": {
       "files": 3,
@@ -41,23 +41,23 @@
       "comment": 0,
       "blank": 58
     },
+    "JSON": {
+      "files": 51,
+      "code": 1492,
+      "comment": 0,
+      "blank": 6
+    },
     "HTML": {
       "files": 4,
       "code": 1447,
       "comment": 7,
       "blank": 117
     },
-    "JSON": {
-      "files": 50,
-      "code": 1259,
-      "comment": 0,
-      "blank": 6
-    },
     "CMake": {
       "files": 2,
-      "code": 597,
-      "comment": 684,
-      "blank": 102
+      "code": 686,
+      "comment": 706,
+      "blank": 105
     },
     "C/C++头": {
       "files": 4,
@@ -67,8 +67,8 @@
     },
     "Systemd": {
       "files": 8,
-      "code": 124,
-      "comment": 125,
+      "code": 125,
+      "comment": 131,
       "blank": 16
     },
     "Nginx配置": {
@@ -136,8 +136,8 @@
   },
   "product_by_dir": {
     "core": {
-      "CMake": 570,
-      "C++": 24376,
+      "CMake": 659,
+      "C++": 31909,
       "Python": 1293,
       "PowerShell": 52,
       "Shell": 10,
@@ -153,8 +153,8 @@
       "HTML": 1447
     },
     "scripts": {
-      "Shell": 4379,
-      "Python": 4585,
+      "Shell": 4397,
+      "Python": 4818,
       "Text": 160
     },
     "usbproxy": {
@@ -171,13 +171,13 @@
       "JSON": 5
     },
     "tools": {
-      "Python": 1740
+      "Python": 1949
     },
     "framework": {
       "Python": 977
     },
     "docs": {
-      "JSON": 229,
+      "JSON": 462,
       "Python": 223,
       "Shell": 176
     },
@@ -192,7 +192,7 @@
       "CMake": 27,
       "Nginx配置": 102,
       "Text": 88,
-      "Systemd": 124
+      "Systemd": 125
     },
     "config": {
       "JSON": 137

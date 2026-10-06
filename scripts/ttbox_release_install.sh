@@ -50,7 +50,7 @@ UNIT_REL_DIR="deploy/systemd"
 KEEP_VERSIONS="${TTBOX_KEEP_VERSIONS:-2}"
 HEALTH_TIMEOUT="${TTBOX_HEALTH_TIMEOUT:-30}"
 WEB_PORT="${TTBOX_WEB_PORT:-8000}"
-RESTART_UNITS="${TTBOX_RESTART_UNITS:-ttbox-core ttbox-web ttbox-preview ttbox-usbproxy}"
+RESTART_UNITS="${TTBOX_RESTART_UNITS:-ttbox-core ttbox-web ttbox-usbproxy}"
 # systemd 开关：auto（默认，探测 PID1）/ 1 强制使用 / 0 强制跳过（WSL、容器、本机验证）
 SYSTEMD_MODE="${TTBOX_SYSTEMD:-auto}"
 #
@@ -113,7 +113,7 @@ usage() {
   TTBOX_KEEP_VERSIONS   默认 2（保留版本数）
   TTBOX_HEALTH_TIMEOUT  默认 30（秒）
   TTBOX_WEB_PORT        默认 8000
-  TTBOX_RESTART_UNITS   默认 "ttbox-core ttbox-web ttbox-preview ttbox-usbproxy"
+  TTBOX_RESTART_UNITS   默认 "ttbox-core ttbox-web ttbox-usbproxy"
   TTBOX_SYSTEMD         auto(默认) | 1(强制用 systemd) | 0(强制跳过 restart/健康检查)
 
 迁移期过渡软链（--activate 时按 TRANSITIONAL_LINKS 清单浇筑，verify 逐条断言）:
