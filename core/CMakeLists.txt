@@ -639,6 +639,15 @@ if(TTBOX_CORE_WITH_ONNX)
   list(APPEND CORE_SOURCES src/model/backend/OnnxBackend.cpp)
 endif()
 
+# ---- EDID 核心（V1.0.53：自 scripts/edid/*.py 移植；业主令「去掉所有 Python 代码」）----
+# 无条件源：纯算法（时序表 / 256B 构造 / 合规校验），零平台依赖（只用 common/Json）
+# ⇒ host 与板端都能编译 ⇒ 逐字节对拍测试可在本机跑（core/tests/test_edid_golden.cpp）。
+# ★ 必须位于 add_library(ttbox_core ...) 之前（同 ONNX/Preview 块的顺序约束）。
+list(APPEND CORE_SOURCES
+  src/edid/EdidTiming.cpp
+  src/edid/EdidBuilder.cpp
+  src/edid/EdidValidator.cpp)
+
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
 #   add_library 一旦执行，CORE_SOURCES 是否包含 PreviewModule.cpp 就被固化；
@@ -1046,6 +1055,9 @@ if(TTBOX_CORE_BUILD_TESTS)
   endif()
   # 真实模型 + 方向语义测试（无 ONNX 也跑层B 纯算法部分）
   list(APPEND TEST_SOURCES tests/test_real_model.cpp)
+  # EDID C++ 移植的逐字节对拍（V1.0.53）。基准 = tools/edid_golden_gen.py 在删 Python 前
+  # 冻结的现役实现输出；host 可跑（EDID 核心零平台依赖）。
+  list(APPEND TEST_SOURCES tests/test_edid_golden.cpp)
   add_executable(ttbox_core_tests ${TEST_SOURCES})
   target_include_directories(ttbox_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   # D1：把真实 rknn_api.h 的**绝对路径**注入测试（host/board 通用），使
@@ -1062,7 +1074,16 @@ if(TTBOX_CORE_BUILD_TESTS)
       "test_input_quant.cpp 的 input_quant_enum_mirror_against_real_header 依赖该文件。")
   endif()
   target_compile_definitions(ttbox_core_tests PRIVATE
-    TTBOX_RKNN_API_HEADER="${TTBOX_RKNN_API_HEADER_PATH}")
+    TTBOX_RKNN_API_HEADER="${TTBOX_RKNN_API_HEADER_PATH}"
+    # ★ V1.0.53：EDID 对拍基准路径（configure 期确定；见下方存在性断言）
+    TTBOX_EDID_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json")
+  # EDID 对拍基准必须存在，否则 test_edid_golden 会静默失效（同 TTBOX_RKNN_API_HEADER 的
+  # 「守卫存在=假象」纪律）。它是**入库文件**（tools/edid_golden_gen.py 产出）。
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json")
+    message(FATAL_ERROR
+      "EDID 对拍基准缺失：core/tests/fixtures/edid_golden.json。"
+      "请先运行 tools/edid_golden_gen.py（需现役 Python 实现在场）重新冻结。")
+  endif()
   target_link_libraries(ttbox_core_tests PRIVATE ttbox_core)
   add_test(NAME ttbox_core_tests COMMAND ttbox_core_tests)
 
