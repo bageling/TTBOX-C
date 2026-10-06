@@ -13,11 +13,17 @@
 #include <vector>
 
 #include "common/Json.hpp"
+#include "edid/EdidApply.hpp"
 #include "edid/EdidBuilder.hpp"
 #include "edid/EdidConfig.hpp"
 #include "edid/EdidTiming.hpp"
 #include "edid/EdidValidator.hpp"
 #include "test_util.hpp"
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using ttbox::core::JsonParseResult;
 using ttbox::core::JsonValue;
@@ -389,4 +395,110 @@ TEST(edid_golden_pnp) {
         EXPECT(ttbox::core::edid::pnp_decode(enc) == jstr(row, "roundtrip"),
                "pnp_decode roundtrip('" + vendor + "') 不一致");
     }
+}
+
+// ============ 11. 应用流程的纯函数（判锁 / JSON 输出 / 设备白名单）============
+namespace {
+// 断言 JSON 里存在 "k":v（容忍 ": " 与 ":" 两种分隔）
+bool json_has_kv(const std::string& j, const std::string& k, const std::string& v) {
+    return j.find("\"" + k + "\":" + v) != std::string::npos ||
+           j.find("\"" + k + "\": " + v) != std::string::npos;
+}
+}  // namespace
+
+TEST(edid_apply_pure_helpers) {
+    using ttbox::core::edid::v4l2_timing_locked;
+    using ttbox::core::edid::debugfs_locked;
+    using ttbox::core::edid::make_failure_json;
+    using ttbox::core::edid::make_success_json;
+
+    // debugfs 判锁：Clk + Ch0/1/2 四段全 Lock 才算锁上（脚本用 grep -qE 同款）
+    EXPECT(debugfs_locked("Clk-Ch:Lock Ch0:Lock Ch1:Lock Ch2:Lock\n"), "四通道全锁应判锁上");
+    EXPECT(!debugfs_locked("Clk-Ch:Unlock Ch0:Lock Ch1:Lock Ch2:Lock\n"), "Clk 未锁应判未锁");
+    EXPECT(!debugfs_locked("Clk-Ch:Lock Ch0:Lock Ch1:Lock Ch2:Unlock\n"), "Ch2 未锁应判未锁");
+    EXPECT(!debugfs_locked("Clk-Ch:Lock Ch0:Lock Ch1:Lock\n"), "缺 Ch2 应判未锁");
+    EXPECT(!debugfs_locked(""), "空文本应判未锁");
+    EXPECT(!debugfs_locked("其它文本\n"), "无 Clk-Ch 行应判未锁");
+    // 多行时只看含 Clk-Ch 的那一行
+    EXPECT(!debugfs_locked("Mode: HDMI\nClk-Ch:Unlock Ch0:Lock Ch1:Lock Ch2:Lock\n"),
+           "应取 Clk-Ch 所在行判定");
+
+    // v4l2 判锁：无 failed / No locks 即锁上
+    EXPECT(v4l2_timing_locked("Active width: 2560\n"), "正常输出应判锁上");
+    EXPECT(!v4l2_timing_locked("failed to query\n"), "含 failed 应判未锁");
+    EXPECT(!v4l2_timing_locked("No locks\n"), "含 No locks 应判未锁");
+
+    // JSON 输出结构（供 core 原样转发）
+    const std::string ok = make_success_json(true, "/opt/ttbox/runtime/edid/current.bin", "TTBox-COMPAT");
+    EXPECT(json_has_kv(ok, "ok", "true"), "成功 JSON 应含 ok:true");
+    EXPECT(json_has_kv(ok, "hpd", "\"rehandshake\""), "重协商模式 hpd 应为 rehandshake");
+    EXPECT(json_has_kv(ok, "method", "\"v4l2_ctl\""), "成功 JSON 应含 method");
+    EXPECT(ok.find("TTBox-COMPAT") != std::string::npos, "成功 JSON 应含模式名");
+    const std::string ok2 = make_success_json(false, "f", "m");
+    EXPECT(json_has_kv(ok2, "hpd", "\"unchanged\""), "纯注入模式 hpd 应为 unchanged");
+
+    const std::string bad = make_failure_json(true, false, "EDID 已写入但未锁定");
+    EXPECT(json_has_kv(bad, "ok", "false"), "失败 JSON 应含 ok:false");
+    EXPECT(json_has_kv(bad, "edid_applied", "true"), "失败 JSON 应含 edid_applied");
+    EXPECT(json_has_kv(bad, "locked", "false"), "失败 JSON 应含 locked");
+
+    // 设备白名单：非 /dev/video0 必须拒绝（脚本同款硬拦），且不碰任何硬件
+    ttbox::core::edid::ApplyOptions bad_opt;
+    bad_opt.video_dev = "/dev/dri/card0";
+    const ttbox::core::edid::ApplyResult br = ttbox::core::edid::apply(bad_opt);
+    EXPECT(!br.ok, "非 /dev/video0 应拒绝");
+    EXPECT(br.error.find("必须使用 /dev/video0") != std::string::npos, "应说明设备错误");
+}
+
+// ============ 12. dry-run 走通「读配置 → 保护 → 构建 → 落盘」全链 ============
+TEST(edid_apply_dry_run) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    // 唯一目录名用时间戳而非 getpid：getpid 在 MSYS/Linux 头文件位置不同，跨平台易踩坑
+    const long long uniq =
+        static_cast<long long>(std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path tmp = fs::temp_directory_path(ec) / ("ttbox_edid_test_" + std::to_string(uniq));
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp / "config", ec);
+
+    // 出厂兼容身份（deploy/config/hardware_display.json 原样）
+    const std::string cfg =
+        R"({"device":"auto","name":"TTBox-COMPAT","vendor":"AIB","product_id":"0x2400",)"
+        R"("serial":"0xA1B00001","native_mode":"1080p240","native_only":true,"profile":"boot-safe-full"})";
+    {
+        std::ofstream f(tmp / "config" / "hardware_display.json", std::ios::binary);
+        f << cfg;
+    }
+
+    ttbox::core::edid::ApplyOptions opt;
+    opt.prefix = tmp.string();
+    opt.dry_run = true;
+    const ttbox::core::edid::ApplyResult r = ttbox::core::edid::apply(opt);
+    EXPECT(r.ok, "dry-run 应成功：" + r.error);
+    EXPECT(r.edid_applied, "dry-run 应标记 EDID 已生成");
+
+    const fs::path out = tmp / "runtime" / "edid" / "current.bin";
+    EXPECT(fs::exists(out), "current.bin 应已生成（含自动建目录）");
+    if (fs::exists(out)) {
+        std::ifstream f(out, std::ios::binary);
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        const std::string got = ss.str();
+        EXPECT(got.size() == 256, "current.bin 应为 256 字节，实际 " + std::to_string(got.size()));
+
+        // 与"直接构建同一配置"逐字节一致 —— 证明 apply 没在中间改坏配置
+        const JsonParseResult pr = json_parse(cfg);
+        EXPECT(pr.ok, "测试配置应可解析");
+        if (pr.ok) {
+            const ttbox::core::edid::BuildResult direct =
+                ttbox::core::edid::build_from_config(pr.value);
+            EXPECT(direct.ok, "直接构建应成功");
+            if (direct.ok) {
+                const std::string want(reinterpret_cast<const char*>(direct.edid.data()),
+                                       direct.edid.size());
+                EXPECT(got == want, "current.bin 应与直接构建逐字节一致");
+            }
+        }
+    }
+    fs::remove_all(tmp, ec);
 }

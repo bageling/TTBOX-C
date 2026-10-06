@@ -647,7 +647,8 @@ list(APPEND CORE_SOURCES
   src/edid/EdidTiming.cpp
   src/edid/EdidBuilder.cpp
   src/edid/EdidValidator.cpp
-  src/edid/EdidConfig.cpp)
+  src/edid/EdidConfig.cpp
+  src/edid/EdidApply.cpp)
 
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
