@@ -1,3 +1,6 @@
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 """report_html.py — 自测看板 HTML 生成器（V1.0.46）
 
 把 trace_replay 的回放结果渲染成**单文件自包含 HTML**：数据内嵌、双击即开、

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """板端长时间监控：轮询 /api/state + 热区温度，用于验证改动稳定性。"""
 
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
+
 import argparse
 import json
 import subprocess

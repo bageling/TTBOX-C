@@ -1,3 +1,6 @@
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 # 板端临时诊断：高频采样 GET_STATUS(data.metrics)，分析目标框抖动模式
 import json, socket, time, sys, statistics, os
 # IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
@@ -77,3 +80,8 @@ else:
     acts = [s for s in samples if s['active']]
     print('aim_active frames:', len(acts), '/', len(samples))
     print('detect:', set(s['detect'] for s in samples), 'fps:', set(s['fps'] for s in samples), 'input:', set((s['iw'], s['ih']) for s in samples))
+
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。

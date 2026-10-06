@@ -1,4 +1,14 @@
-"""trace_replay.py — 真实检测轨迹离线回放（V1.0.46）
+"""trace_replay.py — 自测脚本的**轨迹生成 + CSV 落盘**（V1.0.46 收口）
+
+★ 定位（业主 2026-10-06 定案「代码全用 C++，只有脚本用 py」）：
+  本文件**只做两件事** —— ① 生成测试轨迹；② 写成 DetTrace CSV。
+  **不再实现任何控制逻辑**（那是 C++ 回放器 ttbox_replay 的事）。
+  历史：V1.0.46 之前这里还有一整套 Python 版控制器（fitts.py/pid1.py）与闭环回放，
+  那是"用替身验证真身"——V1.0.43 的 τ=MT 错误在两边犯一模一样的错，互验形同虚设。
+  现已全部删除；控制逻辑只有一份，就是上板跑的那份 C++。
+
+原文档（保留说明背景）：
+--- 真实检测轨迹离线回放（V1.0.46）
 
 读板端 DetTrace 录的 CSV，用**真实目标运动**驱动控制器闭环，产出可比较的指标。
 这是"有目标才能测出 PID 自瞄各种问题"的落地：合成轨迹（匀速/随机游走）只能测
@@ -33,9 +43,6 @@ import json
 import math
 import statistics
 from dataclasses import dataclass, field, asdict
-
-from fitts import Fitts
-from pid1 import Pid1
 
 # 板端标定实测（ttbox_motion/calibration.py）
 GAIN_X_PX_PER_COUNT = 0.686
@@ -201,295 +208,20 @@ def make_synthetic(name: str, speed_px_s: float, noise_px: float = 2.0,
     return tr
 
 
-# ────────────────────────────── 控制器 ──────────────────────────────
+# ────────────────────────────── 统计 ──────────────────────────────
+# 控制器与闭环回放全部在 C++（ttbox_replay）。此处仅提供轨迹侧的描述性统计，
+# 供报告展示场景规模用（控制质量指标由 selftest.py 从 C++ 回放器拿）。
 
-@dataclass
-class CtlCfg:
-    kind: str = "fitts"                 # fitts | pid1
-    # Fitts
-    fitts_a_ms: float = 20.0
-    fitts_b_ms: float = 20.0
-    fitts_deadzone_px: float = 3.0
-    fitts_deadzone_ratio: float = 0.02
-    fitts_ff_gain: float = 0.85
-    fitts_ff_tau_ms: float = RESPONSE_DELAY_MS
-    # pid1
-    kp: float = 25.0
-    kd: float = 25.0
-    predict: float = 0.5
-    rate: float = 0.3
-    smooth: float = 9900.0
-    # 公共
-    deadzone_count: float = 1.0
-    gain: float = GAIN_X_PX_PER_COUNT
-    response_delay_ms: float = RESPONSE_DELAY_MS
-
-    def make(self):
-        if self.kind == "pid1":
-            return Pid1(self.kp, self.kd, self.predict, self.rate, self.smooth)
-        return Fitts(self.fitts_a_ms, self.fitts_b_ms, self.fitts_deadzone_px,
-                     self.fitts_deadzone_ratio, self.fitts_ff_gain, self.fitts_ff_tau_ms)
-
-
-@dataclass
-class Result:
-    label: str
-    kind: str
-    settle_med: float = 0.0
-    settle_p95: float = 0.0
-    overshoot_px: float = 0.0     # 首次穿越目标后的最大过冲
-    oscillate: bool = False
-    sign_flips: int = 0          # 输出方向翻转次数（>阈值 = 抖）
-    move_frames: int = 0
-    max_step: float = 0.0
-    stuck_frames: int = 0         # 误差大却没输出（追不上）
-    settle_frames: int = 0        # 收敛耗时：首次进入死区且此后不再出去（0=未收敛）
-    drift_px: float = 0.0         # 末段误差线性漂移（px/s，正=越追越远；识别"缓慢失控"）
-    jerk: float = 0.0             # ★ 误差二阶差分能量（px）：控制器自身抖动量。
-                                   #   比 oscillate 判据可靠：后者用「末两段 max|h| 比值」，
-                                   #   在**随机游走目标**下 h1/h2 天然抖动（实测 1.47）⇒ 误报。
-    total: float = 0.0
-    errs: list = field(default_factory=list)
-    outs: list = field(default_factory=list)
-
-    def brief(self) -> dict:
-        d = asdict(self)
-        d.pop("errs", None)
-        d.pop("outs", None)
-        return d
-
-
-def replay(tr: Trace, cfg: CtlCfg, label: str = "") -> Result:
-    """闭环回放。
-
-    ★ 闭环必须自己积分「准星位置」（V1.0.46 踩过的坑）：
-      录制数据里的 err_x 是**板端当时**的误差（准星已经跟着移动过了）。
-      回放要回答「换成另一个控制器会怎样」，就得把准星位置当成真实状态驱动：
-          目标位置 target_pos（由录制序列推进）
-          准星位置 cross_pos（从 0 起，只由本回放的输出驱动）
-          观测误差   obs_err = target_pos - cross_pos
-      第一版写成 `live_err = fr.err_x - applied`，等于每帧把准星位置丢掉重置
-      ⇒ 准星永远不动 ⇒ 稳态误差发散到 250~850px（还被误判成「振荡」）。
-    """
-    ctl = cfg.make()
-    delay_n = max(0, int(round(cfg.response_delay_ms / FRAME_MS_144FPS)))
-    queue: list[float] = [0.0] * delay_n
-    rem = 0.0
-    cross_pos = 0.0        # 准星绝对位置（本回放闭环驱动）
-    target_pos = 0.0       # 目标绝对位置（由录制序列推进）
-    vel_est = 0.0
-    errs: list[float] = []
-    outs: list[float] = []
-    sign_prev = 0
-    flips = 0
-    over = 0.0
-    stuck = 0
-    crossed = False
-
-    for i, fr in enumerate(tr.frames):
-        obs_err = target_pos - cross_pos
-        # ★ 速度估计必须用**目标位置**的速度（板端 AimTracker 就是跟目标框，不是跟误差）。
-        #   用「含自身输出的观测误差」差分 = 把自己的动作算进速度 ⇒ 正反馈。
-        if i > 0:
-            dt = (fr.t_ms - tr.frames[i - 1].t_ms) / 1000.0
-            if dt > 1e-6:
-                v = (fr.target_x - tr.frames[i - 1].target_x) / dt
-                vel_est += 0.5 * (v - vel_est)
-
-        if cfg.kind == "pid1":
-            u = ctl.upd(obs_err)
-        else:
-            u = ctl.upd(obs_err, fr.box_h or 0.0, cfg.gain, vel_est, FRAME_MS_144FPS)
-        if not math.isfinite(u):
-            u = 0.0
-        if abs(u) < cfg.deadzone_count:
-            u = 0.0
-        rem += u
-        move = 0.0
-        if abs(rem) >= 1.0:
-            move = float(int(rem))
-            rem -= move
-        move = max(HID_MIN, min(HID_MAX, move))
-        # 回路：位移经延迟队列才生效 ⇒ 延迟内准星不动（滞后的物理来源）
-        queue.append(move * cfg.gain)
-        applied = queue.pop(0) if queue else 0.0
-        cross_pos += applied
-        errs.append(obs_err)
-        outs.append(move)
-
-        # 目标推进：直接用录制/合成的**目标绝对位置**（语义已在 Frame 里定死）
-        target_pos = fr.target_x
-
-        # 过冲：误差穿零后的最大反向距离
-        if not crossed and i > 3 and abs(obs_err) < 4.0:
-            crossed = True
-        if crossed and i > 3 and (obs_err < 0) != (errs[-2] < 0):
-            over = max(over, abs(obs_err))
-        s = 1 if move > 0 else (-1 if move < 0 else 0)
-        if s and sign_prev and s != sign_prev:
-            flips += 1
-        if s:
-            sign_prev = s
-        if abs(obs_err) > 15.0 and move == 0.0:
-            stuck += 1
-
-    # 收敛帧数：从头扫，找最后一个 |err| > 死区基准的帧，其后即"已收敛"
-    # （死区基准取控制器死区：Fitts 用 min(绝对, 框高×ratio) 的近似 3px，pid1 用 0.5px）
-    dz_base = cfg.deadzone_count * cfg.gain if cfg.kind == "pid1" else 3.0
-    settle_frames = 0
-    for k in range(len(errs)):
-        if abs(errs[k]) > max(dz_base, 2.0):
-            settle_frames = k + 1
-    # 末段漂移：线性回归斜率 ×1000（px/s）——识别"慢慢追不上"这种静态指标看不出来的问题
-    drift_px = 0.0
-    m = len(errs) // 4
-    if m > 4:
-        seg = errs[-m:]
-        xm = (m - 1) / 2.0
-        ym = sum(seg) / m
-        num = sum((i - xm) * (seg[i] - ym) for i in range(m))
-        den = sum((i - xm) ** 2 for i in range(m))
-        if den > 1e-9:
-            drift_px = (num / den) * 1000.0
-
-    # 误差二阶差分能量：|e[i] - 2e[i-1] + e[i-2]| 的均值
-    # （去掉目标自身运动的贡献后，剩下的就是控制器造成的抖动）
-    jerk = 0.0
-    if len(errs) > 8:
-        m = len(errs) // 2
-        seg = errs[-m:]
-        jerk = statistics.mean(abs(seg[i] - 2 * seg[i - 1] + seg[i - 2])
-                              for i in range(2, len(seg)))
-
-    n3 = max(30, len(errs) // 3)
-    tail = [abs(x) for x in errs[-n3:]]
-    tailo = outs[-n3:]
-    q = max(1, len(errs) // 4)
-    h1 = max((abs(x) for x in errs[-2 * q:-q]), default=0.0)
-    h2 = max((abs(x) for x in errs[-q:]), default=0.0)
-    return Result(
-        label=label or cfg.kind,
-        kind=cfg.kind,
-        settle_med=round(statistics.median(tail), 2) if tail else 0.0,
-        settle_p95=round(sorted(tail)[int(len(tail) * 0.95)], 2) if tail else 0.0,
-        overshoot_px=round(over, 2),
-        oscillate=bool(h2 > h1 * 1.05 and h2 > cfg.gain * 2.0),
-        sign_flips=flips,
-        move_frames=sum(1 for o in tailo if abs(o) >= 1.0),
-        max_step=round(max((abs(o) for o in tailo), default=0.0), 2),
-        stuck_frames=stuck,
-        settle_frames=settle_frames,
-        drift_px=round(drift_px, 1),
-        jerk=round(jerk, 3),
-        total=round(statistics.mean([abs(x) for x in errs[-200:]]), 2) if errs else 0.0,
-        errs=[round(x, 2) for x in errs],
-        outs=[round(x, 2) for x in outs],
-    )
-
-
-def sweep(tr: Trace, key: str, values: list[float], base: CtlCfg) -> list[dict]:
-    """单参数扫描：每个取值跑一次闭环，产出可直接画图/画表的行。"""
-    rows = []
-    for v in values:
-        cfg = CtlCfg(**{**asdict(base)})
-        setattr(cfg, key, v)
-        r = replay(tr, cfg, label=f"{key}={v:g}")
-        row = r.brief()
-        row["value"] = v
-        rows.append(row)
-    return rows
-
-
-# ────────────────────────────── 报告 ──────────────────────────────
-
-def build_report(traces: list[Trace]) -> dict:
-    """跑「合成三档速度 + A/B + 参数扫描」，产出 HTML 用的数据。"""
-    scenes = []
-    for name, spd in (("静止", 0.0), ("慢跑 50", 50.0), ("快跑 150", 150.0)):
-        tr = make_synthetic(name, spd)
-        pid1 = replay(tr, CtlCfg(kind="pid1"), "pid1")
-        fitts = replay(tr, CtlCfg(kind="fitts"), "fitts")
-        scenes.append({
-            "name": name,
-            "stats": tr.stats(),
-            "results": [pid1.brief(), fitts.brief()],
-            "series": {
-                "errs": {"pid1": pid1.errs[:600], "fitts": fitts.errs[:600]},
-            },
-        })
-    # 参数扫描（用快跑场景）
-    tr = make_synthetic("快跑 150", 150.0)
-    scans = {
-        "fitts_ff_gain": sweep(tr, "fitts_ff_gain", [0.0, 0.3, 0.6, 0.85], CtlCfg()),
-        "fitts_deadzone_px": sweep(tr, "fitts_deadzone_px", [1.0, 2.0, 3.0, 5.0], CtlCfg()),
-        "fitts_a_ms": sweep(tr, "fitts_a_ms", [8.0, 12.0, 20.0, 30.0], CtlCfg()),
-        "fitts_b_ms": sweep(tr, "fitts_b_ms", [10.0, 20.0, 30.0, 40.0], CtlCfg()),
-    }
+def trace_summary(tr: "Trace") -> dict:
+    """场景描述性统计（帧数/有目标帧/目标位移量级）—— 不含控制质量指标。"""
+    if not tr.frames:
+        return {"frames": 0}
+    xs = [f.target_x for f in tr.frames]
+    hs = [f.box_h for f in tr.frames if f.box_h > 0]
     return {
-        "generated_by": "trace_replay.py",
-        "physics": {
-            "gain_px_per_count": GAIN_X_PX_PER_COUNT,
-            "response_delay_ms": RESPONSE_DELAY_MS,
-            "frame_ms": round(FRAME_MS_144FPS, 3),
-        },
-        "scenes": scenes,
-        "scans": scans,
+        "frames": len(tr.frames),
+        "target_frames": sum(1 for f in tr.frames if f.has_target),
+        "target_travel_px": round(max(xs) - min(xs), 1) if xs else 0.0,
+        "box_h_min": round(min(hs), 1) if hs else 0.0,
+        "box_h_max": round(max(hs), 1) if hs else 0.0,
     }
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser(description="真实轨迹闭环回放")
-    ap.add_argument("--trace", help="板端 DetTrace CSV（不给则用合成轨迹）")
-    ap.add_argument("--out", default="", help="导出 JSON 报告路径")
-    ap.add_argument("--ab", action="store_true", help="控制器 A/B")
-    ap.add_argument("--sweep", action="store_true", help="参数扫描")
-    ap.add_argument("--html", default="", help="导出 HTML 报告路径")
-    args = ap.parse_args()
-
-    traces = []
-    if args.trace:
-        tr = load_trace_csv(args.trace)
-        print(f"读入真实轨迹: {tr.name}  帧数={len(tr.frames)}")
-        print(f"  统计: {tr.stats()}")
-        traces.append(tr)
-    else:
-        for name, spd in (("静止", 0.0), ("慢跑 50", 50.0), ("快跑 150", 150.0)):
-            traces.append(make_synthetic(name, spd))
-
-    for tr in traces:
-        print(f"\n=== {tr.name} ===")
-        p1 = replay(tr, CtlCfg(kind="pid1"), "pid1")
-        fi = replay(tr, CtlCfg(kind="fitts"), "fitts")
-        for r in (p1, fi):
-            d = r.brief()
-            print(f"  {d['label']:<6} 稳态{d['settle_med']:>7.2f}px "
-                  f"P95{d['settle_p95']:>7.2f} 过冲{d['overshoot_px']:>6.2f} "
-                  f"翻转{d['sign_flips']:>4d} 卡死{d['stuck_frames']:>4d} "
-                  f"{'振荡!' if d['oscillate'] else '稳'}")
-        if p1.settle_med > 0:
-            print(f"  ⇒ fitts 稳态误差 {p1.settle_med:.2f} → {fi.settle_med:.2f} px "
-                  f"（{(p1.settle_med - fi.settle_med) / p1.settle_med * 100:+.0f}%）")
-
-    if args.sweep:
-        tr = traces[-1]
-        print(f"\n=== 参数扫描（场景 {tr.name}）===")
-        for key, vals in (("fitts_ff_gain", [0.0, 0.3, 0.6, 0.85]),
-                          ("fitts_deadzone_px", [1.0, 2.0, 3.0, 5.0])):
-            print(f"  {key}:")
-            for row in sweep(tr, key, vals, CtlCfg()):
-                print(f"    {row['value']:>6g}  稳态{row['settle_med']:>7.2f} "
-                      f"翻转{row['sign_flips']:>4d} 卡死{row['stuck_frames']:>4d}")
-
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump({"physics": {"gain": GAIN_X_PX_PER_COUNT, "delay": RESPONSE_DELAY_MS},
-                       "scenes": [{"name": t.name, "stats": t.stats(),
-                                   "results": [replay(t, CtlCfg(kind="pid1"), "pid1").brief(),
-                                               replay(t, CtlCfg(kind="fitts"), "fitts").brief()]}
-                                  for t in traces]}, f, ensure_ascii=False, indent=1)
-        print(f"\nJSON 报告: {args.out}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

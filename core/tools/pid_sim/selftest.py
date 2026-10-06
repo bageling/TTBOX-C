@@ -1,3 +1,6 @@
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 """selftest.py — 自瞄控制器**自动测试系统**（V1.0.46）
 
 这是「改完控制器不用上板就能知道好没好」的那一层：跑一批场景 × 一批指标 ×
@@ -123,7 +126,9 @@ SCENES = [
 #   2D 平面仿真结构上测不到「框随深度暴涨暴跌」，而那正是「追着怪/停不住」
 #   的一大来源。scene3d.py 用透视投影生成：框高 ∝ 1/Z，冲向时实测放大 6.2×。
 USE_3D = True
-SCENES_3D = ["3D横移", "3D冲向", "3D远离", "3D折返", "3D混合"]
+# 3D 场景：(显示名, C++ --scene 关键字)。★ 生成在 C++（透视投影属物理，不该 Python 重写）
+SCENES_3D_CPP = [("3D横移", "strafe"), ("3D冲向", "approach"),
+                 ("3D远离", "retreat"), ("3D折返", "zigzag"), ("3D混合", "mixed")]
 
 RANK = {PASS: 0, WARN: 1, FAIL: 2}
 
@@ -138,7 +143,7 @@ def _j(v):
     return (f"{v:.2f}" if isinstance(v, float) else str(v))
 
 
-def judge(r: T.Result, moving: bool = False) -> tuple[str, list[tuple[str, str, str]]]:
+def judge(r, moving: bool = False) -> tuple[str, list[tuple[str, str, str]]]:
     """单条结果判定：返回 (总判, [(指标, 实测, 等级)])。
 
     ★ moving=True（目标持续移动）时**跳过「收敛」判据**：移动目标本来就永远
@@ -174,22 +179,29 @@ def judge(r: T.Result, moving: bool = False) -> tuple[str, list[tuple[str, str, 
     return worst, rows
 
 
-def _as_result(d: dict, kind: str) -> "T.Result":
-    """把 C++ 回放器的 JSON 指标包成 T.Result（复用 judge 的读取接口）。"""
-    return T.Result(
-        label=kind, kind=kind,
-        settle_med=float(d.get("settle_med", 0.0)),
-        settle_p95=float(d.get("settle_p95", 0.0)),
-        overshoot_px=float(d.get("overshoot_px", 0.0)),
-        sign_flips=int(d.get("sign_flips", 0)),
-        move_frames=int(d.get("move_frames", 0)),
-        max_step=float(d.get("max_step", 0.0)),
-        stuck_frames=int(d.get("stuck_frames", 0)),
-        settle_frames=int(d.get("settle_frames", 0)),
-        drift_px=float(d.get("drift_px", 0.0)),
-        jerk=float(d.get("jerk", 0.0)),
-        total=0.0,
-    )
+class _Metrics:
+    """C++ 回放器返回的指标容器（字段与 C++ replay_main.cpp 的 JSON 输出一一对应）。
+    刻意**不**复用 Python 侧的控制器：控制逻辑只有 C++ 一份。"""
+
+    def __init__(self, kind: str, d: dict):
+        self.label = kind
+        self.kind = kind
+        self.settle_med = float(d.get("settle_med", 0.0))
+        self.settle_p95 = float(d.get("settle_p95", 0.0))
+        self.overshoot_px = float(d.get("overshoot_px", 0.0))
+        self.sign_flips = int(d.get("sign_flips", 0))
+        self.move_frames = int(d.get("move_frames", 0))
+        self.max_step = float(d.get("max_step", 0.0))
+        self.stuck_frames = int(d.get("stuck_frames", 0))
+        self.settle_frames = int(d.get("settle_frames", 0))
+        self.drift_px = float(d.get("drift_px", 0.0))
+        self.jerk = float(d.get("jerk", 0.0))
+        self.total = 0.0
+
+
+def _as_result(d: dict, kind: str) -> "_Metrics":
+    """把 C++ 回放器的 JSON 指标包成 _Metrics（供 judge 读取）。"""
+    return _Metrics(kind, d)
 
 
 def run_all(traces: dict[str, T.Trace]) -> tuple[dict, list]:
@@ -209,16 +221,26 @@ def run_all(traces: dict[str, T.Trace]) -> tuple[dict, list]:
     tmpdir = tempfile.mkdtemp(prefix="ttbox_replay_")
     try:
         for name, tr in traces.items():
-            csv_path = os.path.join(tmpdir, f"{abs(hash(name))}.csv")
-            T.write_det_trace_csv(csv_path, tr)
+            is_cpp_scene = (isinstance(tr, tuple) and len(tr) == 2 and tr[0] == "__cpp_scene__")
+            if is_cpp_scene:
+                csv_path = ""            # 让 C++ 自己用 --scene 生成
+                scene_kw = tr[1]
+            else:
+                csv_path = os.path.join(tmpdir, f"{abs(hash(name))}.csv")
+                T.write_det_trace_csv(csv_path, tr)
+                scene_kw = ""
             for kind in (DEFAULT_KIND, ALT_KIND):
-                raw = replay_cpp(csv_path, kind)
+                extra = (["--scene", scene_kw] if is_cpp_scene else [])
+                raw = replay_cpp(csv_path, kind, extra)
                 if not raw:
                     print(f"★ C++ 回放失败: {name}/{kind}")
                     continue
                 r = _as_result(raw, kind)
                 verdict, rows = judge(r, moving=(name != "静止"))
-                data["scenes"][f"{name}/{kind}"] = r.brief()
+                data["scenes"][f"{name}/{kind}"] = {
+                    k: getattr(r, k, 0) for k in (
+                        "settle_med", "settle_p95", "overshoot_px", "sign_flips",
+                        "stuck_frames", "settle_frames", "drift_px", "max_step")}
                 detail.append((name, kind, verdict, r, rows))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -267,17 +289,20 @@ def check_robustness(tr: T.Trace) -> tuple[str, list[str]]:
         return WARN, ["无 C++ 回放器，跳过鲁棒性检查"]
     tmpdir = tempfile.mkdtemp(prefix="ttbox_rb_")
     try:
-        csv_path = os.path.join(tmpdir, "rb.csv")
-        T.write_det_trace_csv(csv_path, tr)
+        is_cpp_scene = (isinstance(tr, tuple) and len(tr) == 2 and tr[0] == "__cpp_scene__")
+        csv_path = "" if is_cpp_scene else os.path.join(tmpdir, "rb.csv")
+        if not is_cpp_scene:
+            T.write_det_trace_csv(csv_path, tr)
         for key, base in (("fitts_a_ms", 20.0), ("fitts_b_ms", 20.0),
                           ("fitts_deadzone_px", 3.0), ("fitts_ff_gain", 0.85)):
             for mul in (0.8, 1.2):
                 val = base * mul
+                extra = (["--scene", tr[1]] if is_cpp_scene else [])
                 raw = replay_cpp(csv_path, "fitts",
-                                 [_ROBUST_ARGS[key], f"{val:g}"])
+                                 extra + [_ROBUST_ARGS[key], f"{val:g}"])
                 if not raw:
                     continue
-                v, _ = judge(_as_result(raw, "fitts"), moving=(tr.name != "静止"))
+                v, _ = judge(_as_result(raw, "fitts"), moving=True)
                 tag = f"{key}={val:.3g}"
                 if v == FAIL:
                     notes.append(f"{tag}: {v}（单点扰动即崩 ⇒ 参数过拟合）")
@@ -305,11 +330,13 @@ def main() -> int:
         t = T.load_trace_csv(args.trace)
         traces = {t.name: t}
     else:
+        # 2D 平面场景（粗筛基础跟随）
         traces = {name: T.make_synthetic(name, spd, frames=n) for name, spd, n in SCENES}
+        # ★ 3D 场景由 **C++ 回放器的 --scene** 生成（透视投影是物理，不该用 Python 重写）。
+        #   Python 这里只登记"场景名 → C++ 场景关键字"，轨迹生成/控制全在 C++。
         if USE_3D and not args.no_3d:
-            import scene3d as S3
-            for nm, mode in S3.scene3d_catalog():
-                traces[nm] = S3.gen_scene3d(nm, mode, seconds=8.0)
+            for nm, mode in SCENES_3D_CPP:
+                traces[nm] = ("__cpp_scene__", mode)   # 标记：这条走 C++ --scene
 
     cur, detail = run_all(traces)
 

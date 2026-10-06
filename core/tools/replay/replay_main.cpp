@@ -63,6 +63,8 @@ struct Cfg {
     int frames = 1200;
     std::string trace;
     std::string out;
+    std::string scene = "2d";    // 2d | strafe | approach | retreat | zigzag | mixed
+    double seconds = 8.0;
 };
 
 // ── CSV 解析 ──
@@ -115,6 +117,78 @@ std::vector<Frame> load_trace(const std::string& path, const Cfg& cfg) {
         fr.has_target = 1;
         (void)i_ty; (void)i_mv;
         cross += cfg.gain * at(i_mv);
+        out.push_back(fr);
+    }
+    return out;
+}
+
+
+// ── 3D 场景生成（V1.0.46，业主指出三角洲是 3D）──
+// ★ 为什么必须在 C++：之前 scene3d.py 用 Python 算透视投影，那是「重写物理」。
+//   目标带深度 Z 时：屏幕 sx = f·X/Z、**框高 ∝ 1/Z**、落点 = y1 + 0.15h 跟着缩放。
+//   「冲向玩家」（Z 50m→5m）⇒ 框高放大 10 倍 ⇒ 落点外扩 10 倍距离。
+//   这是与「平面横移」完全不同的动力学，实战「追着怪/停不住」的一大来源。
+//   之前的仿真框高写死 160px ⇒ 结构上测不到，却报了 PASS。
+constexpr double kFrameMs = 1000.0 / 144.0;
+
+struct Proj {
+    double capture_h = 640.0;
+    double fov_v_deg = 60.0;
+    double body_h_m = 1.75;
+    double w_h_ratio = 0.32;      // 人体框宽高比（板端实测 0.32~0.52 漂，取保守值）
+    double f() const { return (capture_h * 0.5) / std::tan(fov_v_deg * 3.14159265358979323846 / 180.0 * 0.5); }
+    // 返回 (屏幕中心x, 落点y, 框高px)；wy 向上为正 ⇒ 屏幕 y 取负
+    void project(double wx, double wy, double wz,
+                 double* sx, double* aim_y, double* h_px) const {
+        const double z = wz < 0.5 ? 0.5 : wz;
+        const double fpx = f();
+        *sx = fpx * wx / z;
+        *h_px = fpx * body_h_m / z;
+        *aim_y = (-fpx * wy / z - *h_px * 0.5) + 0.15 * *h_px;   // 板端 ty = y1 + 0.15h
+    }
+};
+
+struct Lcg {
+    unsigned st;
+    explicit Lcg(unsigned seed) : st(seed) {}
+    double uni() { st = st * 1103515245u + 12345u; return (static_cast<double>(st >> 8) / 8388608.0) * 2.0 - 1.0; }
+};
+
+std::vector<Frame> gen_scene3d(const std::string& mode, double seconds,
+                               unsigned seed, double noise_px) {
+    const double dt = kFrameMs / 1000.0;
+    const int n = static_cast<int>(seconds * 1000.0 / kFrameMs);
+    Proj p;
+    Lcg rnd(seed);
+    std::vector<Frame> out;
+    out.reserve(static_cast<size_t>(n));
+    double wx = rnd.uni() * 1.2, wy = 0.0, wz = 25.0;
+    for (int i = 0; i < n; ++i) {
+        double vx = 0.0, vz = 0.0, vy = rnd.uni() * 0.4;
+        if (mode == "strafe") {
+            vx = 5.0 * std::sin(i * 0.012);
+        } else if (mode == "approach") {
+            vx = rnd.uni() * 0.8;  vz = -4.5;              // 冲向玩家 ⇒ 框暴涨
+        } else if (mode == "retreat") {
+            vx = rnd.uni() * 0.8;  vz = +4.0;              // 远离玩家 ⇒ 框缩小
+        } else if (mode == "zigzag") {
+            vx = ((i / 45) % 2 == 0) ? 6.0 : -6.0;        // 每 45 帧折返
+            vz = rnd.uni() * 1.0;
+        } else {                                          // mixed
+            vx = 4.5 * std::sin(i * 0.009) + rnd.uni() * 1.2;
+            vz = rnd.uni() * 3.0;
+        }
+        wx += vx * dt;  wy += vy * dt;  wz += vz * dt;
+        if (wz < 4.0) wz = 4.0;
+        if (wz > 60.0) wz = 60.0;
+        double sx = 0.0, aim_y = 0.0, h = 0.0;
+        p.project(wx, wy, wz, &sx, &aim_y, &h);
+        Frame fr;
+        fr.t_ms = i * kFrameMs;
+        fr.box_w = h * p.w_h_ratio;
+        fr.box_h = h;
+        fr.target_x = sx + rnd.uni() * noise_px;
+        fr.has_target = (std::fabs(sx) < p.capture_h * 0.5 - fr.box_w * 0.5) ? 1 : 0;
         out.push_back(fr);
     }
     return out;
@@ -276,9 +350,18 @@ int main(int argc, char** argv) {
         else if (a == "--gain") cfg.gain = nxt();
         else if (a == "--delay-ms") cfg.delay_ms = nxt();
         else if (a == "--frame-ms") cfg.frame_ms = nxt();
+        else if (a == "--scene") cfg.scene = argv[++i];
+        else if (a == "--seconds") cfg.seconds = nxt();
     }
 
-    std::vector<Frame> tr = cfg.trace.empty() ? gen_synthetic(cfg) : load_trace(cfg.trace, cfg);
+    std::vector<Frame> tr;
+    if (!cfg.trace.empty()) {
+        tr = load_trace(cfg.trace, cfg);          // 真实录制（板端 DetTrace）
+    } else if (cfg.scene != "2d") {
+        tr = gen_scene3d(cfg.scene, cfg.seconds, 7u, 2.0);   // 3D 透视场景
+    } else {
+        tr = gen_synthetic(cfg);                            // 2D 平面兜底
+    }
     if (tr.empty()) { std::fprintf(stderr, "没有轨迹可回放\n"); return 2; }
     const Metrics m = replay(tr, cfg);
 

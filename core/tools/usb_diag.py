@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 import socket, struct, os, sys, subprocess, json
 # 路径默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py，禁止在此散写 socket 字面量。
 # 根锚发现（P6）：向上找同时含 plugins/framework/scripts/deploy 的目录，
@@ -134,3 +137,8 @@ for line in r2.stdout.splitlines()[-60:]:
     ll = line.lower()
     if any(k in ll for k in ["usb","gadget","raw","dwc","hidg"]):
         print(f"  {line}")
+
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。

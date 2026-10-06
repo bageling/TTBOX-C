@@ -1,3 +1,6 @@
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 # 板端诊断：打印 GET_STATUS data 结构
 import json, socket, os, sys
 # IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
@@ -40,3 +43,8 @@ if isinstance(dd, dict):
     print('mouse:', {k: metrics.get(k) for k in ('mouse_control_connected', 'mouse_control_socket_write_ok', 'mouse_control_socket_write_fail', 'mouse_control_send_count', 'injection_allowed', 'gated_frames', 'mouse_control_send_count')})
 elif isinstance(dd, list):
     print('data is list len', len(dd), 'first:', str(dd[0])[:300] if dd else '')
+
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """板端调试：从 ttbox-web /api/state 拉取并打印核心指标子集。"""
+
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 import json
 import sys
 import urllib.request

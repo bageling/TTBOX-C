@@ -1,3 +1,6 @@
+# ★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+#   本脚本只做「调 C++ / 生成输入 / 判阈值 / 出报告」，不含任何控制逻辑。
+#   控制器与物理仿真全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
 # 板端诊断：打印 GET_STATUS 原始结构
 import json, socket, os, sys
 # IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
@@ -32,3 +35,8 @@ if isinstance(m, dict):
     print('metrics keys (%d):' % len(m), sorted(m.keys()))
 else:
     print('metrics type:', type(m), 'value:', str(m)[:300])
+
+
+★ 分工（业主 2026-10-06 定案「代码全部用 C++，只有脚本用 py」）：
+  本脚本是**板端运维/诊断**工具，只读不写、不含任何控制逻辑。
+  控制器与仿真逻辑全在 C++（core/src/aim/*.hpp、core/tools/replay/replay_main.cpp）。
