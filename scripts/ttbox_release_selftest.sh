@@ -98,7 +98,7 @@ PY
 make_payload() { # $1=dir $2=rpath [$3=real_core_main]
   local p="$1" rp="$2" real="${3:-}"
   rm -rf "$p"; mkdir -p "$p/bin" "$p/plugins/web/bin" "$p/plugins/preview/bin" \
-                        "$p/scripts/edid" "$p/deploy/systemd" "$p/lib"
+                        "$p/deploy/systemd" "$p/lib"
   printf 'int main(void){return 0;}\n' > "$p/_t.c"
   aarch64-linux-gnu-gcc -o "$p/bin/ttbox_core_main" "$p/_t.c" "$rp" 2>/dev/null
   rm -f "$p/_t.c"
@@ -109,7 +109,6 @@ make_payload() { # $1=dir $2=rpath [$3=real_core_main]
   # ★ E3：可选以**真实交叉产物**替换合成 core_main（对真货跑 verify，而非合成夹具）。
   if [ -n "$real" ]; then cp -f "$real" "$p/bin/ttbox_core_main"; chmod +x "$p/bin/ttbox_core_main"; fi
   printf '#!/bin/sh\nexit 0\n' > "$p/plugins/web/bin/ttbox-web";           chmod +x "$p/plugins/web/bin/ttbox-web"
-  printf '#!/bin/sh\nexit 0\n' > "$p/scripts/edid/edid_apply.sh";          chmod +x "$p/scripts/edid/edid_apply.sh"
   local u
   for u in ttbox-core ttbox-web; do
     sed 's/\r$//' "$REPO/deploy/systemd/$u.service" > "$p/deploy/systemd/$u.service"
