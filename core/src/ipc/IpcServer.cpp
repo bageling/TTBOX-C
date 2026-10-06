@@ -746,6 +746,36 @@ if (type == "GET_CONFIG") {
         return resp;
     }
 
+    // ---- 硬件写入（V1.0.50）：APPLY_EDID / SET_USB_MODE ----
+    // 走 IPC 而非 web 直写的原因：core 跑 User=root，是唯一能写 sysfs / 改 systemd
+    // 单元的层；web（ttbox）无 sudo，硬做只会拿到「看起来实现了、上板就崩」的代码。
+    if (type == "HARDWARE_ACTION") {
+        if (!hardware_action_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "硬件写入处理器未注册";
+            return resp;
+        }
+        const JsonValue* params = request.find("params");
+        const JsonValue* act_v = params ? params->find("action") : nullptr;
+        const std::string act = act_v ? act_v->as_string() : "";
+        if (act != "apply_edid" && act != "set_usb_mode") {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.action must be apply_edid|set_usb_mode";
+            return resp;
+        }
+        const JsonValue empty = JsonValue::object();
+        JsonValue data = JsonValue::object();
+        std::string handler_error;
+        if (!hardware_action_(act, params ? *params : empty, &data, &handler_error)) {
+            resp.status = IpcError::kInternal;
+            resp.error = handler_error.empty() ? ("hardware " + act + " failed") : handler_error;
+            return resp;
+        }
+        resp.status = IpcError::kOk;
+        resp.data = std::move(data);
+        return resp;
+    }
+
     // ---- 模型管理（v0.3）：LIST / IMPORT / VALIDATE / INSTALL / ACTIVATE / REMOVE ----
     // 通用参数校验辅助：取 params.<field> 字符串
     auto param_str = [&request](const char* field, std::string* out) -> bool {

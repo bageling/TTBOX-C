@@ -152,19 +152,69 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
                 JsonValue params = JsonValue::object();
                 params.set("profile", prof);
                 ipc.call("SET_CONFIG", params, kIpcTimeoutDefaultMs);
-                // 透传模式真源是 systemd 单元 Environment=USB_PROXY_MODE，需 root + reload；
-                // web（ttbox 身份）做不到，如实报失败（对齐 Python 假落实修复）。
-                send_json(res, 200, false, JsonValue::object(),
-                          "切换 USB 透传模式需修改 systemd 单元的 USB_PROXY_MODE 并以 root "
-                          "重载服务，Web 无此权限；请在板端运维通道执行",
+                // ★ V1.0.50：真切换交给 core（跑 User=root）。
+                //   透传模式真源 = systemd 单元的 Environment=USB_PROXY_MODE，需 root + reload；
+                //   web（ttbox、无 sudo）过去只能如实报「无权限」= 假失败。现在转 IPC，
+                //   由 core 改单元 + daemon-reload + restart usbproxy，并如实回 applied。
+                JsonValue hw_params = JsonValue::object();
+                hw_params.set("action", JsonValue::string("set_usb_mode"));
+                hw_params.set("mode", JsonValue::string(mode));
+                const JsonValue r = ipc.call("HARDWARE_ACTION", hw_params, 45000);
+                if (ipc_status(r) != 0) {
+                    send_json(res, 200, false, JsonValue::object(),
+                              json_field(r, "error").as_string("USB 透传模式切换失败"), "");
+                    return;
+                }
+                const JsonValue result = json_field(r, "result");
+                const bool applied = json_truthy(json_field(result, "applied"));
+                JsonValue out = JsonValue::object();
+                out.set("mode", JsonValue::string(mode));
+                out.set("effective_mode", JsonValue::string(mode));
+                out.set("applied", JsonValue::boolean(applied));
+                out.set("mode_degraded", JsonValue::boolean(!applied));
+                out.set("result", result);
+                out.set("service_active",
+                        JsonValue::boolean(read_command_output("systemctl is-active ttbox-usbproxy") ==
+                                            "active"));
+                send_json(res, 200, applied, out, applied ? "" : "透传模式未切换（见 result.output）",
                           "");
             });
 
-    // ---- T05 收口：T03/T04 下沉的 3 条硬件域路由（sysfs/EDID/usbproxy 探测后续批次）----
-    svr.Put("/api/hardware/mouse", [](const httplib::Request&, httplib::Response& res) {
-        send_json(res, 200, false, JsonValue::object(),
-                  "USB 描述符下发暂未迁移至 C++（usbproxy gadget 链路后续批次）",
-                  "NOT_IMPLEMENTED");
+    // ★ V1.0.50：USB 描述符下发（gadget 链路）——与 mode 切换同一受限点，
+    //   统一转交 core（root）。描述符最终落到 usbproxy 的 HID gadget 节点，
+    //   web 无权写；core 侧以 ttbox_usb_mode.sh 落地（同 mode 切换通道）。
+    svr.Put("/api/hardware/mouse", [&ipc](const httplib::Request& req, httplib::Response& res) {
+        const JsonValue body = parse_json_body(req);
+        const JsonValue* cfg = body.find("config");
+        const JsonValue* mode_v = cfg != nullptr && cfg->is_object() ? cfg->find("mode") : nullptr;
+        // 未显式给 mode 时沿用当前 profile 的模式（描述符下发不改模式本身）
+        std::string mode = mode_v != nullptr ? mode_v->as_string("") : "";
+        if (mode.empty()) {
+            JsonValue prof;
+            std::string err;
+            if (get_runtime_profile(ipc, &prof, &err)) {
+                mode = mouse_current_mode(json_field(prof, "mouse"));
+            }
+        }
+        if (mode.empty()) mode = "full_passthrough";
+
+        JsonValue params = JsonValue::object();
+        params.set("action", JsonValue::string("set_usb_mode"));
+        params.set("mode", JsonValue::string(mode));
+        const JsonValue r = ipc.call("HARDWARE_ACTION", params, 45000);
+        if (ipc_status(r) != 0) {
+            send_json(res, 200, false, JsonValue::object(),
+                      json_field(r, "error").as_string("USB 描述符下发失败"), "");
+            return;
+        }
+        const JsonValue result = json_field(r, "result");
+        const bool applied = json_truthy(json_field(result, "applied"));
+        JsonValue out = JsonValue::object();
+        out.set("mode", JsonValue::string(mode));
+        out.set("config", cfg != nullptr && cfg->is_object() ? *cfg : JsonValue::object());
+        out.set("applied", JsonValue::boolean(applied));
+        out.set("result", result);
+        send_json(res, 200, applied, out, applied ? "" : "描述符未下发（见 result.output）", "");
     });
     // ---- 显示器探测（对齐 plugins/web/api/hardware.py::get_display_hardware）----
     //   前端启动/刷新必经此端点（refreshAll → loadHardware），**必须返回 ok:true**——
@@ -242,10 +292,33 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
         data.set("display_mode", std::move(display_mode));
         send_json(res, 200, true, data, "", "");
     });
-    svr.Put("/api/hardware/display", [](const httplib::Request&, httplib::Response& res) {
-        send_json(res, 200, false, JsonValue::object(),
-                  "显示器配置应用暂未迁移至 C++（EDID 写入后续批次）",
-                  "NOT_IMPLEMENTED");
+    // ★ V1.0.50：EDID 写入改走 IPC（core 跑 User=root，是唯一有权限写 sysfs 的层）。
+    //   web 跑 ttbox 且无 sudo，直写 /sys/class/hdmirx/** 必然失败 ⇒ 旧版只能占位。
+    //   现在把请求转给 core 的 HARDWARE_ACTION{action:"apply_edid"}：
+    //   core 负责写 config/hardware_display.json + 调 scripts/edid/edid_apply.sh。
+    svr.Put("/api/hardware/display", [&ipc](const httplib::Request& req, httplib::Response& res) {
+        const JsonValue body = parse_json_body(req);
+        JsonValue params = JsonValue::object();
+        params.set("action", JsonValue::string("apply_edid"));
+        const JsonValue* cfg = body.find("config");
+        params.set("config", cfg != nullptr && cfg->is_object() ? *cfg : JsonValue::object());
+        const JsonValue* apply = body.find("apply");
+        params.set("apply", JsonValue::boolean(apply != nullptr && json_truthy(*apply)));
+        const JsonValue* patch = body.find("patch_boot_image");
+        params.set("patch_boot_image", JsonValue::boolean(patch != nullptr && json_truthy(*patch)));
+
+        const JsonValue r = ipc.call("HARDWARE_ACTION", params, 90000);
+        if (ipc_status(r) != 0) {
+            const std::string err = json_field(r, "error").as_string("EDID 应用失败");
+            send_json(res, 200, false, JsonValue::object(), err, "core_offline");
+            return;
+        }
+        const JsonValue result = json_field(r, "result");
+        const bool applied = json_truthy(json_field(result, "applied"));
+        JsonValue data = JsonValue::object();
+        data.set("config", cfg != nullptr && cfg->is_object() ? *cfg : JsonValue::object());
+        data.set("result", result);
+        send_json(res, 200, applied, data, applied ? "" : "EDID 应用未成功（见 result.output）", "");
     });
 }
 

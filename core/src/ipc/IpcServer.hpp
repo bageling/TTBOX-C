@@ -74,6 +74,19 @@ public:
     using RuntimeControlHandler = std::function<bool(const std::string& action, std::string* error)>;
     void set_runtime_control_handler(RuntimeControlHandler h) { runtime_control_ = std::move(h); }
 
+    // ---- 硬件写入回调（V1.0.50；core 跑 User=root，是唯一有权写 sysfs 的层）----
+    // Web 后端（ttbox 身份，无 sudo）做不到这两件事：EDID 注入要写
+    // /sys/class/hdmirx/** 与 /sys/kernel/debug/hdmirx/，USB 透传切换要改 systemd
+    // 单元的 USB_PROXY_MODE 并重载服务。web 只能把请求转给 core。
+    // 语义：params 传 JSON，handler 返回执行结果（data 供回显，error 供报错文案）。
+    //   APPLY_EDID  —— 应用 EDID（写 config + 调 scripts/edid/edid_apply.sh）
+    //   SET_USB_MODE —— 切换 USB 透传模式（改单元 + daemon-reload + restart usbproxy）
+    using HardwareActionHandler = std::function<bool(const std::string& action,
+                                                     const JsonValue& params,
+                                                     JsonValue* data,
+                                                     std::string* error)>;
+    void set_hardware_action_handler(HardwareActionHandler h) { hardware_action_ = std::move(h); }
+
     // ---- 模型管理回调（v0.3）：桥接 ModelRegistry，由 Application 注入 ----
     // 注意：文件上传不走 IPC（IPC 帧不适合大二进制）。上传 = 调用方先把 .rknn
     // 写入 Core 可访问的 staging 收件目录（默认 models/_incoming/<文件名>），
@@ -150,6 +163,7 @@ private:
     ConfigProvider config_provider_;
     ConfigUpdateHandler config_update_;
     RuntimeControlHandler runtime_control_;
+    HardwareActionHandler hardware_action_;  // V1.0.50：APPLY_EDID / SET_USB_MODE
     ModelListHandler model_list_;
     ModelImportHandler model_import_;
     ModelActionHandler model_validate_;

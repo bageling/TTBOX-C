@@ -74,6 +74,10 @@ private:
     bool handle_config_update(const JsonValue& profile_json, std::string* error, bool* persisted);
     // RUNTIME_CONTROL 启停（复用 CoreRuntime start/stop，不改状态机）
     bool handle_runtime_control(const std::string& action, std::string* error);
+    // V1.0.50 硬件写入：APPLY_EDID（写 config + 调 edid_apply.sh）/ SET_USB_MODE
+    //（改 systemd 单元 USB_PROXY_MODE + 重载）。core 跑 User=root，是唯一有权限的层。
+    bool handle_hardware_action(const std::string& action, const JsonValue& params,
+                                JsonValue* data, std::string* error);
     // R5 用户启停意愿持久化：把显式 start/stop 落盘，供 core 重启后还原（OTA 更新会
     // systemctl restart ttbox-core，不还原就会出现"没点启动却自己跑起来"）。
     // 无记录时不动默认值（保持历史语义 want=true）。

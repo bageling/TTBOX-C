@@ -559,6 +559,12 @@ int Application::initialize(int argc, char** argv) {
         [this](const std::string& action, std::string* error) {
             return handle_runtime_control(action, error);
         });
+    // V1.0.50：硬件写入（EDID 注入 / USB 透传切换）——core 是 root，web 无 sudo。
+    ipc_.set_hardware_action_handler(
+        [this](const std::string& action, const JsonValue& params, JsonValue* data,
+               std::string* error) {
+            return handle_hardware_action(action, params, data, error);
+        });
     // M2.02：离线卡激活（Web → IPC → daemon 原子序 → Gate publish）。
     ipc_.set_license_activate_handler(
         [this](const std::string& card, JsonValue* data, std::string* error) {

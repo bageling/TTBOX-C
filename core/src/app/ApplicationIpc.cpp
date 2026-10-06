@@ -18,6 +18,13 @@
 #include "model/ModelManagement.hpp"
 #include "model/ModelRegistry.hpp"
 
+// V1.0.50 硬件写入处理器所需（fork/exec 脚本 + 原子写配置）
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
 using ttbox::core::app_internal::incoming_dir_of;
 
 namespace ttbox::core {
@@ -576,6 +583,160 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
         return true;
     }
     if (error) *error = "未知 action: " + action;
+    return false;
+}
+
+// ============ 硬件写入（V1.0.50）============
+// 为什么在 core 侧做：edid_apply.sh 要写 /sys/class/hdmirx/**、
+// /sys/kernel/debug/hdmirx/ 与固件目录；ttbox_usb_mode.sh 要改 systemd 单元并
+// daemon-reload。core 跑 User=root，是唯一有权限的层；web（ttbox，无 sudo）
+// 直写 sysfs 只会得到「看起来实现了、上板就崩」的代码。
+namespace {
+
+// 运行根前缀（对齐 Python ttbox_paths / web 侧 ttbox_prefix()）。
+std::string hw_root() {
+    const char* v = std::getenv("TTBOX_PREFIX");
+    return (v != nullptr && *v != '\0') ? std::string(v) : std::string("/opt/ttbox");
+}
+
+// 跑一个脚本，捕获合并输出（stdout+stderr），返回 exit code。
+// 不用 std::system：它走 /bin/sh 且不回传 stdout，错误文案无法回传给 web。
+int run_script(const std::string& cmd, std::string* output, int timeout_sec) {
+    std::string wrapped = "{ " + cmd + " ; } 2>&1";
+    FILE* p = ::popen(("timeout " + std::to_string(timeout_sec) + " " + wrapped).c_str(), "r");
+    if (p == nullptr) {
+        if (output) *output = "popen 失败";
+        return -1;
+    }
+    std::string out;
+    char buf[512];
+    while (std::fgets(buf, sizeof(buf), p) != nullptr) out += buf;
+    const int rc = ::pclose(p);
+    if (output) *output = out;
+    // pclose 返回的是 wait 状态；取退出码（-1 表示异常终止）
+    return (rc == -1) ? -1 : (rc >> 8);
+}
+
+// 原子写：先写 .tmp 再 rename（对齐 ApplicationRuntime.cpp 的 tmp+rename 范式）。
+// 配置文件是 EDID 注入的真源，半写状态会让下次开机注入坏 EDID。
+bool write_json_atomic(const std::string& path, const JsonValue& value) {
+    const std::string tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        out << value.dump();
+        out.flush();
+        if (!out) return false;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::error_code rm_ec;
+        std::filesystem::remove(tmp, rm_ec);
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+// APPLY_EDID：应用 EDID（对齐 Python api/hardware.py::update_display_hardware 的 apply 分支）。
+//   1) 写 config/hardware_display.json（合并白名单键，core 有权限）
+//   2) 调 scripts/edid/edid_apply.sh（TTBOX_EDID_REHANDSHAKE=1）
+bool Application::handle_hardware_action(const std::string& action, const JsonValue& params,
+                                         JsonValue* data, std::string* error) {
+    if (action == "apply_edid") {
+        const std::string root = hw_root();
+        const std::string cfg_path = root + "/config/hardware_display.json";
+        const std::string script = root + "/scripts/edid/edid_apply.sh";
+
+        // 1) 合并白名单键写配置（防注入：只接受这几个键）
+        JsonValue cur = JsonValue::object();
+        const JsonParseResult old_cfg = json_parse_file(cfg_path);
+        if (old_cfg.ok && old_cfg.value.is_object()) cur = old_cfg.value;
+
+        const JsonValue* cfg_in = params.find("config");
+        if (cfg_in != nullptr && cfg_in->is_object()) {
+            static const char* kAllowed[] = {
+                "device", "name", "vendor", "product_id", "serial", "native_mode",
+                "native_only", "profile", "loopout_enabled", "loopout_overlay_enabled",
+                "loopout_pixel_format", "loopout_overlay_thickness", "loopout_overlay_color"};
+            for (const char* k : kAllowed) {
+                const JsonValue* v = cfg_in->find(k);
+                if (v != nullptr) cur.set(k, *v);
+            }
+        }
+        // device 归一：auto/空 → /dev/video0；拒绝 DRM 输出节点（与 Python 同口径）
+        const std::string dev = cur.find("device") ? cur.find("device")->as_string("auto") : "auto";
+        if (dev.empty() || dev == "auto") {
+            cur.set("device", JsonValue::string("/dev/video0"));
+        } else if (dev.rfind("/dev/dri/", 0) == 0 || dev.find("card") != std::string::npos ||
+                   dev.find("renderD") != std::string::npos) {
+            if (error) {
+                *error = "HDMI-RX 输入必须使用 /dev/video0，/dev/dri/card0 仅用于 loopout";
+            }
+            return false;
+        }
+
+        if (!write_json_atomic(cfg_path, cur)) {
+            if (error) *error = "写配置失败：" + cfg_path;
+            return false;
+        }
+
+        // 2) 调 EDID 应用脚本（root 身份，HPD 重协商）
+        std::string out;
+        const int rc = run_script("TTBOX_EDID_REHANDSHAKE=1 bash " + script + " " +
+                                      cur.find("device")->as_string("/dev/video0"),
+                                  &out, 60);
+        JsonValue res = JsonValue::object();
+        res.set("exit", JsonValue::number(rc));
+        res.set("output", JsonValue::string(out.size() > 500 ? out.substr(out.size() - 500) : out));
+        res.set("applied", JsonValue::boolean(rc == 0));
+        if (data != nullptr) data->set("result", std::move(res));
+        if (rc != 0 && error != nullptr) {
+            *error = "EDID 应用失败（exit " + std::to_string(rc) + "）";
+            if (!out.empty()) *error += "：" + out.substr(out.size() > 200 ? out.size() - 200 : 0);
+        }
+        return rc == 0;
+    }
+
+    if (action == "set_usb_mode") {
+        const std::string mode = params.find("mode") ? params.find("mode")->as_string("") : "";
+        if (mode.empty()) {
+            if (error) *error = "缺少 params.mode";
+            return false;
+        }
+        // 透传模式真源 = systemd 单元的 USB_PROXY_MODE（Python 版同口径，见
+        // web/infra/mouse 的说明）。core 是 root ⇒ 可以改单元 + daemon-reload。
+        const std::string root = hw_root();
+        const std::string unit = root + "/deploy/systemd/ttbox-usbproxy.service";
+        const std::string script = root + "/scripts/ttbox_usb_mode.sh";
+
+        // 优先用官方脚本（它负责改单元 + reload + 重启 + 健康检查）
+        std::string out;
+        int rc = run_script("bash " + script + " " + mode, &out, 30);
+        if (rc != 0) {
+            // 脚本缺失/失败 ⇒ 退化为直接改单元（core 是 root，可写）
+            out += "\n[fallback] 直接改 systemd 单元";
+            rc = run_script(
+                "sed -i 's/^Environment=USB_PROXY_MODE=.*/Environment=USB_PROXY_MODE=" + mode +
+                    "/' " + unit + " && systemctl daemon-reload && systemctl restart ttbox-usbproxy",
+                &out, 30);
+        }
+        JsonValue res = JsonValue::object();
+        res.set("mode", JsonValue::string(mode));
+        res.set("exit", JsonValue::number(rc));
+        res.set("output", JsonValue::string(out.size() > 500 ? out.substr(out.size() - 500) : out));
+        res.set("applied", JsonValue::boolean(rc == 0));
+        if (data != nullptr) data->set("result", std::move(res));
+        if (rc != 0 && error != nullptr) {
+            *error = "USB 透传模式切换失败（exit " + std::to_string(rc) + "）";
+            if (!out.empty()) *error += "：" + out.substr(out.size() > 200 ? out.size() - 200 : 0);
+        }
+        return rc == 0;
+    }
+
+    if (error) *error = "未知 hardware action: " + action;
     return false;
 }
 
