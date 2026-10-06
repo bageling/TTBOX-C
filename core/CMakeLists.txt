@@ -661,7 +661,8 @@ list(APPEND CORE_SOURCES
   # 验签与摘要：复用 auth/ed25519（TweetNaCl 自包含，零外部依赖）+ 自实现 SHA-256。
   # ★ 不引 OpenSSL：出货向量强制 AUTH=OFF，且随包 ELF 的运行期依赖闭集已冻结。
   src/ota/OtaCrypto.cpp
-  src/ota/OtaExtract.cpp)
+  src/ota/OtaExtract.cpp
+  src/ota/OtaUpdater.cpp)
 
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
@@ -1003,6 +1004,18 @@ target_link_libraries(ttbox_edid PRIVATE ttbox_core)
 # 自包含 RUNPATH（形态 A = 仅 $ORIGIN/../lib 一段，与 ttbox_core_main / ttbox_web 同规格）。
 # $ORIGIN 必须转义 "\$ORIGIN"，否则生成器命令行会被 shell 把 $ORIGIN 展开为空 ⇒ 变成 /../lib。
 set_target_properties(ttbox_edid PROPERTIES
+  BUILD_RPATH   "\$ORIGIN/../lib"
+  INSTALL_RPATH "\$ORIGIN/../lib"
+  INSTALL_RPATH_USE_LINK_PATH FALSE)
+
+# ---- OTA 更新入口（V1.0.56：替代 scripts/ttbox_ota_updater.py）----
+# 无条件构建、零新增依赖：HTTPS 走系统 curl（板端有 7.81）、解包走系统 tar、
+# 验签走自包含 TweetNaCl（auth/ed25519）、SHA-256 自实现。
+# ★ 刻意**不**引 OpenSSL：仅为下载而给升级通道增加 libssl/libcrypto 依赖不划算
+#   （低频操作，且会动"随包 ELF 运行期依赖闭集"契约）。
+add_executable(ttbox_ota src/ota/main.cpp)
+target_link_libraries(ttbox_ota PRIVATE ttbox_core)
+set_target_properties(ttbox_ota PROPERTIES
   BUILD_RPATH   "\$ORIGIN/../lib"
   INSTALL_RPATH "\$ORIGIN/../lib"
   INSTALL_RPATH_USE_LINK_PATH FALSE)
