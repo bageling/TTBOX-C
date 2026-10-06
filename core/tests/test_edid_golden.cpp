@@ -334,7 +334,43 @@ TEST(edid_golden_helpers) {
     }
 }
 
-// ============ 9. PnP 编解码 ============
+// ============ 9. 面板模式列表（自 _probe_edid_modes 移植）============
+// 旧实现是"调 hdmirx_edid --list 再解析文本"，而那个命令打印的就是 TIMING_MAP
+// ⇒ 这里用「与时序表逐条一致」作为等价判据（无需另存黄金样本）。
+TEST(edid_panel_modes_json) {
+    const JsonValue all = ttbox::core::edid::advertised_modes_json();
+    EXPECT(all.is_array(), "advertised_modes_json 不是数组");
+    if (!all.is_array()) return;
+    const auto& arr = all.as_array();
+    EXPECT(arr.size() == ttbox::core::edid::timing_map().size(), "条数与时序表不一致");
+
+    size_t i = 0;
+    for (const JsonValue& e : arr) {
+        if (i >= ttbox::core::edid::timing_map().size()) break;
+        const auto& kv = ttbox::core::edid::timing_map()[i];
+        const ttbox::core::edid::DisplayTiming& t = kv.second;
+        EXPECT(jstr(e, "token") == kv.first, "第 " + std::to_string(i) + " 条 token 不一致");
+        char label[64];
+        std::snprintf(label, sizeof(label), "%dx%d@%d", t.width, t.height,
+                      static_cast<int>(t.refresh));
+        EXPECT(jstr(e, "label") == label,
+               "第 " + std::to_string(i) + " 条 label='" + jstr(e, "label") + "' 期望 '" + label +
+                   "'");
+        EXPECT(jint(e, "width", -1) == t.width && jint(e, "height", -1) == t.height,
+               "第 " + std::to_string(i) + " 条宽高不一致");
+        EXPECT(jint(e, "refresh", -1) == static_cast<int>(t.refresh),
+               "第 " + std::to_string(i) + " 条刷新率不一致");
+        EXPECT(jint(e, "pixel_clock_khz", -1) ==
+                   static_cast<int64_t>(ttbox::core::edid::py_round(t.pixel_clock * 1000.0)),
+               "第 " + std::to_string(i) + " 条像素时钟不一致");
+        i++;
+    }
+    // 面板用截断版：<=16 时内容必须与全量一致
+    const JsonValue cut = ttbox::core::edid::advertised_modes_json_truncated(16);
+    EXPECT(cut.is_array() && cut.as_array().size() == arr.size(), "截断 16 不应改变条数");
+}
+
+// ============ 10. PnP 编解码 ============
 TEST(edid_golden_pnp) {
     REQUIRE_GOLDEN(root);
     const JsonValue* h = root->find("F_helpers");

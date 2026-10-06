@@ -7,12 +7,15 @@
 #include <cctype>
 #include <cstdlib>
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "common/Json.hpp"
+#include "edid/EdidConfig.hpp"
 #include "httplib.h"
 #include "web/domain/domain_internal.hpp"
 #include "web/domain/domain_payloads.hpp"
@@ -279,6 +282,28 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
     //   表现为「连接失败/未连接」徽章 + 硬件区按钮未初始化（V1.0.48 板端实测故障）。
     //   真值来源：v4l2-ctl 当前时序 + config/hardware_display.json（EDID 身份下沉后续批次）。
     svr.Get("/api/hardware/display", [](const httplib::Request&, httplib::Response& res) {
+        // ★ V1.0.53：补 3 秒缓存（对齐旧 Python 版 hardware.py 的同名机制）。
+        //   为什么必须有：`v4l2-ctl --query-dv-timing` 在 HDMI 信号重协商**会阻塞**，
+        //   而面板是轮询的 ⇒ 每次都真跑一遍会持续占住 httplib 工作线程，
+        //   极端情况线程耗尽、整机面板卡死。旧 Python 版注释对此有原话警告。
+        //   httplib 多线程处理请求 ⇒ 静态量必须配互斥。
+        static std::mutex cache_mu;
+        static JsonValue cache_data;
+        static std::chrono::steady_clock::time_point cache_ts;
+        static bool cache_valid = false;
+        {
+            std::lock_guard<std::mutex> lk(cache_mu);
+            if (cache_valid) {
+                const auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now() - cache_ts)
+                                        .count();
+                if (age_ms < 3000) {
+                    send_json(res, 200, true, cache_data, "", "");
+                    return;
+                }
+            }
+        }
+
         // 1) HDMI 当前时序（v4l2-ctl，超时 2s 防信号重协商阻塞）
         const std::string timing =
             read_command_output("timeout 2 v4l2-ctl -d /dev/video0 --query-dv-timing");
@@ -326,8 +351,15 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
         JsonValue display_mode = JsonValue::object();
         display_mode.set("loopout_enabled", JsonValue::boolean(loopout_enabled));
         display_mode.set("real_monitor", std::move(real_monitor));
-        display_mode.set("advertised_modes", JsonValue::array());
-        display_mode.set("available_modes", JsonValue::array());
+        // ★ V1.0.53：原先这里是「先给诚实空值」的占位（V1.0.47 迁移时的 TODO）。
+        //   前端确实在读它（10-flow.js:4402/4450）⇒ 拿空数组会走到降级分支：
+        //     · 「Windows 可选模式」那行显示「未读取」（看着像没读到显示器，实为后端没给）
+        //     · 环出时下拉框退回前端内置的通用模式表（可能列出环出屏并不支持的模式）
+        //   旧 Python 版两字段**同源**（hardware.py::_probe_edid_modes，advertised 仅截断 16）
+        //   ⇒ 此处对齐：advertised 截断 16，available 不截断。
+        display_mode.set("advertised_modes",
+                         ttbox::core::edid::advertised_modes_json_truncated(16));
+        display_mode.set("available_modes", ttbox::core::edid::advertised_modes_json());
 
         JsonValue status = JsonValue::object();
         status.set("output", JsonValue::string(
@@ -347,6 +379,13 @@ void register_hardware_routes(httplib::Server& svr, IpcClient& ipc) {
         data.set("status", std::move(status));
         data.set("loopout", JsonValue::object());
         data.set("display_mode", std::move(display_mode));
+        // 写入缓存（须在 send 之前 —— send_json 之后 data 可能已被移动）
+        {
+            std::lock_guard<std::mutex> lk(cache_mu);
+            cache_data = data;
+            cache_ts = std::chrono::steady_clock::now();
+            cache_valid = true;
+        }
         send_json(res, 200, true, data, "", "");
     });
     // ★ V1.0.50：EDID 写入改走 IPC（core 跑 User=root，是唯一有权限写 sysfs 的层）。

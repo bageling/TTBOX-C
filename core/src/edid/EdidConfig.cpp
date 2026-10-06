@@ -196,6 +196,39 @@ const std::vector<std::string>& native_modes_set() {
 
 int max_advertised_modes() { return 6; }
 
+JsonValue advertised_modes_json() {
+    // 自旧 Python hardware.py::_probe_edid_modes 移植。那一版解析 `hdmirx_edid --list`
+    // 的文本，而该命令逐行打印的正是 TIMING_MAP（见 hdmirx_edid.py::cmd_list）
+    // ⇒ 这里直接由时序表生成，等价且免去外部进程与文本解析。
+    std::vector<JsonValue> out;
+    out.reserve(timing_map().size());
+    for (const auto& kv : timing_map()) {
+        const DisplayTiming& t = kv.second;
+        JsonValue e = JsonValue::object();
+        e.set("token", JsonValue::string(kv.first));
+        // label = "宽x高@刷新"（旧版从 --list 行里正则取 (\d+)x(\d+)@(\d+)）
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%dx%d@%d", t.width, t.height,
+                      static_cast<int>(t.refresh));
+        e.set("label", JsonValue::string(buf));
+        e.set("width", JsonValue::number(static_cast<double>(t.width)));
+        e.set("height", JsonValue::number(static_cast<double>(t.height)));
+        e.set("refresh", JsonValue::number(static_cast<double>(static_cast<int>(t.refresh))));
+        e.set("pixel_clock_khz",
+              JsonValue::number(static_cast<double>(py_round(t.pixel_clock * 1000.0))));
+        out.push_back(std::move(e));
+    }
+    return JsonValue::array(std::move(out));
+}
+
+JsonValue advertised_modes_json_truncated(size_t limit) {
+    JsonValue all = advertised_modes_json();
+    const std::vector<JsonValue>& arr = all.as_array();
+    if (arr.size() <= limit) return all;
+    std::vector<JsonValue> cut(arr.begin(), arr.begin() + static_cast<long>(limit));
+    return JsonValue::array(std::move(cut));
+}
+
 // ---------------- E 段：native_mode 保护 ----------------
 
 std::string resolve_native_mode(const std::string& profile, const std::string& native_mode) {

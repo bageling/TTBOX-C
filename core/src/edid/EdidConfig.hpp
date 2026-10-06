@@ -33,6 +33,19 @@ const std::vector<std::string>& profiles_set();
 const std::vector<std::string>& native_modes_set();
 int max_advertised_modes();
 
+// ---- 面板「模式列表」（自旧 Python hardware.py::_probe_edid_modes 移植）----
+// 结构：{token, label, width, height, refresh, pixel_clock_khz}
+//   · token = timing token（如 "1440p144"）
+//   · label = "宽x高@刷新"（如 "2560x1440@144"）
+//   · 顺序 = TIMING_MAP 顺序
+// ★ 真相澄清：旧实现是调 `hdmirx_edid --list` 再**解析其文本输出**，
+//   而那个命令打印的正是 TIMING_MAP 本身（不是读 EDID、不是读显示器）
+//   ⇒ 本函数直接由时序表生成，结果等价且不再需要外部进程。
+JsonValue advertised_modes_json();
+
+// 面板用：把模式列表截断到 16 条（旧 Python 的 `advertised[:16]`）
+JsonValue advertised_modes_json_truncated(size_t limit);
+
 // ---- E 段：edid_apply.sh::PYEOF 的 native_mode 保护 ----
 // native_mode 为空 / "auto" / 非法（mode_info 解析不出）⇒ 用 profile 首选模式；
 // profile 未知则兜底 "1080p60compat"。
