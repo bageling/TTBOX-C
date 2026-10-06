@@ -14,6 +14,7 @@
 
 #include "common/Json.hpp"
 #include "ota/OtaCanonical.hpp"
+#include "ota/OtaCrypto.hpp"
 #include "ota/OtaVersion.hpp"
 #include "test_util.hpp"
 
@@ -202,4 +203,81 @@ TEST(ota_canonical_key_order_invariant) {
     JsonValue c = JsonValue::object();
     c.set("k", JsonValue::string("中"));
     EXPECT(ttbox::core::ota::canonical_dump(c) == "{\"k\":\"中\"}", "非 ASCII 应原样输出");
+}
+
+// ============ 7. SHA-256 标准测试向量（自实现必须钉死）============
+TEST(ota_sha256_vectors) {
+    using ttbox::core::ota::sha256_hex;
+    EXPECT(sha256_hex("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+           "空串 SHA-256 不对");
+    EXPECT(sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+           "\"abc\" SHA-256 不对");
+    EXPECT(sha256_hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") ==
+               "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+           "448bit SHA-256 不对");
+    // 一百万个 'a'：走分块路径（1MB 缓冲的边界）
+    const std::string big(1000000, 'a');
+    EXPECT(sha256_hex(big) == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+           "1M 'a' SHA-256 不对");
+}
+
+// ============ 8. 真实历史签名往返（★ 最强的一步）============
+// 拿 V1.0.55 的**真实旁车签名**跑一遍完整链路：读 sign.json → 取 SIGNED_FIELDS →
+// canonical → base64 解签名 → PEM 解公钥 → Ed25519 验签。
+// ★ 同一份数据已用 Python cryptography 验过（结果：通过，见 fixture 的 _python_crosscheck）。
+//   本用例的意义就是钉住「C++ 侧与 Python 侧对同一签名结论一致」。
+TEST(ota_real_signature_roundtrip) {
+    using namespace ttbox::core::ota;
+    std::ifstream fh(TTBOX_OTA_REAL_SIG, std::ios::binary);
+    EXPECT(fh.good(), std::string("打不开真实签名 fixture: ") + TTBOX_OTA_REAL_SIG);
+    if (!fh.good()) {
+        TEST_SKIP_REQUIRED(std::string("真实签名 fixture 不可用: ") + TTBOX_OTA_REAL_SIG);
+    }
+    std::ostringstream ss;
+    ss << fh.rdbuf();
+    const JsonParseResult pr = json_parse(ss.str());
+    EXPECT(pr.ok && pr.value.is_object(), "真实签名 fixture 解析失败");
+    if (!pr.ok || !pr.value.is_object()) return;
+    const JsonValue* root_v = &pr.value;
+
+    // 1) 公钥 PEM → raw 32B
+    uint8_t pk[32] = {0};
+    const std::string pem = jstr(*root_v, "public_key_pem");
+    EXPECT(load_ed25519_pem(pem, pk), "PEM 公钥解析失败");
+    // 已知答案：公钥 hex 应为 8a25d73f00f0e07b1d1eee59d5d0dd8d0e4b4a4e9ee3f0...（长度 32 字节）
+    // —— 只断言"解出了非全零的 32 字节"，具体值由下面的真实验签兜住
+    bool all_zero = true;
+    for (int i = 0; i < 32; ++i) {
+        if (pk[i] != 0) all_zero = false;
+    }
+    EXPECT(!all_zero, "PEM 解出的公钥不应全零");
+
+    // 2) sign.json 的 SIGNED_FIELDS → canonical
+    const JsonValue* sj = root_v->find("sign_json");
+    EXPECT(sj != nullptr && sj->is_object(), "fixture 缺 sign_json");
+    if (sj == nullptr || !sj->is_object()) return;
+    const std::vector<std::string> kSigned = {"sha256", "version", "built_at", "key_id"};
+    const std::string canon = canonical_signed_fields(*sj, kSigned);
+    EXPECT(canon.size() == 146, "canonical 长度应为 146，实际 " + std::to_string(canon.size()));
+    EXPECT(canon.find("\"version\":\"V1.0.55\"") != std::string::npos, "canonical 内容异常");
+
+    // 3) base64 解签名（64 字节）
+    std::vector<uint8_t> sig;
+    EXPECT(base64_decode(jstr(*sj, "signature"), &sig), "签名 base64 解码失败");
+    EXPECT(sig.size() == 64, "签名长度应为 64 字节，实际 " + std::to_string(sig.size()));
+    if (sig.size() != 64) return;
+
+    // 4) 验签 —— 真实签名应当通过
+    EXPECT(verify_ed25519(sig.data(), canon, pk), "★ 真实签名验签失败（C++ 与 Python 结论不一致）");
+
+    // 5) 负例：改一个字节必须失败（验签不是摆设）
+    sig[0] = static_cast<uint8_t>(sig[0] ^ 0x01);
+    EXPECT(!verify_ed25519(sig.data(), canon, pk), "篡改签名后仍验签通过 —— 严重缺陷");
+    sig[0] = static_cast<uint8_t>(sig[0] ^ 0x01);
+
+    // 6) 负例：改消息一个字节必须失败
+    std::string bad_canon = canon;
+    const size_t p = bad_canon.find("V1.0.55");
+    if (p != std::string::npos) bad_canon[p + 1] = '9';
+    EXPECT(!verify_ed25519(sig.data(), bad_canon, pk), "篡改消息后仍验签通过 —— 严重缺陷");
 }

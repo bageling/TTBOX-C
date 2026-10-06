@@ -656,7 +656,10 @@ list(APPEND CORE_SOURCES
 #   必须锁死字节格式；与通用 dump 混用会在"顺手优化通用函数"时静默打断 OTA 验签。
 list(APPEND CORE_SOURCES
   src/ota/OtaCanonical.cpp
-  src/ota/OtaVersion.cpp)
+  src/ota/OtaVersion.cpp
+  # 验签与摘要：复用 auth/ed25519（TweetNaCl 自包含，零外部依赖）+ 自实现 SHA-256。
+  # ★ 不引 OpenSSL：出货向量强制 AUTH=OFF，且随包 ELF 的运行期依赖闭集已冻结。
+  src/ota/OtaCrypto.cpp)
 
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
@@ -1106,7 +1109,9 @@ if(TTBOX_CORE_BUILD_TESTS)
     # ★ V1.0.53：EDID 对拍基准路径（configure 期确定；见下方存在性断言）
     TTBOX_EDID_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json"
     # ★ V1.0.56：OTA 对拍基准路径
-    TTBOX_OTA_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ota_golden.json")
+    TTBOX_OTA_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ota_golden.json"
+    # ★ V1.0.56：真实历史签名 fixture（验证 C++ 验签与 Python cryptography 结论一致）
+    TTBOX_OTA_REAL_SIG="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ota_real_signature.json")
   # EDID 对拍基准必须存在，否则 test_edid_golden 会静默失效（同 TTBOX_RKNN_API_HEADER 的
   # 「守卫存在=假象」纪律）。它是**入库文件**（tools/edid_golden_gen.py 产出）。
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json")

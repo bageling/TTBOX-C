@@ -1,0 +1,12 @@
+{
+ "_doc": "真实历史签名往返测试数据：V1.0.55 的旁车签名 + 对应公钥。用途=验证 C++ 侧（自实现 canonical + TweetNaCl 验签）与 Python cryptography 对**同一份真实签名**结论一致。签名是历史事实，永不失效，可长期留作回归。★ 数据取自 2026-10-06 云端 /ota/pkgs/ttbox-update-V1.0.55.tgz.sign.json 与 deploy/keys/ttbox-ota-2026b.pub。",
+ "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA+IpdO/ABpxL/OrX8Q4+oy8nrAKqSEFebb6CbqnRvuT4=\n-----END PUBLIC KEY-----\n",
+ "sign_json": {
+  "built_at": 1791292496,
+  "key_id": "ttbox-ota-2026b",
+  "sha256": "7b32c907c76250b43864e8650b21f866ad04025d0ce489c7db128bceebf8ecd4",
+  "signature": "+LbtyilJrq0NktJ2ZeNWdZalVXQEtVpP+xbQS3kGLID1zh/xqmkzwhAUxrDf3EsKsLdRQhsaBIW1roO++w1FAA==",
+  "version": "V1.0.55"
+ },
+ "_python_crosscheck": "Python 侧（cryptography）对同一数据验签结果：通过。canonical 串长度 146 字节，即 {\"built_at\":1791292496,\"key_id\":\"ttbox-ota-2026b\",\"sha256\":\"7b32c907...\",\"version\":\"V1.0.55\"}"
+}
