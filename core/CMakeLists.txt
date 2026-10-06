@@ -375,7 +375,7 @@ cmake_minimum_required(VERSION 3.16)
 #                       · web 层：面板与后端按域拆分 + 静态资源 gzip（-72% 传输）
 #                       · core：去写死的板级拓扑（风扇 hwmon / UDC 名改运行时解析）、
 #                         日志三文件分流（报错与客户操作永不被轮转吃掉）。
-project(ttbox_core VERSION 1.0.46 LANGUAGES CXX)
+project(ttbox_core VERSION 1.0.47 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -853,6 +853,69 @@ if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
     # （把形态 A 悄悄污染回形态 B）——必须 FALSE。
     INSTALL_RPATH_USE_LINK_PATH FALSE)
 endif()
+
+# ---- Web 面板后端（C++ 迁移 T01：httplib + IPC 客户端纯转发骨架）----
+# 与 ttbox_core_main 不同：ttbox_web 是纯 HTTP 壳 + IPC 客户端，业务只调
+# ttbox::core::ipc_request / ipc_ping / JsonValue（均为无条件源），零 RKNN/ONNX/
+# OpenCV/JPEG/RGA 依赖 ⇒ 不做 TTBOX_CORE_HAS_RKNN 门禁，host（本机/CI）也能构建
+# 冒烟验证；板端 aarch64 与 ttbox_core_main 同树编出（httplib 单头已 vendor）。
+# 线程库说明：httplib 用 std::thread（与 core 既有 IpcServer.cpp 同款），板端 g++ 12 /
+# glibc≥2.34 已把 libpthread 并入 libc，本文件亦无 find_package(Threads) 先例 ⇒ 不引入。
+add_executable(ttbox_web
+  src/web/main.cpp
+  src/web/WebServer.cpp
+  src/web/infra/ipc_client.cpp
+  src/web/translate/hotkeys.cpp
+  src/web/translate/controller_params.cpp
+  src/web/translate/profile_translate_fov.cpp
+  src/web/translate/profile_translate_aim.cpp
+  src/web/translate/profile_translate_body.cpp
+  src/web/translate/profile_translate_body_mouse.cpp
+  src/web/translate/profile_translate_web.cpp
+  src/web/domain/control.cpp
+  src/web/domain/state.cpp
+  src/web/domain/state_snapshot.cpp
+  src/web/domain/models.cpp
+  src/web/domain/models_meta.cpp
+  src/web/domain/presets.cpp
+  src/web/domain/hardware.cpp
+  src/web/domain/license.cpp
+  src/web/domain/ota.cpp
+  src/web/domain/ota_impl.cpp
+  src/web/domain/ota_query.cpp
+  src/web/domain/system.cpp
+  src/web/domain/diagnostics.cpp
+  src/web/domain/brand.cpp
+  src/web/domain/pages.cpp
+  src/web/domain/aim.cpp
+  src/web/domain/preview.cpp
+  src/web/domain/calib.cpp
+  src/web/domain/motion.cpp
+  src/web/infra/calibration_controller.cpp
+  src/web/infra/calibration_api.cpp
+  src/web/infra/calibration_worker.cpp
+  src/web/infra/calibration_worker_sample.cpp
+  src/web/infra/calibration_worker_finish.cpp
+  src/web/infra/motion_store.cpp
+  src/web/infra/motion_store_session.cpp
+  src/web/infra/motion_store_validate.cpp
+)
+target_link_libraries(ttbox_web PRIVATE ttbox_core)
+target_include_directories(ttbox_web PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/httplib
+)
+# 云端 card-login（license.cpp）复用 core 的 TtboxLicenseClient（在线授权层）。
+# 仅在 TTBOX_CORE_BUILD_AUTH=ON 且 OpenSSL 找到时启用；默认构建（AUTH=OFF）诚实报 501。
+if(TTBOX_CORE_BUILD_AUTH AND OPENSSL_FOUND)
+  target_compile_definitions(ttbox_web PRIVATE TTBOX_WEB_CLOUD_AUTH=1)
+endif()
+# RUNPATH 与 ttbox_core_main 同口径：$ORIGIN/../lib 就近解析设备库（librknnrt.so 等），
+# 形态 A（仅一段）且 INSTALL_RPATH_USE_LINK_PATH=FALSE，避免被链接期绝对路径污染。
+set_target_properties(ttbox_web PROPERTIES
+  BUILD_RPATH   "\$ORIGIN/../lib"
+  INSTALL_RPATH "\$ORIGIN/../lib"
+  INSTALL_RPATH_USE_LINK_PATH FALSE)
 
 # ---- IPC 命令行工具 ----
 if(TTBOX_CORE_BUILD_TOOLS)

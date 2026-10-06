@@ -1,0 +1,111 @@
+classDiagram
+    %% TTBOX Web 面板迁 C++ —— 数据模型与接口（classDiagram）
+    %% 分层：HTTP 层 → 业务层 → 基础设施层（复用 core）
+
+    class WebServer {
+        -std::string host_
+        -std::string port_
+        -int threads_
+        -httplib::Server svr_
+        +start(host, port, threads) void
+        +register_routes() void
+        +enforce_gate(req) bool
+        +serve_static() void
+    }
+
+    class IpcClient {
+        -std::string socket_path_
+        +call(type, params, timeout_ms) JsonValue
+        +ping() bool
+    }
+
+    class ConfigTranslator {
+        +web_body_to_profile(body, prev) JsonValue
+        +profile_to_web(profile) JsonValue
+        +validate_aim_profiles(list) vector
+        +deep_merge(base, patch) JsonValue
+    }
+
+    class Hotkeys {
+        +to_bits(name, default) int
+        +to_name(bits) string
+        +guard_to_web(hg) JsonValue
+    }
+
+    class ControllerParams {
+        +read_block(ctrl, prefix, fields) JsonValue
+        +write_block(ctrl, prefix, fields, mouse) void
+        +coerce(value, kind) JsonValue
+    }
+
+    class CloudClient {
+        +card_login(card, machine_code) JsonValue
+        +heartbeat(token, machine_code, version) JsonValue
+        +app_info() JsonValue
+        -sign(method, path, ts, nonce, body) string
+    }
+
+    class OtaClient {
+        -server_url_
+        -jobs_dir_
+        +check_update() JsonValue
+        +install(url, key_id, version) JsonValue
+        -validate_source(req) bool
+        -enqueue_job(job) string
+    }
+
+    class SystemCmd {
+        +run(argv, timeout) string
+        +sysfs_int(path) int
+        +power_action(verb) pair
+        +set_hostname(name) bool
+    }
+
+    class FileStore {
+        +read_json(path) JsonValue
+        +write_json_atomic(path, data) bool
+        +list_presets(dir) vector
+    }
+
+    class CalibrationController {
+        -std::thread worker_
+        -std::mutex lock_
+        -state_
+        +start() bool
+        +cancel() bool
+        +clear() bool
+        +payload() JsonValue
+        -worker() void
+        -apply_gain(calib) bool
+        -apply_pid(calib) bool
+    }
+
+    class MotionStore {
+        +list() vector
+        +create(name) bool
+        +rename(id, name) bool
+        +remove(id) bool
+        +export(id) JsonValue
+        +activate(id) bool
+        +train(id) bool
+    }
+
+    %% HTTP 层 → 业务层
+    WebServer --> ConfigTranslator : 调用
+    WebServer --> OtaClient : 调用
+    WebServer --> CalibrationController : 调用
+    WebServer --> MotionStore : 调用
+
+    %% 业务层 → 基础设施层
+    ConfigTranslator --> Hotkeys : 位掩码换算
+    ConfigTranslator --> ControllerParams : 表驱动搬运
+    ConfigTranslator --> IpcClient : GET_CONFIG/SET_CONFIG
+    CalibrationController --> IpcClient : GET_STATUS/SET_CONFIG
+    CalibrationController --> SystemCmd : 读 sysfs
+    MotionStore --> FileStore : 持久化
+    OtaClient --> SystemCmd : 任务目录探测
+    OtaClient --> FileStore : 写任务文件
+
+    %% 复用 core（既有符号，不新建）
+    IpcClient ..> ttbox_core_ipc_request : 复用 core/src/ipc
+    CloudClient ..> TtboxLicenseClient : 复用 core/src/auth

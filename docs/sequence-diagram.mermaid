@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    participant FE as 前端(浏览器)
+    participant WS as WebServer(C++/httplib)
+    participant TR as ConfigTranslator
+    participant IPC as IpcClient(core)
+    participant CORE as Core(IpcServer)
+    participant OTA as OtaClient
+    participant ROOT as root 更新器
+
+    %% 1) 配置保存：PUT /api/config（翻译 + 深合并 + SET_CONFIG）
+    FE->>WS: PUT /api/config {"profile":{...}}
+    WS->>WS: enforce_gate(req)（激活 gate + D1 来源校验）
+    WS->>IPC: GET_CONFIG
+    IPC->>CORE: {"type":"GET_CONFIG"}
+    CORE-->>IPC: {status:0,data:{runtime_profile}}
+    IPC-->>WS: runtime_profile
+    WS->>TR: web_body_to_profile(body, prev_profile)
+    TR->>TR: 热键位掩码 / 表驱动搬运 / 深合并
+    TR-->>WS: merged_profile
+    WS->>IPC: SET_CONFIG {"profile":merged}
+    IPC->>CORE: {"type":"SET_CONFIG","params":{...}}
+    CORE-->>IPC: {status:0,data:{applied:true}}
+    IPC-->>WS: ok
+    WS-->>FE: 200 {"ok":true,"data":{}}
+
+    %% 2) OTA 安装：POST /api/ota/install（D1 来源校验 + 同源收敛 + 防刷）
+    FE->>WS: POST /api/ota/install {"url","key_id","version"}
+    WS->>WS: enforce_gate：来源校验（非白名单→403）
+    WS->>OTA: install(url, key_id, version)
+    OTA->>OTA: 校验 capabilities.ota / key_id 白名单 / url 同源 / 防刷
+    OTA->>OTA: 探测任务目录可写 + 写 job-*.json
+    OTA-->>WS: {scheduled:name}
+    WS-->>FE: 200 {"ok":true,"data":{scheduled}}
+    Note over ROOT: ttbox-ota.path 感知 *.json → 拉起 root 更新器
+    ROOT->>ROOT: https 下载 + sha256 + Ed25519 双因子验签 → 安装
+
+    %% 3) 预览流：GET /api/preview.mjpg（C++ 直出 MJPEG，消 8001 一跳）
+    FE->>WS: GET /api/preview.mjpg
+    WS->>IPC: GET_PREVIEW(timeout=3s)
+    IPC->>CORE: {"type":"GET_PREVIEW"}
+    CORE-->>IPC: {status:0,data:{jpeg_base64,seq}}
+    IPC-->>WS: jpeg_base64
+    loop 轮询帧
+        WS->>IPC: GET_PREVIEW
+        IPC-->>WS: 新帧(seq 去重)
+        WS-->>FE: multipart/x-mixed-replace 流
+    end

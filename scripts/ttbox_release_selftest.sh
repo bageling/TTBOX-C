@@ -29,7 +29,9 @@
 # 回归锚点（T1.16）：A20 断言依赖 ttbox_release_verify.sh 的 RUNPATH 判据文案
 #       —— 已由「整串前缀匹配」改为「按 : 逐段校验」，故断言匹配 'RUNPATH 段'。
 #       若再次改 verify 文案，必须同步更新 A20，否则本条会假 FAIL。
-# 回归锚点（E2）：A26 断言依赖 verify 的 '非闭集成员' 文案；夹具 bin/ 闭集 = { ttbox_core_main }。
+# 回归锚点（E2）：A26 断言依赖 verify 的 '非闭集成员' 文案；夹具 bin/ 闭集 = { ttbox_core_main }
+#       （Web 迁 C++ 后闭集扩为 { ttbox_core_main, ttbox_web }；夹具不造 ttbox_web 不影响
+#       A26 负例 —— 闭集判据只查"出现非成员"、不查"成员齐全"）。
 #
 # 退出码：全部通过=0；有任一 FAIL=1（SKIP 不计 FAIL，但显式打印并计入 SKIP 计数）。
 set -u
@@ -101,8 +103,9 @@ make_payload() { # $1=dir $2=rpath [$3=real_core_main]
   aarch64-linux-gnu-gcc -o "$p/bin/ttbox_core_main" "$p/_t.c" "$rp" 2>/dev/null
   rm -f "$p/_t.c"
   chmod +x "$p/bin/ttbox_core_main"
-  # ★ E2：bin/ 为【白名单闭集】= { ttbox_core_main }（verify 会点名校验；此前夹具额外造
-  #   ipc_ping，与 E2 判据自相矛盾——已删除，夹具与真发货集合同构）。
+  # ★ E2：bin/ 为【白名单闭集】（verify 会点名校验；此前夹具额外造 ipc_ping，与 E2 判据
+  #   自相矛盾——已删除）。Web 迁 C++ 后真发货闭集 = { ttbox_core_main, ttbox_web }；
+  #   夹具只造 ttbox_core_main（E2 只查"出现非成员"，不查"成员齐全"，故不影响 A26）。
   # ★ E3：可选以**真实交叉产物**替换合成 core_main（对真货跑 verify，而非合成夹具）。
   if [ -n "$real" ]; then cp -f "$real" "$p/bin/ttbox_core_main"; chmod +x "$p/bin/ttbox_core_main"; fi
   printf '#!/bin/sh\nexit 0\n' > "$p/plugins/web/bin/ttbox-web";           chmod +x "$p/plugins/web/bin/ttbox-web"

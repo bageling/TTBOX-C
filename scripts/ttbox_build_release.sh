@@ -404,18 +404,18 @@ echo "[release] usbproxy 诚实性：①.sha256 一致 ✅（${UBP_SHA:0:12}…�
 
 # ---- 5) payload 白名单闭集 + 构建后自检（T1.15 待补 ④/⑤；§8/§9）--------------
 # ④ 白名单闭集：**禁 `build-aarch64*/` 通配**收 payload（会把 `ttbox_core_main.bak-20260916`
-#    这类备份发到板上）。§8：`bin/` 闭集 == **恰一个文件** `ttbox_core_main`。
+#    这类备份发到板上）。§8：`bin/` 闭集 == **恰两个文件** `ttbox_core_main` + `ttbox_web`。
 # ⑤ 构建后自检（host 侧）：★ 关键约束 —— aarch64 产物在 x86 host **不能执行 `ldd`**
 #    ⇒ host 自检**只用 `readelf`（静态）**；运行期 `ldd` 归板端 T1.13。
 STAGE="${BUILD_DIR}/.selfcheck"
 rm -rf "$STAGE"; mkdir -p "${STAGE}/bin" "${STAGE}/lib"
 
-# (1) 闭集拷贝（逐名，禁通配）
-for _b in ttbox_core_main; do
+# (1) 闭集拷贝（逐名，禁通配）—— Web 迁 C++（V1.0.47）后闭集 = { ttbox_core_main, ttbox_web }
+for _b in ttbox_core_main ttbox_web; do
   install -m 0755 "${BUILD_DIR}/${_b}" "${STAGE}/bin/" || die "闭集拷贝失败：${_b}"
 done
 BIN_N="$(find "${STAGE}/bin" -maxdepth 1 -type f | wc -l)"
-[ "${BIN_N}" = "1" ] || die "§8 payload bin/ 闭集应恰 1 文件，实得 ${BIN_N} ⇒ 拒绝出货。"
+[ "${BIN_N}" = "2" ] || die "§8 payload bin/ 闭集应恰 2 文件（ttbox_core_main + ttbox_web），实得 ${BIN_N} ⇒ 拒绝出货。"
 BAD_N="$(find "${STAGE}/bin" -maxdepth 1 -type f \
            \( -name '*.bak-*' -o -name '*.bak' -o -name '*_backup*' \
               -o -name '*.o' -o -name '*.a' -o -name '*.cmake' \) | wc -l)"

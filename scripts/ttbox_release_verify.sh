@@ -223,15 +223,19 @@ fi
 #     无 RUNPATH 的 ELF 纳入发货，上面的 RUNPATH 检查会把它判 FAIL（好），可若检查被人
 #     误删/绕过，就没有第二道护栏。
 #   - 判据写在执法点，才能防住"旁人改 sync 列表"。故显式点名闭集成员。
-BIN_ALLOWED="ttbox_core_main"
+# Web 迁 C++（V1.0.47）后 bin/ 闭集扩为两成员：ttbox_core_main + ttbox_web。
+#   ttbox_web 是纯 HTTP 壳 + IPC 客户端，同样带 RUNPATH \$ORIGIN（同 ttbox_core_main 口径）。
+BIN_ALLOWED=("ttbox_core_main" "ttbox_web")
 if [[ -d "$BIN_DIR" ]]; then
     while IFS= read -r f; do
         [[ -f "$f" ]] || continue
         bnm="$(basename -- "$f")"
-        if [[ "$bnm" == "$BIN_ALLOWED" ]]; then
+        allowed=0
+        for a in "${BIN_ALLOWED[@]}"; do [[ "$bnm" == "$a" ]] && allowed=1; done
+        if [[ "$allowed" == 1 ]]; then
             ok "bin/ 闭集成员: ${bnm}"
         else
-            fail "bin/ 出现非闭集成员: ${bnm}（bin/ 只允许 ${BIN_ALLOWED}）"
+            fail "bin/ 出现非闭集成员: ${bnm}（bin/ 只允许 ${BIN_ALLOWED[*]}）"
         fi
     done < <(find "$BIN_DIR" -maxdepth 1 -type f | sort)
 fi

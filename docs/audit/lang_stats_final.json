@@ -1,0 +1,233 @@
+{
+  "product_code_lines": 74813,
+  "test_code_lines": 27035,
+  "thirdparty_code_lines": 12921,
+  "doc_lines": 5496,
+  "test_to_product_ratio": 0.3614,
+  "product_by_language": {
+    "C++": {
+      "files": 199,
+      "code": 29472,
+      "comment": 6575,
+      "blank": 3382
+    },
+    "Python": {
+      "files": 149,
+      "code": 18908,
+      "comment": 1986,
+      "blank": 3356
+    },
+    "JavaScript": {
+      "files": 15,
+      "code": 8133,
+      "comment": 554,
+      "blank": 613
+    },
+    "Shell": {
+      "files": 86,
+      "code": 7175,
+      "comment": 2084,
+      "blank": 891
+    },
+    "CSS": {
+      "files": 3,
+      "code": 4894,
+      "comment": 0,
+      "blank": 811
+    },
+    "Text": {
+      "files": 9,
+      "code": 2078,
+      "comment": 0,
+      "blank": 58
+    },
+    "HTML": {
+      "files": 4,
+      "code": 1447,
+      "comment": 7,
+      "blank": 117
+    },
+    "JSON": {
+      "files": 50,
+      "code": 1259,
+      "comment": 0,
+      "blank": 6
+    },
+    "CMake": {
+      "files": 2,
+      "code": 597,
+      "comment": 684,
+      "blank": 102
+    },
+    "C/C++头": {
+      "files": 4,
+      "code": 279,
+      "comment": 0,
+      "blank": 49
+    },
+    "Systemd": {
+      "files": 8,
+      "code": 124,
+      "comment": 125,
+      "blank": 16
+    },
+    "Nginx配置": {
+      "files": 1,
+      "code": 102,
+      "comment": 0,
+      "blank": 0
+    },
+    "Makefile": {
+      "files": 1,
+      "code": 100,
+      "comment": 0,
+      "blank": 16
+    },
+    "C": {
+      "files": 1,
+      "code": 97,
+      "comment": 16,
+      "blank": 8
+    },
+    "Lua": {
+      "files": 6,
+      "code": 76,
+      "comment": 105,
+      "blank": 23
+    },
+    "PowerShell": {
+      "files": 1,
+      "code": 52,
+      "comment": 23,
+      "blank": 4
+    },
+    "TOML": {
+      "files": 1,
+      "code": 20,
+      "comment": 6,
+      "blank": 4
+    }
+  },
+  "test_by_language": {
+    "C++": {
+      "files": 96,
+      "code": 16430,
+      "comment": 2889,
+      "blank": 2000
+    },
+    "Python": {
+      "files": 77,
+      "code": 9726,
+      "comment": 1359,
+      "blank": 2315
+    },
+    "JSON": {
+      "files": 4,
+      "code": 441,
+      "comment": 0,
+      "blank": 0
+    },
+    "Shell": {
+      "files": 9,
+      "code": 438,
+      "comment": 82,
+      "blank": 80
+    }
+  },
+  "product_by_dir": {
+    "core": {
+      "CMake": 570,
+      "C++": 24376,
+      "Python": 1293,
+      "PowerShell": 52,
+      "Shell": 10,
+      "JSON": 292,
+      "C": 97
+    },
+    "plugins": {
+      "Python": 9057,
+      "Shell": 24,
+      "JSON": 261,
+      "CSS": 4894,
+      "JavaScript": 8133,
+      "HTML": 1447
+    },
+    "scripts": {
+      "Shell": 4379,
+      "Python": 4585,
+      "Text": 160
+    },
+    "usbproxy": {
+      "Makefile": 100,
+      "Shell": 193,
+      "JSON": 198,
+      "C++": 5096,
+      "C/C++头": 279,
+      "Lua": 76
+    },
+    "image": {
+      "Shell": 2393,
+      "Text": 1830,
+      "JSON": 5
+    },
+    "tools": {
+      "Python": 1740
+    },
+    "framework": {
+      "Python": 977
+    },
+    "docs": {
+      "JSON": 229,
+      "Python": 223,
+      "Shell": 176
+    },
+    "ttbox_motion": {
+      "Python": 519
+    },
+    "ttbox_platform": {
+      "Python": 494
+    },
+    "deploy": {
+      "JSON": 137,
+      "CMake": 27,
+      "Nginx配置": 102,
+      "Text": 88,
+      "Systemd": 124
+    },
+    "config": {
+      "JSON": 137
+    },
+    "preview_server.py": {
+      "Python": 20
+    },
+    "pyproject.toml": {
+      "TOML": 20
+    }
+  },
+  "test_by_dir": {
+    "core": {
+      "C++": 15920,
+      "JSON": 441,
+      "Python": 639
+    },
+    "plugins": {
+      "Python": 7427
+    },
+    "tools": {
+      "Python": 581
+    },
+    "tests": {
+      "Shell": 438,
+      "Python": 103
+    },
+    "usbproxy": {
+      "C++": 510
+    },
+    "framework": {
+      "Python": 509
+    },
+    "ttbox_platform": {
+      "Python": 467
+    }
+  }
+}

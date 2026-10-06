@@ -20,7 +20,14 @@ Group=ttbox
 # 该树内包含 plugins/web。这样 OTA/回滚对 Web 也原子生效。过渡期由发布脚本
 # `ln -sfn current/plugins /opt/ttbox/plugins` 保证旧路径兼容。
 WorkingDirectory=/opt/ttbox/current/plugins/web
-ExecStart=/opt/ttbox/current/plugins/web/bin/ttbox-web
+# ★ Web 后端切换开关（C++ 迁移回滚预案，方案 §7）：cpp=新 C++ 服务（V1.0.47 起默认基线），py=旧 Flask。
+#   回滚：改回 py + restart，无需重建代码（Python 入口/lib/static/templates 全程原样保留）。
+Environment=TTBOX_WEB_BACKEND=cpp
+# ExecStart 依据上面开关选择后端。$$ 是转义，让 /bin/sh 读到 $TTBOX_WEB_BACKEND；
+# 用 exec 替换 shell 进程，systemd 才能正确跟踪服务主进程（Type=simple）。
+#   · py 路径沿用现役 bin/ttbox-web shim（内部 exec python3 .../ttbox-web.py）；
+#   · cpp 路径指向 C++ 二进制 /opt/ttbox/current/bin/ttbox_web（core/CMakeLists.txt 的 target）。
+ExecStart=/bin/sh -c 'if [ "$$TTBOX_WEB_BACKEND" = "cpp" ]; then exec /opt/ttbox/current/bin/ttbox_web; else exec /opt/ttbox/current/plugins/web/bin/ttbox-web; fi'
 Environment=TTBOX_ROOT=/opt/ttbox/current/plugins/web
 # 注意：PYTHONPATH 只需插件根目录（现随 release 走：current/plugins/web）。
 # 否则 `from framework_api import ...` 找不到模块。
