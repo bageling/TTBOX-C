@@ -81,16 +81,24 @@ def _ttbox_tree_root() -> Path:
 
 
 _TREE_ROOT = _ttbox_tree_root()
-# `lib` 包（paths/ipc 单点真源）在 <树根>/plugins/web 下：append 到**末尾**，
-# 不用 insert(0)（顶到 stdlib 前有遮蔽同名标准库的风险）。
-_WEB_DIR = _TREE_ROOT / "plugins" / "web"
-if str(_WEB_DIR) not in sys.path:
-    sys.path.append(str(_WEB_DIR))
 
-from lib.paths import prefix_path as _prefix_path  # noqa: E402  运行根派生（A-PATH-4）
 
-# 运行根下的落点一律经 lib/paths.py 派生：散写 "/opt/ttbox/…" 会让 TTBOX_PREFIX 失效，
-# 也会让同一事实出现第二份字面量（门禁① 的口径）。
+def _prefix_path(name: str) -> str:
+    """运行根派生：``TTBOX_PREFIX`` > ``/opt/ttbox``（A-PATH-4）。
+
+    ★ V1.0.54 修复（严重）：原实现是 ``from lib.paths import prefix_path`` ——
+      该模块（``plugins/web/lib/paths.py``）已随「去 Python」批次 1 删除，
+      于是本文件的**模块级 import 直接 ModuleNotFoundError**，更新器完全起不来
+      ⇒ 板端 OTA 通道整体失效（V1.0.52 装上后再也无法升级；业主实测「装不上」）。
+      为什么内联而不是另建模块：发布树里**没有 core/**（Paths.hpp 不在板上），
+      而门禁① 只允许 socket 路径出现在三个白名单文件里 —— 根前缀不是 socket 路径，
+      内联在这里不新增任何受管字面量。
+    """
+    root = os.environ.get("TTBOX_PREFIX", "").strip().rstrip("/") or "/opt/ttbox"
+    return root + "/" + name
+
+
+# 运行根下的落点一律经 _prefix_path 派生：散写 "/opt/ttbox/…" 会让 TTBOX_PREFIX 失效。
 RELEASES = _prefix_path("releases")
 CURRENT_LINK = _prefix_path("current")
 STATE = _prefix_path("state")
@@ -216,14 +224,37 @@ def _is_active(unit: str) -> bool:
     return rc == 0
 
 
+def _ipc_socket_path() -> str:
+    """IPC socket 路径：环境变量 > 从 ``ttbox-core.service`` 提取。
+
+    ★ V1.0.54 修复：原实现 ``from lib.paths import IPC_SOCKET_DEFAULT`` —— 该模块
+      （plugins/web/lib/paths.py）已随「去 Python」批次 1 删除。
+    ★ 为什么不在这里写字面量：门禁①（路径字面量单点化）—— core IPC 的 socket 路径
+      只允许出现在 ``core/src/common/Paths.hpp`` 与 ``ttbox-{core,web}.service``。
+      而 ``ttbox-core.service`` 正是白名单成员、且内含
+      ``Environment=TTBOX_IPC_SOCKET=…`` ⇒ 从它读既合规又不新增第二处定义。
+    """
+    env = os.environ.get("TTBOX_IPC_SOCKET", "").strip()
+    if env:
+        return env
+    unit = Path(CURRENT_LINK) / "deploy" / "systemd" / "ttbox-core.service"
+    try:
+        text = unit.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    m = re.search(r"^Environment=TTBOX_IPC_SOCKET=(\S+)", text, re.M)
+    return m.group(1) if m else ""
+
+
 def _ipc_get_status() -> dict:
     """读 core IPC（unix socket）拿业务能力；失败返回 {}（= 业务不可用）。
 
     请求体键名是 `type`（IpcServer.cpp:450 `request.find("type")`），
     不是旧版写的 `cmd` —— 那个键 core 根本不认识，GET_STATUS 永远答非所问。
     """
-    from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
-    sock_path = os.environ.get("TTBOX_IPC_SOCKET", _IPC_DEFAULT)
+    sock_path = _ipc_socket_path()
+    if not sock_path:
+        return {}
     try:
         import socket as _s
         with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:
