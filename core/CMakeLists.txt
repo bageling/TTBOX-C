@@ -1025,6 +1025,14 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_det_trace PRIVATE ttbox_core)
   add_test(NAME test_det_trace COMMAND test_det_trace)
 
+  # V1.0.46：离线回放器（★ 直接链接产品控制器头文件，不做二次翻译）
+  #   之前用「Python 精确移植」回放，那是二次翻译：Python 与 C++ 两套独立实现，
+  #   双方可能同时误解原始算法（V1.0.43 的 τ=MT 错误就是两边犯一样的错）。
+  #   现在回放器 include 的就是上板那份 FittsAimController.hpp / Pid1Controller.hpp。
+  add_executable(ttbox_replay tools/replay/replay_main.cpp)
+  target_link_libraries(ttbox_replay PRIVATE ttbox_core)
+  # 注意：刻意**不** install 进产品 payload（纯开发工具）。
+
   # V3 阶段 5：拟人化抖动前馈扣除（延迟对齐环形缓冲 + 两条链抖动上报）
   add_executable(test_jitter_feedforward tests/test_jitter_feedforward.cpp)
   target_link_libraries(test_jitter_feedforward PRIVATE ttbox_core)
