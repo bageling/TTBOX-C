@@ -57,10 +57,12 @@ if [ -f "/opt/ttbox/current/deploy/keys/ttbox-ota-2026b.pub" ]; then
 else
     fail "OTA 公钥缺失（deploy/keys/ttbox-ota-2026b.pub）"
 fi
-if [ -x "${BIN}/ttbox_ota" ]; then
+# ★ V1.0.56：更新器入口由 python3 脚本换成 C++ 二进制（bin/ttbox_ota）
+OTA_BIN="${TTBOX_CURRENT:-/opt/ttbox/current}/bin/ttbox_ota"
+if [ -x "${OTA_BIN}" ]; then
     pass "OTA 更新器在位"
 else
-    fail "OTA 更新器缺失（${BIN}/ttbox_ota）"
+    fail "OTA 更新器缺失（${OTA_BIN}）"
 fi
 if [ -d /var/lib/ttbox/ota/jobs ] && [ "$(stat -c %a /var/lib/ttbox/ota/jobs 2>/dev/null || echo 000)" = "770" ]; then
     pass "OTA 任务目录在位（root:ttbox 0770）"
