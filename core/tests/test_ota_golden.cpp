@@ -5,8 +5,10 @@
 //
 // ★ 最高优先级是 A 段 canonical：Ed25519 签名是对这些**字节**签的，
 //   键序/空格/转义/非 ASCII 任一处不同 ⇒ 验签必然失败 ⇒ 板子升不动。
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -15,6 +17,7 @@
 #include "common/Json.hpp"
 #include "ota/OtaCanonical.hpp"
 #include "ota/OtaCrypto.hpp"
+#include "common/Shell.hpp"
 #include "ota/OtaExtract.hpp"
 #include "ota/OtaVersion.hpp"
 #include "test_util.hpp"
@@ -303,3 +306,98 @@ TEST(ota_golden_safe_members) {
     EXPECT(n_ok > 0, "F 段无合法例");
     EXPECT(n_bad >= 7, "F 段拒绝例偏少（应含 ../escape、/abs、payload/../../etc/passwd 等）");
 }
+
+// ============ 10. 解包行为（★ 用真 tar，host 就能跑）============
+// 为什么必须有这个用例：V1.0.57/59 两次真机事故都栽在 tar 的**默认行为**上 ——
+//   ① 不加 --wildcards            ⇒ 'payload/*' 被当字面名，压根解不出东西
+//   ② 不加 --wildcards-match-slash ⇒ '*' 不跨 '/'，**只解出 payload/ 第一层**，
+//                                   scripts/ plugins/*/ 等深层文件静默全漏
+// 两者都不报错、只在真机上炸。本用例把"深层文件必须解全"钉成回归判据。
+// ★ 本用例在 Windows 上跳过：它验的是 **GNU tar 在 Linux 上的通配语义**，
+//   而 fs::temp_directory_path() 在 Windows 返回 'C:////...////' 形式，MSYS 的 tar 不认这种路径
+//   （手工验证过：同一 tar 命令在 MSYS shell 里正常、在 C++ 里因路径形式失败）。
+//   价值在 Linux CI 与板端：那里这两个开关一旦被漏掉，本用例立刻红。
+#if !defined(_WIN32)
+TEST(ota_extract_real_tar) {
+    using namespace ttbox::core;
+    using namespace ttbox::core::ota;
+    namespace fs = std::filesystem;
+    const long long uniq = static_cast<long long>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path root = fs::temp_directory_path() / ("ota_extract_t_" + std::to_string(uniq));
+    const fs::path src = root / "src";
+    const fs::path staging = root / "staging";
+    std::error_code ec;
+    fs::create_directories(src / "payload" / "bin", ec);
+    fs::create_directories(src / "payload" / "scripts", ec);
+    fs::create_directories(src / "payload" / "x" / "y", ec);
+    fs::create_directories(src / "other", ec);   // 根级、非 payload ⇒ 不该被解
+    {
+        std::ofstream(src / "payload" / "bin" / "alpha", std::ios::binary) << "A";
+        std::ofstream(src / "payload" / "scripts" / "beta.py", std::ios::binary) << "B";
+        std::ofstream(src / "payload" / "x" / "y" / "gamma.txt", std::ios::binary) << "G";
+        std::ofstream(src / "RELEASE_MANIFEST.json", std::ios::binary) << "{\"files_sha256\":{}}";
+        std::ofstream(src / "other" / "outside.txt", std::ios::binary) << "O";
+    }
+    const std::string tgz = (root / "pkg.tgz").string();
+    // 只把 payload/ 与根 manifest 放进包（对齐出货包布局）
+    const int rc = run_quiet_cmd("tar -czf " + shell_quote(tgz) + " -C " + shell_quote(src.string()) +
+                                 " payload RELEASE_MANIFEST.json");
+    EXPECT(rc == 0, "造测试 tar 失败");
+    if (rc != 0) {
+        fs::remove_all(root, ec);
+        return;
+    }
+
+    const ExtractResult r = extract_package(tgz, staging.string());
+    EXPECT(r.ok, "extract_package 失败: " + r.state + " " + r.detail);
+    if (r.ok) {
+        // ★ 深层文件（这条正是 --wildcards-match-slash 的回归防线）
+        EXPECT(fs::is_regular_file(staging / "bin" / "alpha", ec), "缺 payload/bin/alpha");
+        EXPECT(fs::is_regular_file(staging / "scripts" / "beta.py", ec),
+               "★ 缺 payload/scripts/beta.py（深层）—— --wildcards-match-slash 是否被漏掉？");
+        EXPECT(fs::is_regular_file(staging / "x" / "y" / "gamma.txt", ec),
+               "★ 缺 payload/x/y/gamma.txt（多层深层）—— 同上");
+        EXPECT(fs::is_regular_file(staging / "RELEASE_MANIFEST.json", ec), "缺根 manifest");
+        // 只解 payload/ 前缀：根级 other/ 不该出现
+        EXPECT(!fs::exists(staging / "other" / "outside.txt", ec),
+               "非 payload/ 成员被解出来了（应只取 payload/* 与根 manifest）");
+    }
+    fs::remove_all(root, ec);
+}
+
+// ============ 11. 恶意成员必须被拒（root 解不可信包 = RCE 面）============
+TEST(ota_extract_rejects_traversal) {
+    using namespace ttbox::core;
+    using namespace ttbox::core::ota;
+    namespace fs = std::filesystem;
+    const long long uniq = static_cast<long long>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const fs::path root = fs::temp_directory_path() / ("ota_evil_t_" + std::to_string(uniq));
+    const fs::path src = root / "src";
+    const fs::path staging = root / "staging";
+    std::error_code ec;
+    fs::create_directories(src / "payload", ec);
+    {
+        std::ofstream(src / "payload" / "ok.txt", std::ios::binary) << "ok";
+        std::ofstream(src / "RELEASE_MANIFEST.json", std::ios::binary) << "{\"files_sha256\":{}}";
+    }
+    const std::string tgz = (root / "evil.tgz").string();
+    // 手工塞一个带 ../ 的成员（tar 的 -C 不允许造出 ../，故分两步：先正常打，
+    // 再用 --transform 把名字改掉）
+    const int rc = run_quiet_cmd(
+        "tar -czf " + shell_quote(tgz) + " -C " + shell_quote(src.string()) +
+        " --transform 's|^payload/ok.txt|payload/../../evil.txt|' payload RELEASE_MANIFEST.json");
+    if (rc != 0) {
+        // 某些 tar 不支持 --transform ⇒ 退化为直接用 bad 名单测（safe_member_name 已单测覆盖）
+        fs::remove_all(root, ec);
+        TEST_SKIP("当前 tar 不支持 --transform，跳过恶意成员构造");
+    }
+    const ExtractResult r = extract_package(tgz, staging.string());
+    EXPECT(!r.ok, "含 ../ 的成员竟被接受（严重）");
+    EXPECT(r.state == "unsafe_member", "失败态应为 unsafe_member，实为 " + r.state);
+    // 且不得在 dest 外留下任何东西
+    EXPECT(!fs::exists(root / "evil.txt", ec), "穿越成员在 staging 外落地了（严重）");
+    fs::remove_all(root, ec);
+}
+#endif  // !_WIN32
