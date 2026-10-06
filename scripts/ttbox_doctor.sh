@@ -57,10 +57,10 @@ if [ -f "/opt/ttbox/current/deploy/keys/ttbox-ota-2026b.pub" ]; then
 else
     fail "OTA 公钥缺失（deploy/keys/ttbox-ota-2026b.pub）"
 fi
-if [ -f "${SCRIPTS}/ttbox_ota_updater.py" ]; then
+if [ -x "${BIN}/ttbox_ota" ]; then
     pass "OTA 更新器在位"
 else
-    fail "OTA 更新器缺失（${SCRIPTS}/ttbox_ota_updater.py）"
+    fail "OTA 更新器缺失（${BIN}/ttbox_ota）"
 fi
 if [ -d /var/lib/ttbox/ota/jobs ] && [ "$(stat -c %a /var/lib/ttbox/ota/jobs 2>/dev/null || echo 000)" = "770" ]; then
     pass "OTA 任务目录在位（root:ttbox 0770）"

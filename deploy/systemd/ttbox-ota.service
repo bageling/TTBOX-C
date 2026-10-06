@@ -15,7 +15,8 @@ Wants=network-online.target
 Type=oneshot
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /opt/ttbox/current/scripts/ttbox_ota_updater.py --from-jobs /var/lib/ttbox/ota/jobs
+# ★ V1.0.56：入口由 python3 脚本换成 C++ 二进制（去 Python 收尾）。参数契约不变。
+ExecStart=/opt/ttbox/current/bin/ttbox_ota --from-jobs /var/lib/ttbox/ota/jobs
 # 任务处理可能含下载（七牛隧道 ~15KB/s，3MB 包 3.5 分钟，重试最坏 3 倍）+30 秒健康检查；
 # 2026-09-19 实测 600s 会在安装中段被 systemd 杀掉（current 已切、服务没重启的半程态），放宽到 30 分钟
 TimeoutStartSec=1800

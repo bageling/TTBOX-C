@@ -49,9 +49,9 @@ ttbox_motion        -> ttbox_motion
 usbproxy            -> usbproxy
 
 # ---- scripts：systemd 引用 + ttbox.sh 子命令 + OTA 调用链 ----
-#   systemd：ttbox_ensure_services.sh、ttbox_ota_updater.py
+#   systemd：ttbox_ensure_services.sh
 #   ttbox.sh 子命令：doctor / backup / restore / uninstall（install 与 rollback 见下两行）
-#   OTA 更新器：ttbox_ota_updater.py:66 调 current/scripts/ttbox_release_install.sh（缺它 OTA 必挂）
+#   OTA 更新器：★V1.0.56 起是 bin/ttbox_ota（C++），它调 current/scripts/ttbox_release_install.sh
 #   ttbox.sh:29 install 转发 ttbox_fhs_init.sh（板端 REPO_ROOT=current，缺它 install 必挂）
 scripts/ttbox.sh                        -> scripts/ttbox.sh
 scripts/ttbox_doctor.sh                 -> scripts/ttbox_doctor.sh
@@ -59,7 +59,6 @@ scripts/ttbox_backup.sh                 -> scripts/ttbox_backup.sh
 scripts/ttbox_restore.sh                -> scripts/ttbox_restore.sh
 scripts/ttbox_uninstall.sh              -> scripts/ttbox_uninstall.sh
 scripts/ttbox_ensure_services.sh        -> scripts/ttbox_ensure_services.sh
-scripts/ttbox_ota_updater.py            -> scripts/ttbox_ota_updater.py
 scripts/ttbox_dtb_fix.sh                -> scripts/ttbox_dtb_fix.sh
 scripts/ttbox_release_install.sh        -> scripts/ttbox_release_install.sh
 scripts/ttbox_fhs_init.sh               -> scripts/ttbox_fhs_init.sh

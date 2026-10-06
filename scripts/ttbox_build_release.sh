@@ -410,13 +410,13 @@ echo "[release] usbproxy 诚实性：①.sha256 一致 ✅（${UBP_SHA:0:12}…�
 STAGE="${BUILD_DIR}/.selfcheck"
 rm -rf "$STAGE"; mkdir -p "${STAGE}/bin" "${STAGE}/lib"
 
-# (1) 闭集拷贝（逐名，禁通配）—— ★V1.0.53 起闭集 = { ttbox_core_main, ttbox_web, ttbox_edid }
+# (1) 闭集拷贝（逐名，禁通配）—— ★V1.0.56 起闭集 = { ttbox_core_main, ttbox_web, ttbox_edid, ttbox_ota }
 #     （V1.0.47 加 ttbox_web；V1.0.53 把 EDID 应用入口由 shell 脚本换成 C++ 二进制）
-for _b in ttbox_core_main ttbox_web ttbox_edid; do
+for _b in ttbox_core_main ttbox_web ttbox_edid ttbox_ota; do
   install -m 0755 "${BUILD_DIR}/${_b}" "${STAGE}/bin/" || die "闭集拷贝失败：${_b}"
 done
 BIN_N="$(find "${STAGE}/bin" -maxdepth 1 -type f | wc -l)"
-[ "${BIN_N}" = "3" ] || die "§8 payload bin/ 闭集应恰 3 文件（ttbox_core_main + ttbox_web + ttbox_edid），实得 ${BIN_N} ⇒ 拒绝出货。"
+[ "${BIN_N}" = "4" ] || die "§8 payload bin/ 闭集应恰 4 文件（ttbox_core_main + ttbox_web + ttbox_edid + ttbox_ota），实得 ${BIN_N} ⇒ 拒绝出货。"
 BAD_N="$(find "${STAGE}/bin" -maxdepth 1 -type f \
            \( -name '*.bak-*' -o -name '*.bak' -o -name '*_backup*' \
               -o -name '*.o' -o -name '*.a' -o -name '*.cmake' \) | wc -l)"

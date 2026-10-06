@@ -23,7 +23,6 @@
 656|scripts/ttbox_build_release.sh
 649|scripts/ttbox_release_install.sh
 622|plugins/web/lib/profile_translate.py
-616|scripts/ttbox_ota_updater.py
 609|scripts/ttbox_fhs_init.sh
 609|scripts/ttbox_m2xx_console_accept.py
 605|plugins/web/api/hardware.py

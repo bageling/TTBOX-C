@@ -438,11 +438,11 @@ sync_tree() {
     install -d "${payload}/bin" "${payload}/lib" "${payload}/plugins" \
                "${payload}/scripts" "${payload}/deploy/systemd" "${payload}/deploy/config"
 
-    # bin/：M1 payload bin/ 为【白名单闭集】= { ttbox_core_main, ttbox_web, ttbox_edid }
+    # bin/：M1 payload bin/ 为【白名单闭集】= { ttbox_core_main, ttbox_web, ttbox_edid, ttbox_ota }
     #   （禁通配，防 .bak-* 混入）。V1.0.47 加 ttbox_web；V1.0.53 加 ttbox_edid
     #   （EDID 应用入口由 scripts/edid/edid_apply.sh 换成 C++ 二进制）。
     install -m 0755 "${build_dir}/ttbox_core_main" "${payload}/bin/ttbox_core_main"
-    for _b in ttbox_web ttbox_edid; do
+    for _b in ttbox_web ttbox_edid ttbox_ota; do
         if [ -f "${build_dir}/${_b}" ]; then
             install -m 0755 "${build_dir}/${_b}" "${payload}/bin/${_b}"
         else

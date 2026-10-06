@@ -225,9 +225,10 @@ fi
 #   - 判据写在执法点，才能防住"旁人改 sync 列表"。故显式点名闭集成员。
 # Web 迁 C++（V1.0.47）后 bin/ 闭集扩为两成员：ttbox_core_main + ttbox_web。
 #   ttbox_web 是纯 HTTP 壳 + IPC 客户端，同样带 RUNPATH \$ORIGIN（同 ttbox_core_main 口径）。
-# ★ V1.0.53 起扩为三成员：+ ttbox_edid（EDID 应用入口由 shell 换成 C++ 二进制），
+# ★ V1.0.53 起扩为三成员：+ ttbox_edid；★ V1.0.56 起为四成员：+ ttbox_ota（OTA 更新入口
+#   由 python3 脚本换成 C++ 二进制），
 #   同样是带 \$ORIGIN RUNPATH 的 ELF。
-BIN_ALLOWED=("ttbox_core_main" "ttbox_web" "ttbox_edid")
+BIN_ALLOWED=("ttbox_core_main" "ttbox_web" "ttbox_edid" "ttbox_ota")
 if [[ -d "$BIN_DIR" ]]; then
     while IFS= read -r f; do
         [[ -f "$f" ]] || continue

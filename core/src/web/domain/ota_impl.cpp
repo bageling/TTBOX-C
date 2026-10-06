@@ -22,7 +22,8 @@ namespace {
 std::string ota_jobs_dir() { return "/var/lib/ttbox/ota/jobs"; }
 
 std::string ota_updater_path() {
-    return join_path(join_path(ttbox_prefix(), "current"), "scripts/ttbox_ota_updater.py");
+    // ★ V1.0.56：由 python3 脚本换成 C++ 二进制。契约不变（argv[1]=url、可选 [key_id]）。
+    return join_path(join_path(ttbox_prefix(), "current"), "bin/ttbox_ota");
 }
 
 // key_id / version 白名单校验（对齐 ota._OTA_ID_RE，源头拒路径穿越）。
