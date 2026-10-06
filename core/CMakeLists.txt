@@ -655,6 +655,7 @@ list(APPEND CORE_SOURCES
 # ★ canonical 单列出来自己实现、**不复用** common/Json.hpp 的 dump()：它是签名协议的一部分，
 #   必须锁死字节格式；与通用 dump 混用会在"顺手优化通用函数"时静默打断 OTA 验签。
 list(APPEND CORE_SOURCES
+  src/common/Shell.cpp
   src/ota/OtaCanonical.cpp
   src/ota/OtaVersion.cpp
   # 验签与摘要：复用 auth/ed25519（TweetNaCl 自包含，零外部依赖）+ 自实现 SHA-256。
