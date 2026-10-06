@@ -118,7 +118,7 @@ const CONTROLLER_DEFAULTS = {
   fitts_a_ms: 20,
   fitts_b_ms: 20,
   fitts_deadzone_px: 3,
-  fitts_ff_gain: 0.6,
+  fitts_ff_gain: 0.85,
   // ---- 老 pid 控制器（controller_type=pid1 时才生效）----
   //   predict=0.5 = BB927 实战值（pid1.cpp main() 的 3.0 是演示值，误抄 ⇒ 乱飞）。
   kp: 25,

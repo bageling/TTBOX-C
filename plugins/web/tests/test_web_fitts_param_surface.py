@@ -31,7 +31,10 @@ FITTS_DEFAULTS = {
     'fitts_a_ms': 20.0,
     'fitts_b_ms': 20.0,
     'fitts_deadzone_px': 3.0,
-    'fitts_ff_gain': 0.6,
+    # ★ V1.0.45：0.85 是**闭环**实测定案（原 V1.0.43 的 0.6 来自开环仿真，
+    #   在闭环里偏保守）。τ=51ms 前馈下 ff 越大跟随越好，0.85 处收益饱和
+    #   （急跑 300px/s 滞后 20.00→8.34px）。
+    'fitts_ff_gain': 0.85,
 }
 CONTROLLER_TYPE_DEFAULT = 'fitts'
 
@@ -193,8 +196,9 @@ def test_core_to_web_profile_exposes_fitts_fields():
     prof = {
         'mouse': {
             'controller_type': 'fitts',
-            'fitts_a_ms': 20, 'fitts_b_ms': 20,
-            'fitts_deadzone_px': 3, 'fitts_ff_gain': 0.6,
+            # ★ 从 FITTS_DEFAULTS 取，不要硬编码字面量：默认值改过一次（0.6→0.85），
+            #   硬编码会让这里的期望值与 FITTS_DEFAULTS 悄悄脱节。
+            **{k: v for k, v in FITTS_DEFAULTS.items()},
         },
     }
     web = profile_to_web(prof)

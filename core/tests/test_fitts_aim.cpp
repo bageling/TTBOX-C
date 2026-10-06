@@ -26,7 +26,7 @@ bool near(float a, float b, float eps) { return std::fabs(a - b) < eps; }
 // ① 近慢远快：大误差的绝对移动量 > 小误差（远处快拉、近处精调）
 TEST(fitts_far_moves_faster_than_near) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);  // ff_gain=0 隔离前馈
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);  // ff_gain=0 隔离前馈
     const float near_move = c.update(10.0f, kBoxH, kGain, 0.0f, kDt);
     const float far_move = c.update(100.0f, kBoxH, kGain, 0.0f, kDt);
     CHECK(far_move > near_move);
@@ -38,14 +38,14 @@ TEST(fitts_far_moves_faster_than_near) {
 // ② 尺寸自适应死区：误差 < max(3px, 框高×5%) 不移动；超出则动
 TEST(fitts_deadzone_adaptive_to_box) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
-    // 框高 100 ⇒ 死区 = max(3, 5) = 5px
-    CHECK_EQ(c.update(4.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
-    CHECK_EQ(c.update(-4.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
-    CHECK(c.update(6.0f, 100.0f, kGain, 0.0f, kDt) > 0.0f);
-    // 框高 300 ⇒ 死区 = max(3, 15) = 15px（近目标框大死区大）
-    CHECK_EQ(c.update(10.0f, 300.0f, kGain, 0.0f, kDt), 0.0f);
-    CHECK(c.update(20.0f, 300.0f, kGain, 0.0f, kDt) > 0.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
+    // ratio=0.02（闭环实测定案）⇒ 框高 100 死区 = max(dz=3, 100×0.02=2) = 3px（dz 主导）
+    CHECK_EQ(c.update(2.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
+    CHECK_EQ(c.update(-2.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
+    CHECK(c.update(4.0f, 100.0f, kGain, 0.0f, kDt) > 0.0f);
+    // 框高 300 ⇒ 死区 = max(3, 6) = 6px（此时比例项主导 ⇒ 大框死区更大）
+    CHECK_EQ(c.update(4.0f, 300.0f, kGain, 0.0f, kDt), 0.0f);
+    CHECK(c.update(8.0f, 300.0f, kGain, 0.0f, kDt) > 0.0f);
     // 框高 20 ⇒ 死区 = max(3, 1) = 3px（像素下限兜底）
     CHECK_EQ(c.update(2.0f, 20.0f, kGain, 0.0f, kDt), 0.0f);
     CHECK(c.update(4.0f, 20.0f, kGain, 0.0f, kDt) > 0.0f);
@@ -54,7 +54,7 @@ TEST(fitts_deadzone_adaptive_to_box) {
 // ③ px → count 换算：输出 = px 移动 / gain；gain 缺失兜底 0.65 不除零
 TEST(fitts_px_to_count_via_gain) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
     const float out_g1 = c.update(100.0f, kBoxH, 1.0f, 0.0f, kDt);
     const float out_g065 = c.update(100.0f, kBoxH, kGain, 0.0f, kDt);
     // gain 越小，同样 px 移动需要的 count 越多（count = px/gain）
@@ -67,7 +67,7 @@ TEST(fitts_px_to_count_via_gain) {
 // ④ 纯函数无状态：连续同样输入返回同样输出（不像 pid1 有积分惯性）
 TEST(fitts_is_pure_function) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
     const float a = c.update(50.0f, kBoxH, kGain, 0.0f, kDt);
     const float b = c.update(50.0f, kBoxH, kGain, 0.0f, kDt);
     const float d = c.update(50.0f, kBoxH, kGain, 0.0f, kDt);
@@ -78,7 +78,7 @@ TEST(fitts_is_pure_function) {
 // ⑤ MT 钳位 + 方向正确：超大误差不发散、输出与误差同号、单调
 TEST(fitts_large_error_bounded_and_signed) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
     const float pos = c.update(500.0f, kBoxH, kGain, 0.0f, kDt);
     const float neg = c.update(-500.0f, kBoxH, kGain, 0.0f, kDt);
     CHECK(pos > 0.0f);
@@ -96,7 +96,7 @@ TEST(fitts_large_error_bounded_and_signed) {
 //    写死 dt 会让 4ms/12ms 的帧率抖动变成 ±50% 的系统性速度失配。
 TEST(fitts_scales_linearly_with_measured_dt) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
     const float at_7 = c.update(100.0f, kBoxH, kGain, 0.0f, 7.0f);
     const float at_14 = c.update(100.0f, kBoxH, kGain, 0.0f, 14.0f);
     CHECK(near(at_14 / at_7, 2.0f, 0.01f));   // dt 加倍 ⇒ 输出加倍
@@ -112,20 +112,27 @@ TEST(fitts_scales_linearly_with_measured_dt) {
 // ⑦ ★速度前馈：目标同向移动 ⇒ 输出加大（补滞后）；反向 ⇒ 减小；上限保护生效
 TEST(fitts_velocity_feedforward_reduces_lag) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
-    const float no_ff = c.update(100.0f, kBoxH, kGain, 0.0f, kDt);
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.6f);
-    const float with_ff = c.update(100.0f, kBoxH, kGain, 200.0f, kDt);
-    CHECK(with_ff > no_ff);  // 同向 ⇒ 追得更快（补滞后）
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
+    // ★ 判据：前馈的物理作用是「在贴近稳态的小误差点加速」——闭环稳态下 err 已很小，
+    //   此刻速度项决定准星能否维持住移动目标。在大误差点比 ff 有无看不出方向。
+    for (float err : {5.0f, 10.0f, 20.0f, 40.0f}) {
+        c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
+        const float no_ff = c.update(err, kBoxH, kGain, 200.0f, kDt);
+        c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.85f);
+        const float with_ff = c.update(err, kBoxH, kGain, 200.0f, kDt);
+        CHECK(with_ff > no_ff);  // 同向 ⇒ 追得更快（补滞后）
+    }
     // 反向移动：符号护栏接管（见 fitts_feedforward_never_reverses_output）——
-    // 前馈被钳到不改变误差符号，输出**不会反向**，只会比无前馈更小（甚至归零）。
-    const float against = c.update(100.0f, kBoxH, kGain, -200.0f, kDt);
-    CHECK(against <= no_ff);
-    CHECK(against > 0.0f);  // 仍与误差同向，绝不反向
+    // 前馈被钳到不改变误差符号，输出**不会反向**。
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
+    const float no_ff2 = c.update(100.0f, kBoxH, kGain, 0.0f, kDt);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.85f);
+    CHECK(c.update(100.0f, kBoxH, kGain, -200.0f, kDt) <= no_ff2);
+    CHECK(c.update(100.0f, kBoxH, kGain, -200.0f, kDt) > 0.0f);
     // ff_gain 上限保护：给到 5.0 等效于钳到 0.85（防速度噪声放大成抖）
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 5.0f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 5.0f);
     const float ff_huge = c.update(100.0f, kBoxH, kGain, 200.0f, kDt);
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.85f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.85f);
     const float ff_cap = c.update(100.0f, kBoxH, kGain, 200.0f, kDt);
     CHECK(near(ff_huge, ff_cap, 1e-3f));
 }
@@ -133,12 +140,12 @@ TEST(fitts_velocity_feedforward_reduces_lag) {
 // ⑧ 默认参数 = 仿真定案（A=20/B=20/dz=3/ff=0.6）：不 configure 也能用
 TEST(fitts_defaults_are_sim_tuned) {
     ttbox::core::aim::FittsAimController c;  // 不 configure，吃默认
-    // 默认死区 = max(3, 100×0.05) = 5px ⇒ 4px 不动、6px 动
-    CHECK_EQ(c.update(4.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
-    CHECK(c.update(6.0f, 100.0f, kGain, 0.0f, kDt) > 0.0f);
+    // 默认死区（ratio=0.02）= max(3, 100×0.02) = 3px ⇒ 2px 不动、4px 动
+    CHECK_EQ(c.update(2.0f, 100.0f, kGain, 0.0f, kDt), 0.0f);
+    CHECK(c.update(4.0f, 100.0f, kGain, 0.0f, kDt) > 0.0f);
     // 默认带前馈 ff=0.6：同向移动目标应比静止更快
     ttbox::core::aim::FittsAimController still_only;
-    still_only.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.0f);
+    still_only.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.0f);
     const float still = still_only.update(100.0f, 100.0f, kGain, 0.0f, kDt);
     CHECK(c.update(100.0f, 100.0f, kGain, 200.0f, kDt) > still);
 }
@@ -148,7 +155,7 @@ TEST(fitts_defaults_are_sim_tuned) {
 //    上游 tracker 偶发吐 NaN（除零/时间跳变）时，这道闸是最后防线。
 TEST(fitts_rejects_non_finite_input) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.6f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.85f);
     const float nan = std::nanf("");
     const float inf = std::numeric_limits<float>::infinity();
     CHECK_EQ(c.update(nan, 100.0f, kGain, 0.0f, kDt), 0.0f);        // error=NaN
@@ -168,7 +175,7 @@ TEST(fitts_rejects_non_finite_input) {
 //    这也是「不反向」的正确形态（宁可不追，也不往回跑）。
 TEST(fitts_feedforward_never_reverses_output) {
     ttbox::core::aim::FittsAimController c;
-    c.configure(20.0f, 20.0f, 3.0f, 0.05f, 0.6f);
+    c.configure(20.0f, 20.0f, 3.0f, 0.02f, 0.85f);
     // 误差为正、目标向左急冲（vel 很负）：输出必须**不为负**
     for (float vel : {-100.0f, -500.0f, -2000.0f, -10000.0f}) {
         const float out = c.update(50.0f, kBoxH, kGain, vel, kDt);

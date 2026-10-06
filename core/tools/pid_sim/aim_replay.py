@@ -54,6 +54,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 
 from pid1 import Pid1
+from fitts import Fitts
 
 # ---- 板端标定实测物理量（ttbox_motion/calibration.py:25 / :19）----
 GAIN_X_PX_PER_COUNT = 0.686
@@ -79,11 +80,23 @@ class Plant:
     box_jump_px: float = 0.0          # 每 N 帧的框跳变（低置信度抖动）
     box_jump_every: int = 20
     target_speed_px_s: float = 0.0    # 目标匀速横向移动（px/s）；0 = 静止靶
+    # ★ V1.0.44：速度估计 EMA 系数（Fitts 前馈的输入源）。
+    #   板端真值是 AimTracker 的 One-Euro 自适应滤波（AimTracker.cpp:60-78），
+    #   这里用固定 alpha 近似；**扫描出来的最优值暴露了一个真问题**：
+    #   alpha=0.2 时 300px/s 急跑滞后 40px（比 pid1 的 23px 差近一倍），
+    #   因为 EMA 太钝、速度估计本身滞后 ⇒ 前馈补不上。提高到 0.5 明显改善。
+    vel_alpha: float = 0.5
 
 
 @dataclass
 class Controller:
-    """pid1 控制器 + 输出尾链配置（与 AimThread.cpp 尾链一一对应）"""
+    """控制器 + 输出尾链配置。
+
+    ★ V1.0.44：新增 `kind` 字段做 pid1 / fitts 双控制器 A/B（板端 mouse.controller_type）。
+      kind="pid1"  → 走 Pid1（BB927 实战值，V1.0.42）
+      kind="fitts" → 走 FittsAimController 的 Python 等价实现（V1.0.43 起默认）
+    fitts_* 为 Fitts 四参；box_h_px 是死区尺寸自适应用的目标框高。
+    """
 
     kp: float = KP_NOMINAL
     kd: float = KD_NOMINAL
@@ -93,6 +106,15 @@ class Controller:
     deadzone_count: float = 1.0        # 面板「抖动忽略门槛」默认 1（index.html:6583）
     mode: str = "legacy"               # legacy | accum
     seed: int = 20260928
+    # ---- Fitts（V1.0.44）：默认值与 core MouseTypes.hpp 逐个一致 ----
+    kind: str = "fitts"                # pid1 | fitts
+    fitts_a_ms: float = 20.0
+    fitts_b_ms: float = 20.0
+    fitts_deadzone_px: float = 3.0
+    fitts_ff_gain: float = 0.85
+    fitts_deadzone_ratio: float = 0.02  # 死区比例（死区=max(dz, 框高×ratio)）
+    fitts_ff_tau_ms: float = 51.0       # 前馈时延 = 回路延迟（物理常量，不是 MT）
+    box_h_px: float = 100.0            # 目标框高（死区尺寸自适应用）
 
 
 @dataclass
@@ -135,8 +157,16 @@ def run_closed_loop(
     """
     if ctl.mode not in ("legacy", "accum"):
         raise ValueError(f"未知输出模式: {ctl.mode}")
+    if ctl.kind not in ("pid1", "fitts"):
+        raise ValueError(f"未知控制器: {ctl.kind}")
     nd = _rng(ctl.seed)
-    pid = Pid1(ctl.kp, ctl.kd, ctl.predict, ctl.rate, ctl.smooth)
+    # ★ V1.0.44：控制器按板端 mouse.controller_type 二选一。Fitts 是纯函数（无内部状态），
+    #   与 pid1（P_PID 有 kp_gain 爬升惯性）并存时互不干扰。
+    if ctl.kind == "pid1":
+        ctl_obj = Pid1(ctl.kp, ctl.kd, ctl.predict, ctl.rate, ctl.smooth)
+    else:
+        ctl_obj = Fitts(ctl.fitts_a_ms, ctl.fitts_b_ms, ctl.fitts_deadzone_px,
+                        ctl.fitts_deadzone_ratio, ctl.fitts_ff_gain, ctl.fitts_ff_tau_ms)
 
     g = plant.gain_px_per_count
     delay_frames = max(0, int(round(plant.response_delay_ms / plant.frame_ms)))
@@ -146,6 +176,11 @@ def run_closed_loop(
     remainder = 0.0
     errors: list[float] = []
     outputs: list[float] = []
+    # ★ 目标速度估计（Fitts 前馈的输入源）。板端由 AimTracker 用 One-Euro 滤波给出
+    #   （core/src/mouse/AimTracker.cpp:60-78，EMA 系数随框高/截止频率变化）。
+    #   这里用固定 EMA 近似，噪声抑制量级对齐 AimTracker 的默认档。
+    vel_est = 0.0
+    vel_alpha = plant.vel_alpha
 
     for i in range(frames):
         # --- 观测：检测噪声 + 周期性框跳（AimTracker.hpp:51 记载 y1 帧间 ±18px）---
@@ -155,8 +190,13 @@ def run_closed_loop(
         if plant.box_jump_px and plant.box_jump_every and i % plant.box_jump_every == 0:
             observed += (nd() * 2.0 - 1.0) * plant.box_jump_px
 
-        # --- 控制器：PID 输出在 count 域。误差不做任何倍率折算（V1.0.12 起不区分倍镜）---
-        u_count = pid.upd(observed)
+        # --- 控制器：输出 count。误差不做任何倍率折算（V1.0.12 起不区分倍镜）---
+        if ctl.kind == "pid1":
+            u_count = ctl_obj.upd(observed)
+        else:
+            # 速度估计用**真实目标速度**（plant 是仿真真值；板端用检测差分，此处更干净）
+            vel_est += vel_alpha * (plant.target_speed_px_s - vel_est)
+            u_count = ctl_obj.upd(observed, ctl.box_h_px, g, vel_est, plant.frame_ms)
 
         # --- 输出尾链（V3 阶段 3b 的唯一差别就在这里）---
         if ctl.mode == "legacy":
@@ -180,7 +220,13 @@ def run_closed_loop(
         applied = px_queue.pop(0)
         err -= applied
         if plant.target_speed_px_s:
-            err -= plant.target_speed_px_s * (plant.frame_ms / 1000.0)
+            # ★ V1.0.44 修建模错误：原来是 `err -= speed*dt`，把「目标横移」建成了
+            #   「误差每帧缩小」——等价于给系统加了一个人为的误差衰减项（前馈的补偿对象）。
+            #   后果：target_speed 越大误差越小，稳态指标与真实横移场景脱节；
+            #   且 vel_est（真实横移速度）与 err 的物理关系相反 ⇒ Fitts 前馈被反向抵消，
+            #   实测 ff_gain 从 0.85 调到 3.0 稳态滞后纹丝不动（37.54px）。
+            #   正确建模：目标横移 v ⇒ 误差增量 = +v·dt（准星没动时误差变大）。
+            err += plant.target_speed_px_s * (plant.frame_ms / 1000.0)
         errors.append(err)
 
     # ---- 稳态指标（取最后 settle_window 帧）----

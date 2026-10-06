@@ -459,7 +459,7 @@ struct MouseProfile {
     float fitts_deadzone_px = 3.0f;             // Fitts 死区像素下限（死区=max(px, 框高×5%)）
     // Fitts 速度前馈欠补偿系数：补「只对误差做比例响应 ⇒ 移动目标滞后 ≈ 速度×MT」的固有代价。
     // 0.6 = 仿真甜点（移动 200px/s 滞后 19.5→8.5px 降 56%，翻转仍 0）；≥0.9 噪声被放大开始抖。
-    float fitts_ff_gain = 0.6f;
+    float fitts_ff_gain = 0.85f;
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
     // 插件配置（pull_curve / continuous_lead / recoil / personal_motion / personal_trajectory）
         PullCurveConfig pull_curve;

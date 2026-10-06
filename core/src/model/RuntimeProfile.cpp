@@ -677,7 +677,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.fitts_a_ms = static_cast<float>(obj_num(*m, "fitts_a_ms", 20.0));
         p.mouse.fitts_b_ms = static_cast<float>(obj_num(*m, "fitts_b_ms", 20.0));
         p.mouse.fitts_deadzone_px = static_cast<float>(obj_num(*m, "fitts_deadzone_px", 3.0));
-        p.mouse.fitts_ff_gain = static_cast<float>(obj_num(*m, "fitts_ff_gain", 0.6));
+        p.mouse.fitts_ff_gain = static_cast<float>(obj_num(*m, "fitts_ff_gain", 0.85));
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
         p.mouse.hfov = static_cast<float>(obj_num(*m, "hfov", 83.105));
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));

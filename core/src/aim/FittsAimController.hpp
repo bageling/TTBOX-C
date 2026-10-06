@@ -29,14 +29,20 @@ namespace ttbox::core::aim {
 
 class FittsAimController {
 public:
-    // 参数（默认 = 板端仿真定案 A=20 / B=20 / deadzone_px=3 / ff_gain=0.6）
-    void configure(float a_ms, float b_ms, float deadzone_px, float deadzone_box_ratio = 0.05f,
-                   float ff_gain = 0.6f) {
+    // 参数（默认 = 闭环仿真定案 A=20 / B=20 / dz=3 / ratio=0.02 / ff_gain=0.85）
+    // ★ ratio=0.02 不是拍脑袋：闭环实测（板端实测 gain=0.686/51ms/噪声±2px，box_h=100）
+    //   ratio=0.05 ⇒ 死区被放大到 5px ⇒ 静止稳态误差 0.47→2.96px（6.3×）、急跑抖动 10→24 次。
+    //   ratio ≤0.03（死区仍由 dz=3px 主导）三项全最优 ⇒ 定 0.02。
+    void configure(float a_ms, float b_ms, float deadzone_px, float deadzone_box_ratio = 0.02f,
+                   float ff_gain = 0.85f, float ff_tau_ms = 51.0f) {
         if (a_ms > 0.0f) a_ms_ = a_ms;
         if (b_ms > 0.0f) b_ms_ = b_ms;
         if (deadzone_px > 0.0f) deadzone_px_ = deadzone_px;
-        if (deadzone_box_ratio > 0.0f) deadzone_box_ratio_ = deadzone_box_ratio;
+        // ★ 守卫用 >= 0：ratio=0（只要绝对像素死区）是合法配置，
+        //   `> 0.0` 会让属性根本没被赋值 ⇒ 首次访问是未定义值。
+        if (deadzone_box_ratio >= 0.0f) deadzone_box_ratio_ = deadzone_box_ratio;
         if (ff_gain >= 0.0f) ff_gain_ = ff_gain;
+        if (ff_tau_ms > 0.0f) ff_tau_ms_ = ff_tau_ms;
     }
 
     // 单轴更新。
@@ -70,22 +76,19 @@ public:
         const float id = std::log2(2.0f * std::abs(error) / W + 1.0f);
         // 3. 移动耗时 MT = A + B·ID，钳 [kMinMs, kMaxMs]
         const float mt = std::clamp(a_ms_ + b_ms_ * id, kMinMs, kMaxMs);
-        // 4. ★速度前馈（补 Fitts 模型的固有滞后）：
-        //    Fitts 只对**误差**做比例响应，匀速移动目标必然滞后 ≈ 速度×MT
-        //    （实测 err=100px 时 MT=108ms ⇒ 50px/s 目标隐含滞后 5.4px；叠加 51ms 回路
-        //     延迟后总滞后约 110ms，表现为"追着慢"）。
-        //    这里按「等效移动 MT 毫秒后的误差」把速度项加进控制量：
-        //        control = error + ff_gain × vel × MT
-        //    ff_gain 是欠补偿系数：0.6 = 仿真甜点（移动 200px/s 滞后 19.5→8.5px，降 56%，
-        //    翻转仍为 0）；≥0.9 会因速度估计噪声被放大而开始抖（实测翻转 2~18）⇒ 上限钳 0.85。
-        //    ★符号护栏：前馈**只能加速同向收敛，不能把输出推到反方向**。
-        //      目标急速反向（|vel×MT| > |err|）时纯线性叠加会让输出反向 ⇒ 准星往回跑，
-        //      比"跟慢一点"更糟（实测 err=+50px/vel=-2000px/s 时原始叠加输出 -6.9）。
-        //      ⇒ 反向前馈**保留原符号、只钳幅度**到 |err| 以内：效果是「减速」而非「加速」。
-        //      ⚠ 曾经的 bug：用 copysign(..., error) 把反向前馈翻成了同号（输出反而变大，
-        //        err=+100/vel=-200 时输出 11.28 > 无前馈 9.99）。正确做法是钳 |ff| 不动符号。
+        // 4. ★速度前馈（补「移动目标落后」）：
+        //    回路里目标在动时，准星要追上就得提前往他要去的方向走。
+        //    补偿量 = 目标速度 × **前馈时延 τ**（该走多远 = 速度 × 滞后时间）。
+        //    ★ τ 必须是**固定物理量**（回路延迟 response_delay_ms，板端实测 51ms），
+        //      **不能拿 MT 代替**。MT = A + B·ID 是误差的函数（误差越大 MT 越长），
+        //      用 MT 当 τ 会形成正反馈：越跟不上 → MT 越长 → 前馈越猛 → 过冲 → 误差更大。
+        //      闭环实测（板端实测 gain=0.686/51ms/噪声±2px）两种写法天差地别：
+        //        τ=MT  ：150px/s 滞后 7.08→13.99px、300px/s 19.81→39.95px（**恶化一倍**）
+        //        τ=51ms：150px/s 9.41→5.57px、  300px/s 25.93→9.36px（**降 64%**）
+        //    ff_gain 是欠补偿系数（0.85 = 仿真甜点，实测继续加大收益已饱和）。
+        //    ★符号护栏：前馈**不能把输出推到反方向**（准星往回跑比跟慢一点更糟）。
         const float dt = (dt_ms > 0.0f) ? std::clamp(dt_ms, kMinDtMs, kMaxDtMs) : kDefaultDtMs;
-        float ff = std::min(ff_gain_, 0.85f) * vel_px_s * (mt * 0.001f);
+        float ff = std::min(ff_gain_, kFfHardCap) * vel_px_s * (ff_tau_ms_ * 0.001f);
         if ((error > 0.0f && ff < 0.0f) || (error < 0.0f && ff > 0.0f)) {
             // 反向前馈：钳幅度到 |err| 以内（保持负号 ⇒ 输出减小但绝不反向）
             const float capped = std::min(std::fabs(ff), std::fabs(error));
@@ -108,11 +111,15 @@ private:
     static constexpr float kDefaultDtMs = 6.9f; // dt 缺失兜底（144fps ≈ 6.9ms）
     static constexpr float kMinDtMs = 1.0f;     // dt 下限（防 0 除/防病态小值放大）
     static constexpr float kMaxDtMs = 40.0f;    // dt 上限（长卡顿/掉帧时不让一帧打飞）
+    static constexpr float kFfHardCap = 0.85f;  // ff_gain 硬钳（闭环实测收益在此饱和）
     float a_ms_ = 20.0f;                        // Fitts 时间常数 A（基础反应时间）
     float b_ms_ = 20.0f;                        // Fitts 时间常数 B（难度系数）
     float deadzone_px_ = 3.0f;                  // 死区绝对像素下限
-    float deadzone_box_ratio_ = 0.05f;          // 死区框高比例（死区 = max(px, 框高×比例)）
-    float ff_gain_ = 0.6f;                      // 速度前馈欠补偿系数（仿真甜点；上限钳 0.85 防抖）
+    float deadzone_box_ratio_ = 0.02f;          // 死区框高比例（闭环实测定案，见 configure 注释）
+    float ff_gain_ = 0.85f;                     // 速度前馈欠补偿系数（闭环实测甜点）
+    // ★ 前馈时延 τ：补偿的是**回路延迟**（物理常量），不是 MT。
+    //   取 51ms = 板端实测 response_delay_ms（AimThread 用它算抖动前馈扣除）。
+    float ff_tau_ms_ = 51.0f;
 };
 
 }  // namespace ttbox::core::aim

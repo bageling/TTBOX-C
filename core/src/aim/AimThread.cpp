@@ -294,11 +294,13 @@ void AimThread::loop() {
                 fitts_x_.configure(frame_profile->mouse.fitts_a_ms,
                                    frame_profile->mouse.fitts_b_ms,
                                    frame_profile->mouse.fitts_deadzone_px,
-                                   0.05f, frame_profile->mouse.fitts_ff_gain);
+                                   0.02f, frame_profile->mouse.fitts_ff_gain,
+                                   frame_profile->mouse.response_delay_ms);
                 fitts_y_.configure(frame_profile->mouse.fitts_a_ms,
                                    frame_profile->mouse.fitts_b_ms,
                                    frame_profile->mouse.fitts_deadzone_px,
-                                   0.05f, frame_profile->mouse.fitts_ff_gain);
+                                   0.02f, frame_profile->mouse.fitts_ff_gain,
+                                   frame_profile->mouse.response_delay_ms);
                 gain_x_ppc = frame_profile->mouse.gain_x_px_per_count > 1e-4f
                                  ? frame_profile->mouse.gain_x_px_per_count : 0.65f;
                 gain_y_ppc = frame_profile->mouse.gain_y_px_per_count > 1e-4f
