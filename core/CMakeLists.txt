@@ -650,6 +650,14 @@ list(APPEND CORE_SOURCES
   src/edid/EdidConfig.cpp
   src/edid/EdidApply.cpp)
 
+# ---- OTA 核心（V1.0.56：自 scripts/ttbox_ota_updater.py 移植）----
+# 同样是纯逻辑优先：版本比较 / canonical(验签序列化) / 标识符消毒 —— 零平台依赖，host 可编可对拍。
+# ★ canonical 单列出来自己实现、**不复用** common/Json.hpp 的 dump()：它是签名协议的一部分，
+#   必须锁死字节格式；与通用 dump 混用会在"顺手优化通用函数"时静默打断 OTA 验签。
+list(APPEND CORE_SOURCES
+  src/ota/OtaCanonical.cpp
+  src/ota/OtaVersion.cpp)
+
 # ---- Phase2：Preview 源闭包（libjpeg + OpenCV 双端，板端 UNIX）源选择 ----
 # 顺序硬约束：本块必须位于 add_library(ttbox_core ...) 之前。
 #   add_library 一旦执行，CORE_SOURCES 是否包含 PreviewModule.cpp 就被固化；
@@ -1075,6 +1083,9 @@ if(TTBOX_CORE_BUILD_TESTS)
   # EDID C++ 移植的逐字节对拍（V1.0.53）。基准 = tools/edid_golden_gen.py 在删 Python 前
   # 冻结的现役实现输出；host 可跑（EDID 核心零平台依赖）。
   list(APPEND TEST_SOURCES tests/test_edid_golden.cpp)
+  # OTA C++ 移植的逐值对拍（V1.0.56）。基准 = tools/ota_golden_gen.py 在删 Python 前冻结的
+  # 现役实现输出（114 例）。OTA 是唯一升级通道，等价性必须钉死。
+  list(APPEND TEST_SOURCES tests/test_ota_golden.cpp)
   add_executable(ttbox_core_tests ${TEST_SOURCES})
   target_include_directories(ttbox_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   # D1：把真实 rknn_api.h 的**绝对路径**注入测试（host/board 通用），使
@@ -1093,13 +1104,21 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_compile_definitions(ttbox_core_tests PRIVATE
     TTBOX_RKNN_API_HEADER="${TTBOX_RKNN_API_HEADER_PATH}"
     # ★ V1.0.53：EDID 对拍基准路径（configure 期确定；见下方存在性断言）
-    TTBOX_EDID_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json")
+    TTBOX_EDID_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json"
+    # ★ V1.0.56：OTA 对拍基准路径
+    TTBOX_OTA_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ota_golden.json")
   # EDID 对拍基准必须存在，否则 test_edid_golden 会静默失效（同 TTBOX_RKNN_API_HEADER 的
   # 「守卫存在=假象」纪律）。它是**入库文件**（tools/edid_golden_gen.py 产出）。
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/edid_golden.json")
     message(FATAL_ERROR
       "EDID 对拍基准缺失：core/tests/fixtures/edid_golden.json。"
       "请先运行 tools/edid_golden_gen.py（需现役 Python 实现在场）重新冻结。")
+  endif()
+  # OTA 对拍基准同理（OTA 是唯一升级通道，等价性靠它钉死）
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ota_golden.json")
+    message(FATAL_ERROR
+      "OTA 对拍基准缺失：core/tests/fixtures/ota_golden.json。"
+      "请先运行 tools/ota_golden_gen.py（需现役 Python 实现在场）重新冻结。")
   endif()
   target_link_libraries(ttbox_core_tests PRIVATE ttbox_core)
   add_test(NAME ttbox_core_tests COMMAND ttbox_core_tests)
