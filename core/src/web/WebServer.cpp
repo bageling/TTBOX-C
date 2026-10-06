@@ -118,6 +118,26 @@ bool WebServer::start(std::string* error) {
     // 请求体上限对齐 Python MAX_CONTENT_LENGTH（256 MB，模型上传）。
     svr_.set_payload_max_length(256u * 1024u * 1024u);
 
+    // ★ V1.0.47 上板故障根因：升级瞬间旧 Flask(waitress) 退出后，8000 端口存在 TIME_WAIT
+    //   连接，而 httplib 默认在 Linux 下只设 SO_REUSEPORT（不解决 TIME_WAIT 端口复用）
+    //   ⇒ 新进程 bind 8000 报 listen 失败 → 健康检查失败 → 升级回滚。
+    //   这里用 set_socket_options 覆盖为「SO_REUSEADDR（解决 TIME_WAIT）+ SO_REUSEPORT（保留
+    //   原多进程语义）」，让升级重启时端口能被立即复用。Windows 侧只设 SO_REUSEADDR。
+    svr_.set_socket_options([](socket_t sock) {
+        int yes = 1;
+#ifdef _WIN32
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&yes), sizeof(yes));
+#else
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const void*>(&yes), sizeof(yes));
+#ifdef SO_REUSEPORT
+        setsockopt(sock, SOL_SOCKET, SO_REUSEPORT,
+                   reinterpret_cast<const void*>(&yes), sizeof(yes));
+#endif
+#endif
+    });
+
     svr_.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) {
         return enforce_gate(req, res);
     });

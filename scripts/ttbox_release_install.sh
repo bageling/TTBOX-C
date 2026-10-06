@@ -465,6 +465,11 @@ activate() {
             warn "健康检查失败 —— 自动回切上一版本"
             if [[ -n "$PREV_VERSION" ]]; then
                 switch_current "$PREV_VERSION"
+                # ★ V1.0.47 上板故障根因 2：回切只切了 current 软链、没同步旧版本的 systemd unit，
+                #   导致 unit 停在「新版本的 ExecStart」而 current 已是旧版本 ⇒ exec not found
+                #   循环、面板打不开。这里补上 sync_units_and_runtime_perms（此时 current 已切回
+                #   PREV_VERSION，ensure 脚本会按 PREV_VERSION 的 unit 重新同步 /etc/systemd/system）。
+                sync_units_and_runtime_perms
                 reload_and_restart
                 die "激活失败：已回切到 ${PREV_VERSION}（请检查 core IPC socket 与 web:${WEB_PORT}）"
             else
