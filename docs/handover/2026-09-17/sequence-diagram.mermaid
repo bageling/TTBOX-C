@@ -1,0 +1,46 @@
+sequenceDiagram
+    autonumber
+    participant B as Browser ConsoleApp
+    participant F as TTBoxWeb Flask
+    participant G as ActivationGate
+    participant C as Core IPC
+    participant CL as CloudLicense
+
+    Note over B,CL: Scenario 1 - cold start, unactivated (server fail-closed)
+    B->>F: GET /
+    F->>G: before_request
+    G->>C: GET_STATUS.license
+    C-->>G: activated=false
+    G-->>B: 302 Location /activate
+    B->>F: GET /activate
+    F-->>B: activate.html (1:1 license-gate card)
+    B->>F: POST /api/license/activate {license_key}
+    F->>CL: card_login (HMAC 4 headers)
+    CL-->>F: 200 OK
+    F->>C: ACTIVATE_CLOUD (single source of truth)
+    F-->>B: 200 {ok,data:{license,ui,...}}
+    B->>F: GET / (reload)
+
+    Note over B,CL: Scenario 2 - activated panel load (1:1, 12 pages)
+    B->>F: GET /
+    F->>G: before_request
+    G-->>F: activated -> pass
+    F-->>B: index.html (12 pages + brand slots)
+    B->>F: GET /api/state
+    F-->>B: {ok,data:{config,models,presets,state{license,ui},ui,ui_brand}}
+    B->>B: applyBrand(ui) . populateForm(config) . renderRuntime
+    B->>F: GET /api/config
+    B->>F: GET /api/hardware/display | /api/hardware/mouse
+    B->>F: GET /api/makcu/devices | /api/ferrum/devices
+    B->>F: GET /api/hailo/status (on hailo-page)
+    loop every 2s
+        B->>F: GET /api/state
+    end
+
+    Note over B,CL: Scenario 3 - runtime revocation (server still denies + panel overlay fallback)
+    B->>F: GET /api/state
+    F->>G: before_request
+    G-->>B: 403 {ok:false,error:activation_required}
+    B->>F: GET /api/license (whitelisted)
+    F-->>B: {license.valid=false}
+    B->>B: show licenseGateOverlay / guide re-activation

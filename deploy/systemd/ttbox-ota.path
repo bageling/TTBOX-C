@@ -1,0 +1,23 @@
+# ttbox-ota.path — OTA 特权通道的监听端（2026-09-18 定案 §2.2）
+#
+# 通道：web（User=ttbox）往任务目录丢 *.json 任务文件 → 本 path 单元感知 →
+#       拉起 ttbox-ota.service（User=root）消费。全仓无 sudoers/polkit，
+#       这是 web 驱动 root 更新器的唯一特权通道，权限面 = 一个 0770 目录。
+#
+# 任务目录：/var/lib/ttbox/ota/jobs/（root:ttbox 0770）——由 ttbox_release_install.sh
+# 首装/升级时创建（见 install step"运行时目录"段）。
+#
+# 触发语义：PathExistsGlob 在文件消失后再 armed，若目录里又有 *.json 会再次触发；
+# 更新器消费完把任务文件移入 processed/failed 子目录（不匹配 *.json glob），
+# 因此不会死循环。service 与本单元同被 enable（见 ttbox_release_install.sh unit 清单）。
+
+[Unit]
+Description=TTBOX OTA update job directory watcher
+Documentation=file:/opt/ttbox/current/docs/交付前更新功能定案-2026-09-18.md
+
+[Path]
+PathExistsGlob=/var/lib/ttbox/ota/jobs/*.json
+Unit=ttbox-ota.service
+
+[Install]
+WantedBy=multi-user.target

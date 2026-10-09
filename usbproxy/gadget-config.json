@@ -1,0 +1,19 @@
+{
+	"hid_interval" : 1,
+	"hid_protocol" : 2,
+	"hid_report_desc_hex" : "05010902a1010901a1000509190129051500250195057501810295017503810105010930093109381581257f750895038106c0c0",
+	"hid_report_length" : 4,
+	"hid_subclass" : 1,
+	"usb_bcd_device" : 256,
+	"usb_bcd_usb" : 512,
+	"usb_configuration" : "Mouse",
+	"usb_device_class" : 0,
+	"usb_device_protocol" : 0,
+	"usb_device_subclass" : 0,
+	"usb_manufacturer" : "Corsair",
+	"usb_max_power" : 250,
+	"usb_pid" : 28786,
+	"usb_product" : "Corsair USB Optical Mouse",
+	"usb_serial" : "OPI5P-MOUSE",
+	"usb_vid" : 39552
+}

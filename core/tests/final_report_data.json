@@ -1,0 +1,80 @@
+{
+  "capture_fps_avg": 141.7,
+  "capture_fps_min": 140.8,
+  "infer_fps_avg": 43.1,
+  "infer_ms_avg": 63.55,
+  "infer_ms_p50": 63.5,
+  "decode_ms_avg": 5.39,
+  "decode_ms_p50": 5.4,
+  "e2e_ms_avg": 66.6,
+  "e2e_p50_ms_avg": 65.25,
+  "detect_count_stable": 5,
+  "samples": 12,
+  "all_detect5": true,
+  "injection_allowed": false,
+  "output_enabled": false,
+  "mouse_dx_dy": [
+    0,
+    0
+  ],
+  "model": "yolo261n-rk3588",
+  "input": "640x640 FP16 NHWC",
+  "classes": "COCO 80",
+  "detections": [
+    {
+      "class_id": 0,
+      "class": "person",
+      "score": 0.83,
+      "box": [
+        1502.1,
+        706.6,
+        1529.8,
+        969.3
+      ]
+    },
+    {
+      "class_id": 2,
+      "class": "car",
+      "score": 0.904,
+      "box": [
+        1305.4,
+        746.2,
+        1383.5,
+        801.2
+      ]
+    },
+    {
+      "class_id": 2,
+      "class": "car",
+      "score": 0.864,
+      "box": [
+        1357.9,
+        742.6,
+        1411.8,
+        777.9
+      ]
+    },
+    {
+      "class_id": 2,
+      "class": "car",
+      "score": 0.805,
+      "box": [
+        1443.5,
+        735.2,
+        1519.6,
+        806.3
+      ]
+    },
+    {
+      "class_id": 5,
+      "class": "bus",
+      "score": 0.88,
+      "box": [
+        1196.5,
+        706.1,
+        1280.7,
+        783.9
+      ]
+    }
+  ]
+}

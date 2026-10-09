@@ -1,0 +1,64 @@
+########## A4 修正：留档 md5 正确解析 ##########
+13:| `commit` | `1bf4737928650ebd61b9692bdb00f3546e550bfd` |
+22:| `md5` | `b156c5cc5a069b96ebc56fa703221999` |
+23:| `sha256` | `59178a00ba6696fec608150cc0962134179aace8892492d1fb6f96c23a4ddbc3` |
+实算=b156c5cc5a069b96ebc56fa703221999 留档=b156c5cc5a069b96ebc56fa703221999
+A4 PASS（一致）
+
+########## A17 修正：unit 计数（判据 = 无计数>1 的行） ##########
+      1 ttbox-core.service
+      1 ttbox-edid.service
+      1 ttbox-ensure.service
+      1 ttbox-preview.service
+      1 ttbox-usbproxy.service
+      1 ttbox-web.service
+A17 PASS（各 1 份）
+
+########## A7/A8：出货 stage 真实位置 ##########
+373:STAGE="${BUILD_DIR}/.selfcheck"
+解析 STAGE 变量定义 = "${BUILD_DIR}/.selfcheck"
+
+########## G4：cpu6 硬编码是否还在（全仓搜） ##########
+--- CpuAffinity.cpp 关键段 ---
+
+// 写 sysfs（root 权限）；返回 false 带错误说明
+bool write_sys(const std::string& path, const std::string& value, std::string* error) {
+    std::ofstream f(path);
+    if (!f) {
+        if (error) *error = "open " + path + " 失败: " + std::strerror(errno);
+        return false;
+    }
+    f << value;
+    f.flush();
+    if (!f.good()) {
+        if (error) *error = "write " + path + " 失败: " + std::strerror(errno);
+        return false;
+    }
+    return true;
+}
+
+// 枚举 /sys/devices/system/cpu/cpufreq/ 下全部 policy 目录名
+std::vector<std::string> list_policies() {
+    std::vector<std::string> policies;
+    const char* base = "/sys/devices/system/cpu/cpufreq";
+    DIR* d = ::opendir(base);
+    if (!d) return policies;
+    while (auto* e = ::readdir(d)) {
+        const std::string name = e->d_name;
+        if (name.rfind("policy", 0) == 0 && name.size() > 6) {
+            const bool digits = std::all_of(name.begin() + 6, name.end(), ::isdigit);
+            if (digits) policies.push_back(name);
+        }
+    }
+    ::closedir(d);
+    std::sort(policies.begin(), policies.end());
+    return policies;
+}
+
+}  // namespace
+
+
+########## G8 / C2：host 构建目录是否存在（ctest 基线） ##########
+无 host 构建目录 ⇒ ctest 基线未在本次实测
+/usr/bin/cmake
+/usr/bin/ninja

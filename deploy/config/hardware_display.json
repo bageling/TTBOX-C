@@ -1,0 +1,10 @@
+{
+  "device": "auto",
+  "name": "TTBox-COMPAT",
+  "vendor": "AIB",
+  "product_id": "0x2400",
+  "serial": "0xA1B00001",
+  "native_mode": "1080p240",
+  "native_only": true,
+  "profile": "boot-safe-full"
+}

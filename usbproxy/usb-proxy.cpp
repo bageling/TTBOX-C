@@ -1,0 +1,741 @@
+#include <atomic>
+#include <unordered_map>
+#include <vector>
+
+#include "host-raw-gadget.h"
+#include "device-libusb.h"
+#include "proxy.h"
+#include "misc.h"
+#include "mouse_control.hpp"
+
+// ── 全局运行状态 / 命令行开关（多处读写，跨文件可见）──
+int verbose_level = 0;
+bool please_stop_ep0 = false;
+std::atomic<bool> please_stop_eps(false);
+
+bool injection_enabled = false;
+std::string injection_file = "injection.json";
+Json::Value injection_config;
+
+// ── mouse_control（自研通讯层）──
+// ★ 跨进程同值（A-PATH-5）：本进程独立于 core，无法 include core/src/common/Paths.hpp。
+//   这两个默认值 = usbproxy 侧的**唯一定义**，必须与 core 的
+//   Paths.hpp::kMouseCmdSocketDefault / kMouseEventSocketDefault（及 web paths.py）逐字符相等；
+//   由 scripts/ttbox_conventions_gate.sh 同值断言防漂移（登记表见 docs/protocols/config-path-env-registry.md）。
+bool enable_mouse_control = false;
+std::string mouse_cmd_socket = "/run/ttbox-mouse-passthrough/cmd.sock";
+std::string mouse_event_socket = "/run/ttbox-mouse-passthrough/event.sock";
+
+bool customized_config_enabled = false;
+std::string customized_config_file = "config.json";
+// 1.5.61：认领前**不再**无条件 USB reset。
+//   quirk 固件（Nearlink/星闪接收器一族）连一次 usb reset 都扛不住 ⇒ 设备直接掉总线
+//   （日志特征：libusb_reset_device() failed: Entity not found，之后 lsusb 里再也看不到它），
+//   只能拔插。1.5.58 起描述符已经改走内核 hidraw 缓存，这个 reset 已无存在理由。
+//   需要旧行为时用 --enable_customized_config + config.json 里置 true（或加新开关）。
+bool reset_device_before_proxy = false;
+bool bmaxpacketsize0_must_greater_than_64 = true;
+bool auto_remap_endpoints = false;
+bool hid_passthrough_compat = false;
+// 1.5.58：默认**不**向设备发 class GET_DESCRIPTOR(Report)（见 --allow_class_descriptor_fetch）。
+bool allow_class_descriptor_fetch = false;
+bool set_config_ack_before_configure = false;
+int iso_batch_size = ISO_BATCH_SIZE_DEFAULT;
+enum usb_device_speed device_speed = USB_SPEED_HIGH;
+
+// Print the transform summary for a single injection rule.
+// Returns true if the rule references a Lua script_file.
+static bool print_rule_transforms(const Json::Value &rule)
+{
+	bool has_pattern = rule["content_pattern"].size() > 0 &&
+			   !rule.get("replacement", "").asString().empty();
+	bool has_ops     = rule.isMember("operations") &&
+			   rule["operations"].size() > 0;
+	bool has_script  = rule.isMember("script_file") &&
+			   !rule["script_file"].asString().empty();
+
+	if (has_pattern) printf("  pattern+replace");
+	if (has_ops)     printf("  %u operation(s)", rule["operations"].size());
+	if (has_script)  printf("  script: %s", rule["script_file"].asString().c_str());
+	if (!has_pattern && !has_ops && !has_script) printf("  (no transform configured)");
+
+	return has_script;
+}
+
+// 打印注入规则汇总（启用的规则数、每条规则用的变换、Lua 缺失告警）。
+static void print_injection_summary()
+{
+	const std::vector<std::string> ep_types   = {"int", "bulk", "isoc"};
+	const std::vector<std::string> ctrl_types = {"modify", "ignore", "stall"};
+
+	int active = 0;
+	for (const auto &type : ep_types)
+		for (unsigned int i = 0; i < injection_config[type].size(); i++)
+			if (injection_config[type][i]["enable"].asBool()) active++;
+	for (const auto &sub : ctrl_types)
+		for (unsigned int i = 0; i < injection_config["control"][sub].size(); i++)
+			if (injection_config["control"][sub][i]["enable"].asBool()) active++;
+
+	if (active == 0) {
+		printf("Injection rules: none enabled\n");
+		return;
+	}
+
+	printf("Injection rules: %d active\n", active);
+
+	bool any_script = false;
+
+	for (const auto &type : ep_types) {
+		for (unsigned int i = 0; i < injection_config[type].size(); i++) {
+			const Json::Value &rule = injection_config[type][i];
+			if (!rule["enable"].asBool()) continue;
+
+			int ep = hexToDecimal(rule["ep_address"].asInt());
+			printf("  [%-4s]  EP 0x%02x", type.c_str(), ep);
+			any_script |= print_rule_transforms(rule);
+			printf("\n");
+		}
+	}
+
+	for (const auto &sub : ctrl_types) {
+		for (unsigned int i = 0; i < injection_config["control"][sub].size(); i++) {
+			const Json::Value &rule = injection_config["control"][sub][i];
+			if (!rule["enable"].asBool()) continue;
+
+			printf("  [control/%-6s]  bRequestType=0x%02x bRequest=0x%02x",
+			       sub.c_str(),
+			       rule["bRequestType"].asInt(),
+			       rule["bRequest"].asInt());
+
+			if (sub == "modify")
+				any_script |= print_rule_transforms(rule);
+			printf("\n");
+		}
+	}
+
+#ifndef HAVE_LUA
+	if (any_script)
+		fprintf(stderr, "Warning: one or more rules use 'script_file' but usb-proxy was built "
+			"without Lua support — scripts will be ignored.\n"
+			"  Install a Lua dev package and rebuild: make clean && make\n");
+#else
+	(void)any_script;
+#endif
+}
+
+// 打印命令行用法并退出。
+void usage() {
+	printf("Usage:\n");
+	printf("\t-h/--help: print this help message\n");
+	printf("\t-v/--verbose: increase verbosity\n");
+	printf("\t--device: use specific device\n");
+	printf("\t--driver: use specific driver\n");
+	printf("\t--vendor_id: use specific vendor_id of USB device\n");
+	printf("\t--product_id: use specific product_id of USB device\n");
+	printf("\t--enable_injection: enable injection using the default injection.json\n");
+	printf("\t--injection_file: enable injection using the specified rules file\n");
+	printf("\t--enable_customized_config: enable the customized config feature\n");
+	printf("\t--auto_remap_endpoints: enable endpoint remapping when UDC can't use descriptors directly\n");
+	printf("\t--hid_passthrough_compat: ACK Windows HID setup requests that some real devices stall\n");
+	printf("\t--set_config_ack_before_configure: ACK SET_CONFIGURATION before Raw Gadget CONFIGURE\n");
+	printf("\t--iso_batch_size N: number of isochronous packets per transfer (1-%d, default %d)\n\n",
+		ISO_BATCH_SIZE_MAX, ISO_BATCH_SIZE_DEFAULT);
+	printf("* If `device` not specified, `usb-proxy` will use `dummy_udc.0` as default device.\n");
+	printf("* If `driver` not specified, `usb-proxy` will use `dummy_udc` as default driver.\n");
+	printf("* If both `vendor_id` and `product_id` not specified, `usb-proxy` will connect\n");
+	printf("  the first USB device it can find.\n");
+	printf("* If `injection_file` not specified, `usb-proxy` will use `injection.json` by default.\n\n");
+	exit(1);
+}
+
+// 信号处理：首收 SIGINT/SIGTERM 置停止标志优雅退出，再收第二个则强制退出。
+void handle_signal(int signum) {
+	switch (signum) {
+	case SIGTERM:
+	case SIGINT:
+		static bool signal_received = false;
+		if (signal_received) {
+			printf("Signal received again, force exiting\n");
+			exit(1);
+		}
+		if (signum == SIGTERM)
+			printf("Received SIGTERM, stopping...\n");
+		else
+			printf("Received SIGINT, stopping...\n");
+
+		signal_received = true;
+		please_stop_ep0 = true;
+		please_stop_eps = true;
+		break;
+	}
+}
+
+// Wrapper for UDC endpoint info, allowing future extension with additional state.
+struct EndpointCandidate {
+	struct usb_raw_ep_info info;
+};
+
+// 判断某 UDC 端点候选能否支持给定设备端点的方向/类型/包长。
+static bool candidate_supports_endpoint(const EndpointCandidate &candidate,
+					const struct usb_endpoint_descriptor &endpoint)
+{
+	bool dir_in = usb_endpoint_dir_in(&endpoint);
+	int type = usb_endpoint_type(&endpoint);
+
+	if (dir_in && !candidate.info.caps.dir_in)
+		return false;
+	if (!dir_in && !candidate.info.caps.dir_out)
+		return false;
+
+	switch (type) {
+	case USB_ENDPOINT_XFER_ISOC:
+		if (!candidate.info.caps.type_iso)
+			return false;
+		break;
+	case USB_ENDPOINT_XFER_BULK:
+		if (!candidate.info.caps.type_bulk)
+			return false;
+		break;
+	case USB_ENDPOINT_XFER_INT:
+		if (!candidate.info.caps.type_int)
+			return false;
+		break;
+	default:
+		return false;
+	}
+
+	uint16_t max_packet = usb_endpoint_maxp(&endpoint);
+	if (candidate.info.limits.maxpacket_limit &&
+	    max_packet > candidate.info.limits.maxpacket_limit)
+		return false;
+
+	return true;
+}
+
+// 由 UDC 端点算出主机侧端点地址（ADDR_ANY 时沿用设备地址，否则按方向补 DIR 位）。
+static uint8_t compute_host_endpoint_address(const EndpointCandidate &candidate,
+					     uint8_t device_address,
+					     bool dir_in)
+{
+	if (candidate.info.addr == USB_RAW_EP_ADDR_ANY)
+		return device_address;
+
+	uint8_t host_address = static_cast<uint8_t>(candidate.info.addr);
+	if (dir_in)
+		host_address |= USB_DIR_IN;
+	else
+		host_address &= ~USB_DIR_IN;
+
+	return host_address;
+}
+
+// 在候选里找一个未用且能支持该端点的，返回下标；没有返回 -1。
+static int find_candidate_index(const std::vector<EndpointCandidate> &candidates,
+				std::vector<bool> &candidate_used,
+				const struct usb_endpoint_descriptor &endpoint)
+{
+	for (size_t i = 0; i < candidates.size(); i++) {
+		if (candidate_used[i])
+			continue;
+		if (!candidate_supports_endpoint(candidates[i], endpoint))
+			continue;
+		return i;
+	}
+	return -1;
+}
+
+// 给一个配置的全部端点分配 UDC 端点并改写地址/包长（同设备地址复用同一候选）。
+static int remap_config_endpoints(struct raw_gadget_config *config,
+				  const std::vector<EndpointCandidate> &candidates)
+{
+	std::vector<bool> candidate_used(candidates.size(), false);
+	std::unordered_map<uint8_t, size_t> device_to_candidate;
+
+	for (int i = 0; i < config->config.bNumInterfaces; i++) {
+		struct raw_gadget_interface *iface = &config->interfaces[i];
+		for (int j = 0; j < iface->num_altsettings; j++) {
+			struct raw_gadget_altsetting *alt = &iface->altsettings[j];
+			uint8_t iface_num = alt->interface.bInterfaceNumber;
+			uint8_t alt_setting = alt->interface.bAlternateSetting;
+			for (int k = 0; k < alt->interface.bNumEndpoints; k++) {
+				struct raw_gadget_endpoint *ep = &alt->endpoints[k];
+				uint8_t device_address = ep->device_bEndpointAddress;
+				auto existing = device_to_candidate.find(device_address);
+
+				size_t candidate_index;
+				if (existing != device_to_candidate.end()) {
+					candidate_index = existing->second;
+				}
+				else {
+					int idx = find_candidate_index(candidates,
+								       candidate_used,
+								       ep->endpoint);
+					if (idx < 0) {
+						printf("Failed to remap endpoint 0x%02x "
+						       "(interface %u, alt %u)\n",
+						       device_address, iface_num, alt_setting);
+						return -1;
+					}
+					candidate_index = (size_t)idx;
+					device_to_candidate[device_address] = candidate_index;
+					candidate_used[candidate_index] = true;
+				}
+
+				bool dir_in = usb_endpoint_dir_in(&ep->endpoint);
+				uint8_t host_address = compute_host_endpoint_address(
+					candidates[candidate_index], device_address, dir_in);
+
+				if (host_address != ep->endpoint.bEndpointAddress) {
+					printf("Remapping endpoint 0x%02x -> 0x%02x "
+					       "(interface %u, alt %u)\n",
+						device_address, host_address, iface_num, alt_setting);
+				}
+
+				ep->endpoint.bEndpointAddress = host_address;
+				ep->udc_maxpacket_limit = candidates[candidate_index].info.limits.maxpacket_limit;
+
+				// Clamp isochronous max packet size to UDC limit; UDC can't do high bandwidth.
+				if (usb_endpoint_type(&ep->endpoint) == USB_ENDPOINT_XFER_ISOC &&
+				    ep->udc_maxpacket_limit) {
+					uint16_t maxp = usb_endpoint_maxp(&ep->endpoint);
+					uint16_t base = maxp & 0x7ff;
+					if (base > ep->udc_maxpacket_limit ||
+					    (ep->endpoint.wMaxPacketSize & 0x1800)) {
+						ep->endpoint.wMaxPacketSize = ep->udc_maxpacket_limit;
+					}
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+// 若启用自动重映射：取 UDC 端点信息并对全部配置做一次端点重映射。
+static int remap_host_endpoints_if_needed(int fd)
+{
+	if (!auto_remap_endpoints)
+		return 0;
+
+	struct usb_raw_eps_info eps_info;
+	memset(&eps_info, 0, sizeof(eps_info));
+
+	int num = usb_raw_eps_info(fd, &eps_info);
+	if (num <= 0) {
+		printf("Failed to fetch endpoint info for remapping\n");
+		return -1;
+	}
+
+	std::vector<EndpointCandidate> candidates;
+	for (int i = 0; i < num; i++) {
+		EndpointCandidate candidate;
+		candidate.info = eps_info.eps[i];
+		candidates.push_back(candidate);
+	}
+
+	for (int i = 0; i < host_device_desc.device.bNumConfigurations; i++) {
+		if (remap_config_endpoints(&host_device_desc.configs[i], candidates) < 0)
+			return -1;
+	}
+
+	return 0;
+}
+
+// 把物理设备的设备/配置/接口/端点描述符拷进 host_device_desc（含 FS→HS 的 bInterval 换算）。
+int setup_host_usb_desc() {
+	host_device_desc.device = {
+		.bLength =		device_device_desc.bLength,
+		.bDescriptorType =	device_device_desc.bDescriptorType,
+		.bcdUSB =		device_device_desc.bcdUSB,
+		.bDeviceClass =		device_device_desc.bDeviceClass,
+		.bDeviceSubClass =	device_device_desc.bDeviceSubClass,
+		.bDeviceProtocol =	device_device_desc.bDeviceProtocol,
+		.bMaxPacketSize0 =	device_device_desc.bMaxPacketSize0,
+		.idVendor =		device_device_desc.idVendor,
+		.idProduct =		device_device_desc.idProduct,
+		.bcdDevice =		device_device_desc.bcdDevice,
+		.iManufacturer =	device_device_desc.iManufacturer,
+		.iProduct =		device_device_desc.iProduct,
+		.iSerialNumber =	device_device_desc.iSerialNumber,
+		.bNumConfigurations =	device_device_desc.bNumConfigurations,
+	};
+
+	int bNumConfigurations = device_device_desc.bNumConfigurations;
+	host_device_desc.configs = new struct raw_gadget_config[bNumConfigurations];
+	for (int i = 0; i < bNumConfigurations; i++) {
+		struct usb_config_descriptor temp_config = {
+			.bLength =		device_config_desc[i]->bLength,
+			.bDescriptorType =	device_config_desc[i]->bDescriptorType,
+			.wTotalLength =		device_config_desc[i]->wTotalLength,
+			.bNumInterfaces =	device_config_desc[i]->bNumInterfaces,
+			.bConfigurationValue =	device_config_desc[i]->bConfigurationValue,
+			.iConfiguration = 	device_config_desc[i]->iConfiguration,
+			.bmAttributes =		device_config_desc[i]->bmAttributes,
+			.bMaxPower =		device_config_desc[i]->MaxPower,
+		};
+		host_device_desc.configs[i].config = temp_config;
+
+		int bNumInterfaces = device_config_desc[i]->bNumInterfaces;
+		struct raw_gadget_interface *temp_interfaces =
+			new struct raw_gadget_interface[bNumInterfaces];
+		for (int j = 0; j < bNumInterfaces; j++) {
+			int num_altsetting = device_config_desc[i]->interface[j].num_altsetting;
+			struct raw_gadget_altsetting *temp_altsettings =
+				new struct raw_gadget_altsetting[num_altsetting];
+			for (int k = 0; k < num_altsetting; k++) {
+				const struct libusb_interface_descriptor temp_device_altsetting =
+					device_config_desc[i]->interface[j].altsetting[k];
+				struct usb_interface_descriptor temp_host_altsetting = {
+					.bLength =		temp_device_altsetting.bLength,
+					.bDescriptorType =	temp_device_altsetting.bDescriptorType,
+					.bInterfaceNumber =	temp_device_altsetting.bInterfaceNumber,
+					.bAlternateSetting =	temp_device_altsetting.bAlternateSetting,
+					.bNumEndpoints =	temp_device_altsetting.bNumEndpoints,
+					.bInterfaceClass =	temp_device_altsetting.bInterfaceClass,
+					.bInterfaceSubClass =	temp_device_altsetting.bInterfaceSubClass,
+					.bInterfaceProtocol =	temp_device_altsetting.bInterfaceProtocol,
+					.iInterface =		temp_device_altsetting.iInterface,
+				};
+				temp_altsettings[k].interface = temp_host_altsetting;
+
+				if (!temp_device_altsetting.bNumEndpoints) {
+					printf("InterfaceNumber %x AlternateSetting %x has no endpoint, skip\n",
+						temp_device_altsetting.bInterfaceNumber,
+						temp_device_altsetting.bAlternateSetting);
+					temp_altsettings[k].endpoints = NULL;
+					continue;
+				}
+
+				int bNumEndpoints = temp_device_altsetting.bNumEndpoints;
+				struct raw_gadget_endpoint *temp_endpoints =
+					new struct raw_gadget_endpoint[bNumEndpoints];
+				for (int l = 0; l < bNumEndpoints; l++) {
+					struct usb_endpoint_descriptor temp_endpoint = {
+						.bLength =		temp_device_altsetting.endpoint[l].bLength,
+						.bDescriptorType =	temp_device_altsetting.endpoint[l].bDescriptorType,
+						.bEndpointAddress =	temp_device_altsetting.endpoint[l].bEndpointAddress,
+						.bmAttributes =		temp_device_altsetting.endpoint[l].bmAttributes,
+						.wMaxPacketSize =	temp_device_altsetting.endpoint[l].wMaxPacketSize,
+						.bInterval =		temp_device_altsetting.endpoint[l].bInterval,
+						.bRefresh =		temp_device_altsetting.endpoint[l].bRefresh,
+						.bSynchAddress = 	temp_device_altsetting.endpoint[l].bSynchAddress,
+					};
+					// bInterval 的**单位随速度域变化**：全速/低速是毫秒，高速是
+					// 2^(n-1) 个 125µs 微帧。物理设备跑全速、而 gadget 以高速连电脑时，
+					// 描述符必须换算，否则电脑把一个"1ms"的端点当成 125µs（8kHz）来轮询
+					// ——语义差 8 倍。规则：HS interval = 2^(bInterval-1) * 125µs，
+					// 即 FS bInterval=1 (1ms) → HS bInterval=4。
+					//
+					// 中断端点与等时端点同样适用（批量端点不用 bInterval，跳过）。
+					// 旧代码只换算了 ISO，中断端点漏掉 ⇒ 满速鼠标在高速侧被当成 8kHz。
+					// 2026-09-27：低速一并纳入 —— 低速 bInterval 单位同样是毫秒
+					// （大量廉价 2.4G 无线接收器是 Low Speed），此前漏换算同病。
+					uint8_t xfer_type = temp_endpoint.bmAttributes &
+							USB_ENDPOINT_XFERTYPE_MASK;
+					if ((device_speed == USB_SPEED_FULL ||
+					     device_speed == USB_SPEED_LOW) &&
+					    (xfer_type == USB_ENDPOINT_XFER_ISOC ||
+					     xfer_type == USB_ENDPOINT_XFER_INT)) {
+						uint8_t fs_interval = temp_endpoint.bInterval;
+						// Convert ms to nearest 125µs exponent:
+						// fs_interval ms = fs_interval * 8 microframes
+						// 2^(n-1) = fs_interval * 8 → n = log2(fs_interval*8) + 1
+						// For bInterval=1: n = log2(8)+1 = 4
+						uint8_t hs_interval = fs_ms_to_hs_interval(fs_interval);
+						printf("Converting %s bInterval %d (FS ms) -> %d (HS 125us)\n",
+							xfer_type == USB_ENDPOINT_XFER_ISOC ? "ISO" : "INT",
+							fs_interval, hs_interval);
+						temp_endpoint.bInterval = hs_interval;
+					}
+
+					temp_endpoints[l].endpoint = temp_endpoint;
+					temp_endpoints[l].device_bEndpointAddress = temp_endpoint.bEndpointAddress;
+					temp_endpoints[l].udc_maxpacket_limit = 0;
+					temp_endpoints[l].thread_read = 0;
+					temp_endpoints[l].thread_write = 0;
+					memset((void *)&temp_endpoints[l].thread_info, 0,
+						sizeof(temp_endpoints[l].thread_info));
+					temp_endpoints[l].thread_info.ep_num = -1;
+				}
+				temp_altsettings[k].endpoints = temp_endpoints;
+			}
+			temp_interfaces[j].altsettings = temp_altsettings;
+			temp_interfaces[j].num_altsettings = device_config_desc[i]->interface[j].num_altsetting;
+			temp_interfaces[j].current_altsetting = 0;
+
+		}
+		host_device_desc.configs[i].interfaces = temp_interfaces;
+	}
+
+	host_device_desc.current_config = 0;
+
+	return 0;
+}
+
+// usb-proxy 入口：解析参数 → 启动 mouse_control → 连物理设备 → 初始化 UDC → 进 ep0 主循环。
+int main(int argc, char **argv)
+{
+	// ★ 2026-09-27（1.5.57）：stdout 转【行缓冲】。systemd/journald 下 stdout 是
+	// socket ⇒ glibc 默认全缓冲（4KB 才刷），排障时日志停在半截、关键事件看不到
+	// （1.5.56 事故里 active fetch 的失败日志就这样被吞了）。行缓冲才有实时日志。
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
+	const char *device = "dummy_udc.0";
+	const char *driver = "dummy_udc";
+	int vendor_id = -1;
+	int product_id = -1;
+
+	struct sigaction action;
+	memset(&action, 0, sizeof(struct sigaction));
+	action.sa_handler = handle_signal;
+	sigaction(SIGTERM, &action, NULL);
+	sigaction(SIGINT, &action, NULL);
+
+	int opt, lopt, loidx;
+	const char *optstring = "hv";
+	const struct option long_options[] = {
+		{"help", no_argument, &lopt, 1},
+		{"verbose", no_argument, &lopt, 2},
+		{"device", required_argument, &lopt, 3},
+		{"driver", required_argument, &lopt, 4},
+		{"vendor_id", required_argument, &lopt, 5},
+		{"product_id", required_argument, &lopt, 6},
+		{"enable_injection", no_argument, &lopt, 7},
+		{"injection_file", required_argument, &lopt, 8},
+		{"enable_customized_config", no_argument, &lopt, 9},
+		{"auto_remap_endpoints", no_argument, &lopt, 10},
+		{"iso_batch_size", required_argument, &lopt, 11},
+		{"hid_passthrough_compat", no_argument, &lopt, 12},
+		{"set_config_ack_before_configure", no_argument, &lopt, 13},
+		{"enable_mouse_control", no_argument, &lopt, 14},
+		{"mouse_control_cmd_socket", required_argument, &lopt, 15},
+		{"mouse_control_event_socket", required_argument, &lopt, 16},
+		{"allow_class_descriptor_fetch", no_argument, &lopt, 18},
+		{0, 0, 0, 0}
+	};
+	while ((opt = getopt_long(argc, argv, optstring, long_options, &loidx)) != -1) {
+		if(opt == 0)
+			opt = lopt;
+		switch (opt) {
+		case 'h':
+			usage();
+			break;
+		case 'v':
+			verbose_level++;
+			break;
+		case 1:
+			usage();
+			break;
+		case 2:
+			verbose_level++;
+			break;
+		case 3:
+			device = optarg;
+			break;
+		case 4:
+			driver = optarg;
+			break;
+		case 5:
+			vendor_id = std::stoul(optarg, nullptr, 16);
+			break;
+		case 6:
+			product_id = std::stoul(optarg, nullptr, 16);
+			break;
+		case 7:
+			injection_enabled = true;
+			break;
+		case 8:
+			injection_file = optarg;
+			injection_enabled = true;
+			break;
+		case 9:
+			customized_config_enabled = true;
+			break;
+	case 10:
+		auto_remap_endpoints = true;
+		printf("Automatic endpoint remapping enabled\n");
+		break;
+	case 11:
+		iso_batch_size = std::stoi(optarg);
+		if (iso_batch_size < 1)
+			iso_batch_size = 1;
+		if (iso_batch_size > ISO_BATCH_SIZE_MAX)
+			iso_batch_size = ISO_BATCH_SIZE_MAX;
+		printf("Isochronous batch size set to %d\n", iso_batch_size);
+		break;
+	case 12:
+		hid_passthrough_compat = true;
+		printf("HID passthrough compatibility mode enabled\n");
+		break;
+	case 13:
+		set_config_ack_before_configure = true;
+		printf("SET_CONFIGURATION ACK-before-CONFIGURE mode enabled\n");
+		break;
+	case 14:
+		enable_mouse_control = true;
+		break;
+	case 15:
+		mouse_cmd_socket = optarg;
+		enable_mouse_control = true;
+		break;
+	case 16:
+		mouse_event_socket = optarg;
+		enable_mouse_control = true;
+		break;
+	case 18:
+		// 显式开启「向设备索要 report descriptor」。默认关：实测会把 quirk 固件
+		//（Compx Nearlink Dongle）打死 ⇒ 透传全断，代价远大于 AI 注入。
+		allow_class_descriptor_fetch = true;
+		printf("Class GET_DESCRIPTOR(Report) fetch ENABLED (may wedge quirk firmware)\n");
+		break;
+
+	default:
+		usage();
+		return 1;
+	}
+	}
+	printf("Device is: %s\n", device);
+	printf("Driver is: %s\n", driver);
+	printf("vendor_id is: %d\n", vendor_id);
+	printf("product_id is: %d\n", product_id);
+
+	if (injection_enabled) {
+		printf("Injection enabled\n");
+		if (injection_file.empty()) {
+			printf("Injection file not specified\n");
+			return 1;
+		}
+		struct stat buffer;
+		if (stat(injection_file.c_str(), &buffer) != 0) {
+			printf("Injection file %s not found\n", injection_file.c_str());
+			return 1;
+		}
+
+		Json::Reader jsonReader;
+		std::ifstream ifs(injection_file.c_str());
+		if (jsonReader.parse(ifs, injection_config))
+			printf("Parsed injection file: %s\n", injection_file.c_str());
+		else {
+			printf("Error parsing injection file: %s\n", injection_file.c_str());
+			return 1;
+		}
+		ifs.close();
+		print_injection_summary();
+	}
+
+	if (customized_config_enabled) {
+		struct stat buffer;
+		if (stat(customized_config_file.c_str(), &buffer) != 0) {
+			printf("Customized config file %s not found\n", customized_config_file.c_str());
+			return 1;
+		}
+
+		Json::Reader jsonReader;
+		std::ifstream ifs(customized_config_file.c_str());
+		Json::Value customized_config;
+		if (jsonReader.parse(ifs, customized_config))
+			printf("Parsed customized config file: %s\n", customized_config_file.c_str());
+		else {
+			printf("Error parsing customized config file: %s\n", customized_config_file.c_str());
+			return 1;
+		}
+		ifs.close();
+
+		if (customized_config["reset_device_before_proxy"] == false) {
+			printf("reset_device_before_proxy set to false\n");
+			reset_device_before_proxy = false;
+		}
+		if (customized_config["bmaxpacketsize0_must_greater_than_64"] == false) {
+			printf("bmaxpacketsize0_must_greater_than_64 set to false\n");
+			bmaxpacketsize0_must_greater_than_64 = false;
+		}
+	}
+
+	// 启动 mouse_control 通讯层（自研 cmd.sock/event.sock）
+	if (enable_mouse_control) {
+		if (ttbox_usbproxy::mouse_control_start(
+				mouse_cmd_socket, mouse_event_socket) != 0) {
+			fprintf(stderr, "mouse_control_start failed\n");
+			return 1;
+		}
+	}
+
+	// 锁住地址空间：转发路径上一次换页就够丢一帧（USB_PROXY_MLOCK=0 可关）。
+	usbproxy_mlockall();
+
+	while (connect_device(vendor_id, product_id)) {
+		sleep(1);
+	}
+	printf("Device opened successfully\n");
+
+	// Detect physical device speed（物理鼠标必接，直接问 libusb）。
+		int libusb_speed = libusb_get_device_speed(libusb_get_device(dev_handle));
+		switch (libusb_speed) {
+		case LIBUSB_SPEED_LOW:
+			device_speed = USB_SPEED_LOW;
+			printf("Device speed: Low Speed (1.5Mbps)\n");
+			break;
+		case LIBUSB_SPEED_FULL:
+			device_speed = USB_SPEED_FULL;
+			printf("Device speed: Full Speed (12Mbps)\n");
+			break;
+		case LIBUSB_SPEED_HIGH:
+			device_speed = USB_SPEED_HIGH;
+			printf("Device speed: High Speed (480Mbps)\n");
+			break;
+		case LIBUSB_SPEED_SUPER:
+		case LIBUSB_SPEED_SUPER_PLUS:
+			device_speed = USB_SPEED_SUPER;
+			printf("Device speed: SuperSpeed (5Gbps+)\n");
+			break;
+		default:
+			device_speed = USB_SPEED_HIGH;
+			printf("Device speed: Unknown, defaulting to High Speed\n");
+			break;
+		}
+
+	setup_host_usb_desc();
+	printf("Setup USB config successfully\n");
+
+	int fd = usb_raw_open();
+	// Always use USB_SPEED_HIGH for the gadget; some UDCs (e.g., musb-hdrc)
+	// reject lower speeds. We compensate by adjusting bInterval below.
+	usb_raw_init(fd, USB_SPEED_HIGH, driver, device);
+	usb_raw_run(fd);
+
+	if (remap_host_endpoints_if_needed(fd) < 0) {
+		close(fd);
+		return 1;
+	}
+
+	ep0_loop(fd);
+
+	close(fd);
+
+		int bNumConfigurations = device_device_desc.bNumConfigurations;
+		for (int i = 0; i < bNumConfigurations; i++) {
+			int bNumInterfaces = device_config_desc[i]->bNumInterfaces;
+			for (int j = 0; j < bNumInterfaces; j++) {
+				int num_altsetting = device_config_desc[i]->interface[j].num_altsetting;
+				for (int k = 0; k < num_altsetting; k++) {
+					if (host_device_desc.configs[i].interfaces[j].altsettings[k].endpoints) {
+						delete[] host_device_desc.configs[i].interfaces[j].altsettings[k].endpoints;
+					}
+				}
+				delete[] host_device_desc.configs[i].interfaces[j].altsettings;
+			}
+			delete[] host_device_desc.configs[i].interfaces;
+		}
+		delete[] host_device_desc.configs;
+		delete[] device_config_desc;
+
+		if (context && callback_handle != -1) {
+			libusb_hotplug_deregister_callback(context, callback_handle);
+		}
+		if (hotplug_monitor_thread &&
+			pthread_join(hotplug_monitor_thread, NULL)) {
+			fprintf(stderr, "Error join hotplug_monitor_thread\n");
+		}
+
+	return 0;
+}

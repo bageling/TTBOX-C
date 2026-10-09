@@ -1,0 +1,21 @@
+{
+  "id": "log",
+  "name": "TTBOX Log",
+  "version": "1.0.0",
+  "description": "TTBOX Log 管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-log",
+  "type": "builtin",
+  "autostart": false,
+  "enabled": true,
+  "permissions": [
+    "read_core_status",
+    "read_config"
+  ],
+  "stop_timeout": 5,
+  "health_check": {
+    "kind": "process"
+  },
+  "config": "config",
+  "data": "data"
+}

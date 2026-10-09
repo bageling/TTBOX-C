@@ -1,0 +1,269 @@
+# ============================================================
+# TTBOX-Module-Edition .gitignore
+# 规则：构建产物/缓存/临时文件/敏感信息 一律不入库
+# ============================================================
+
+# ---------- 构建产物 ----------
+# aarch64（RK3588）交叉编译输出：完全本地生成、体积巨大，绝对不能 git add
+# 尾斜杠 `*/` 仅匹配目录（同名的普通文件不受影响，如 build-aarch64-notes.md 仍可入库）。
+# `*` 覆盖全部变体：build-aarch64 / build-aarch64-t114 / 任意 build-aarch64-t*（T1.14 交叉构建目录等）。
+#
+# ★ T1.49（2026-09-23）口径变更：**取消 RELEASE_BUILD.md 白名单，构建目录整体忽略**。
+#   旧做法（T1.15）把出货留档写进 ${BUILD_DIR}/RELEASE_BUILD.md 再白名单放行，动机是"留档要进库"，
+#   代价有两层：
+#     ① 白名单只保证"不被忽略"，**不等于已入库** ⇒ 每轮构建新建的 build-aarch64-t* 里那份留档
+#        都停在"未跟踪且未被忽略"状态（`git status -uall` 可见），一次 `git add -A` 就会把
+#        一堆构建路径带进版本库 —— 这正是"源码树里冒出 build 字符"的真实渠道；
+#     ② 留档落在 §3 clean 会 `rm -rf` 的构建目录内，脚本只能靠"赶在 clean 之前读一次"的时序保命。
+#   现改为：留档落 `docs/build/release-records/`（下方 `!docs/build/` 已白名单），构建目录整体忽略。
+#   自检：`git check-ignore -v build-aarch64-t114/RELEASE_BUILD.md`（期望**命中**）
+#         `git check-ignore -v docs/build/release-records/x.md`（期望**无输出**）
+/build-aarch64*/
+# 出货打包产物（`scripts/ttbox_pack_ota.sh` 默认输出 dist/，另一条 deploy 流程落 ota-out/）
+# ★ T1.49 补：此前未忽略 ⇒ 每轮出包的 tgz 都堆在 `git status` 里，靠提交前手工 `git reset` 兜。
+/deploy/ota-out/
+# 注：仓库根的探针与日志**不在此处重复登记**，既有规则已覆盖 ——
+#   `__probe*.txt` / `_*.txt` ⇒ 下方「M2.07 会话脚手架」段的 `/_*.txt`
+#   `*.log`（含根 `pack_ota_build.log`）⇒ 上方缓存段的 `*.log`
+# 任意层级的构建输出目录（顶层 /build/ 亦见下方条目）
+build/
+# ★ T1.15（2026-09-17）：`build/` **无前导斜杠** ⇒ 匹配**任意层级**的同名目录，会连带吞掉
+#   文档目录 `docs/build/` —— 而 T1.15 新建件 `docs/build/build-reproducibility.md` 的落点正是它
+#   （实测：`git add docs/build/build-reproducibility.md` 直接报 "paths are ignored"）。
+#   白名单必须写在 `build/` **之后**才生效（last-match-wins）。
+#   自检：`git check-ignore -v docs/build/build-reproducibility.md`（期望**无输出**）
+#         `git check-ignore -v core/build`（期望仍命中 `build/`）
+!docs/build/
+cmake-build-*/
+core/build*/
+core/cmake-build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/Makefile
+# T1.06（DEP-04②）：`**/Makefile` 是为吞掉 CMake 生成物，但它会【连带】吞掉 usbproxy
+# 的手写 Makefile（`git add usbproxy/Makefile` 静默无效、clean clone 里编译入口丢失）。
+# 这里对本仓库唯一的手写 Makefile 开白名单——白名单必须写在 `**/Makefile` 之后才生效。
+!usbproxy/Makefile
+**/cmake_install.cmake
+*.o
+*.a
+*.so
+!lib/librknnrt.so
+*.d
+*.exe
+*.lib
+*.obj
+*.pdb
+*.ilk
+
+# ---------- CMake / Ninja 生成物 ----------
+**/compile_commands.json
+**/build.ninja
+**/.ninja_deps
+**/.ninja_log
+**/.ninja_log.lock
+**/CTestTestfile.cmake
+**/Testing/
+**/install_manifest.txt
+**/CPackConfig.cmake
+**/CPackSourceConfig.cmake
+
+# ---------- Python 缓存 ----------
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ---------- 日志与运行时 ----------
+*.log
+*.tmp
+/run/
+/tmp/
+core/dump/
+core/core.*
+
+# ---------- 大体积测试素材（不入库） ----------
+# 原始视频帧 / 大 raw 二进制
+*.raw
+*.h264
+*.yuv
+# PID Trace 采集 CSV（运行时产物，不入库）
+pid_trace*.csv
+# 大模型文件（.pt / .onnx / 大 .rknn；随附的已训练模型白名单入库）
+*.pt
+*.pth
+*.onnx
+*.rknn
+!models/installed/jwdl_sjzv11/model.rknn
+# 测试资产白名单：真实训练模型与测试资源入库
+!core/tests/data/*.onnx
+# 测试截图/预览/中间产物（不入库）
+*.bgr
+*.bmp
+core/tests/*.jpg
+core/tests/*.png
+core/tests/*.csv
+core/tests/*.bin
+core/tests/preview_raw.bin
+!core/tests/data/*.bgr
+core/tests/s*.log
+core/tests/*_mouse.log
+core/tests/*_traj.log
+core/tests/hf_*.log
+core/tests/*.raw
+
+# ---------- 备份与临时 ----------
+*.bak
+*.bak-*
+*~
+*.orig
+*.rej
+*.swp
+
+# ---------- 敏感信息 ----------
+# 私钥 / 凭据 / 本地配置
+keys/*private*.pem
+**/*private*.pem
+*.key
+*.pem
+.env
+.env.*
+*.local.json
+*_credentials*
+config/*secret*
+config/*credential*
+
+# ---------- 系统文件 ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.suo
+
+# ---------- 本地同步 / 临时备份 ----------
+# 板端同步脚本与快照（仅本地使用，不入库）
+.board_sync/
+# 顶层 build 目录（CI/本地编译残留）
+/build/
+# 临时 tar.gz 备份（已弃用）
+*.tar.gz
+
+# ---------- 临时抓包 / 调试文件 ----------
+# curl ... > ttbox_xxx_tmp.json 风格的临时输出
+ttbox_*_tmp.json
+# 顶层 sync 包/快照
+sync_board_*.tgz
+
+# 本地审计/调试产物
+build-audit-pytest/
+ttbox_state.json
+ttbox_preview_status.json
+
+
+# ---------- 本地 Windows 宿主构建（第一阶段验证）----------
+/build-win-host/
+core/third_party/onnxruntime/lib/
+.venv-win/
+.wheels/
+build-win*/
+
+# ONNX Runtime 本地二进制与下载缓存
+core/third_party/onnxruntime/lib/
+ort.nupkg
+
+# ---------- T1.11 OTA：私钥永不入库（§0.3 硬红线）----------
+# 只有 tools/ota/keys/*.pub（公钥）入库；私钥目录整体排除。
+tools/ota/.testkeys/
+tools/ota/**/*.priv.pem
+*.priv.pem
+
+# ---------- M2.01 License：私钥永不入库（同 §0.3 纪律，密钥分族）----------
+# 公钥两处入库：tools/license/keys/*.pub.hex + core 内嵌（LicenseKeys.hpp）。
+tools/license/.testkeys/
+
+# ---------- host 构建目录（本轮对标实测自建）----------
+/build-host-yu/
+
+# ---------- M2.07.1 防复发：真实云端凭据落点（真值严禁入库）----------
+# 背景：T1 收敛密钥泄露面——生产 app_secret / tunnel URL 曾被硬编码进源码与
+# config/cloud.example.json。真值唯一落点 = 板端 /opt/ttbox/config/default.json 与
+# 本地密钥库。此处显式拦截“真实凭据文件”落点（example 占位符文件仍入库，勿一锅端）。
+# 注：config/cloud.local.json 亦被上方 `*.local.json` 覆盖，此处显式列出以表明意图。
+/config/cloud.json
+/config/cloud.local.json
+
+# ---------- M2.07.1：AI 会话目录（非产品产物，不入库）----------
+# .workbuddy/ 是 AI 助手的会话工作目录：
+#   · qa_*.txt  = 探针/命令输出抓取物（临时，无长期价值）；
+#   · memory/*.md = AI 会话记忆（含板端/会话细节，且会持续累积敏感信息）。
+# 二者均无构建/运行价值，入库会污染“可复现出货基线”，并带来信息外泄面（本仓库会
+# 交付客户）⇒ 整体忽略（真值已在 memory 内脱敏，此处只是不入库）。
+/.workbuddy/
+
+# ---------- M2.07 会话脚手架（AI 探针/部署抓取产物，不入库）----------
+# 背景：本轮板端部署与验收过程中，工程师在**仓库根**落了 40 个 `_*.txt` / `_*.sh` /
+# `_payload141.tgz` 形临时抓取（命令输出快照、payload 包）。它们无长期价值，
+# 但既未被旧规则覆盖 ⇒ 一旦 `git add -A` 会被整体带进库。
+# 规则**根锚定 + 限定扩展名**（勿写成裸 `_*`：那会连 `**/__init__.py` 一起吞掉）。
+/_*.txt
+/_*.sh
+/_*.tgz
+
+# ---------- F11② 部署期产物：构建机注入的 git sha（板端落盘，不入库）----------
+# 由部署驱动从构建机 `git rev-parse HEAD` 写入板端源码副本根（配合 ttbox_fhs_init.sh
+# gen_manifest 的分层解析）；本地误落亦不入库。
+/.git_sha
+
+# ---------- 代码梳理（2026-09-17）：本机产物归档区（不入库）----------
+# 批次 0/1/4 依据 docs/handover/2026-09-17/代码梳理方案-2026-09-17.md §4.1：
+# 将判为「删除/出清」的本机产物（39 个根 _* 探针、陈旧 build 目录、空 models/、
+# __pycache__/.pytest_cache 缓存）**移入**本目录而非 rm，供业主复核后再决定是否真删。
+# 本目录名**以点号开头 + 固定日期**，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
+# 自检：`git check-ignore -v .archive-2026-09-17/README.md`（期望命中本行）
+/.archive-2026-09-17/
+
+# ---------- 代码梳理（2026-09-18）：本机产物归档区（批次 2，不入库）----------
+# 沿 2026-09-17 批次同款做法：把本机产物（build-aarch64-deploy/t114 的非留档内容、
+# build-aarch64-t114-repro/、build-host-yu/、根 *.log、.probe_*.txt/.commit3.txt、
+# .pytest_cache/、.workbuddy/qa_*.txt）**mv 入**本目录而非 rm，供业主复核后再决定是否真删。
+# 目录名**以点号开头 + 固定日期**，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
+# 自检：`git check-ignore -v .archive-2026-09-18/README.md`（期望命中本行）
+/.archive-2026-09-18/
+
+# ---------- 代码梳理（2026-09-19）：OTA 出包输出目录（不入库）----------
+# `scripts/ttbox_pack_ota.sh <build_dir> <out_dir>` 默认输出到 `dist/`，产物是
+# ttbox-<ver>.ota.tgz + 旁车 ttbox-<ver>.ota.tgz.sign.json（3 MB 级二进制）。
+# 出包产物属构建产物、不入库（与 build-aarch64*/ 同口径）；真值以服务器上发布的包为准。
+# 自检：`git check-ignore -v dist/ttbox-1.4.9.ota.tgz`（期望命中本行）
+/dist/
+
+# ---------- 代码梳理（2026-09-23）：本机产物归档区（第三批，不入库）----------
+# 沿 2026-09-17 / 2026-09-18 两批同款做法：把本机产物 **mv 入**本目录而非 rm，
+# 供业主复核后再决定是否真删（前两批复核后已真删，故本目录不存在残留）。
+# 本批内容：
+#   · 14 个 `build-aarch64-*` 交叉构建目录（留档已另行迁入 docs/build/release-records/，此处只剩产物）
+#   · `core/build-host/`、`core/build-j/`（陈旧本机构建目录；`core/build-ascii/` 是 ctest 基线，**保留**）
+#   · 根 `__probe.txt` / `__probe2.txt` / `__list.txt` 与 3 个 `*.log`
+# 目录名以点号开头 + 固定日期，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
+# 自检：`git check-ignore -v .archive-2026-09-23/README.md`（期望命中本行）
+/.archive-2026-09-23/
+
+# ---------- P8（2026-10-01）：插件注册表（运行期状态，不入库/不入包）----------
+# `PluginRegistry` 在 `<plugins_root>/.registry.json` 现场生成，内容含**绝对路径**
+# （dev 树实测泄漏过 `/mnt/g/WORKBUDDY工作区/...` 一条进 payload）。它是运行期状态，
+# 不是源码：板端首次运行时自行生成，dev 树不必留。
+# 剔除集三处同一口径：ttbox_pack_ota.sh / ttbox_fhs_init.sh::tcopy /
+# ttbox_release_install.sh::TAR_EXCLUDES；pack 断言 2 亦把它列为禁入物（fail-closed）。
+# 自检：`git check-ignore -v plugins/.registry.json`（期望命中本行）
+.registry.json
+perf-record/
+
+# ── 临时备份与审计脚本（不入库；2026-10-06 V1.0.52 补）──
+.backup-*/
+.audit_pid.py

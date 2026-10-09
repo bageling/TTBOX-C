@@ -1,0 +1,6 @@
+{
+  "model_root": "/opt/ttbox/models",
+  "active_file": "/opt/ttbox/models/active/active.json",
+  "loader": "core_model_adapter",
+  "mouse_output": false
+}

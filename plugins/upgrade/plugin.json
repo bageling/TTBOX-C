@@ -1,0 +1,20 @@
+{
+  "id": "upgrade",
+  "name": "TTBOX Upgrade",
+  "version": "1.0.0",
+  "description": "TTBOX Upgrade 管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-upgrade",
+  "type": "process",
+  "autostart": true,
+  "enabled": true,
+  "permissions": [
+    "manage_plugin"
+  ],
+  "stop_timeout": 5,
+  "health_check": {
+    "kind": "process"
+  },
+  "config": "config",
+  "data": "data"
+}

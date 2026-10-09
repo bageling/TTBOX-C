@@ -1,0 +1,55 @@
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: scheme_rejected: non-https URL: http
+OTA FAILED: signature_invalid: Ed25519 验签失败
+OTA FAILED: signature_invalid: Ed25519 验签失败
+OTA FAILED: sha256_mismatch: package digest != 记录 sha256
+OTA FAILED: install_failed: release_install rc=1
+OTA FAILED: health_check_failed: 已 rollback
+=== T1.11 OTA 验签单测 ===
+[1] good_pkg_verifies
+  PASS: 退出码 0 | 0
+  PASS: state=SUCCESS | {"key_id": "ttbox-ota-2026a", "sha256": "2658ee2a8e25f34d522d57c850b35d4665d90af218b335bacc246773a2ae6128", "state": "SUCCESS", "version": "1.2.0"}
+  PASS: 调用了 T1.01 安装 | [('/tmp/ota-test-fzoxwhi4/releases/1.2.0.staging', '1.2.0')]
+  PASS: 未回滚
+
+[2] tamper_1byte_rejected（多偏移，拒绝率须 100%）
+    偏移 0: rc=1 error=sha256_mismatch
+    偏移 1: rc=1 error=sha256_mismatch
+    偏移 32: rc=1 error=sha256_mismatch
+    偏移 64: rc=1 error=sha256_mismatch
+    偏移 232: rc=1 error=sha256_mismatch
+    偏移 463: rc=1 error=sha256_mismatch
+  PASS: 拒绝率 100%% | 6/6
+  PASS: 篡改后无 staging 残留 | []
+
+[3] http_scheme_rejected
+  PASS: 退出码 1 | 1
+  PASS: error=scheme_rejected | {"detail": "non-https URL: http", "error": "scheme_rejected", "state": "FAILED"}
+  PASS: **未发生下载** | []
+
+[4] wrong_key_id_rejected
+  PASS: 退出码 1 | 1
+  PASS: key_id 不符即拒 | {"detail": "Ed25519 \u9a8c\u7b7e\u5931\u8d25", "error": "signature_invalid", "state": "FAILED"}
+
+[5] dual_factor_both_required（and 非 or）
+  PASS: 签名错（sha 对）⇒ 拒 | signature_invalid
+  PASS: 内容换（签对）⇒ 拒 | sha256_mismatch
+
+[6] no_residue_on_failure
+  PASS: install 失败 ⇒ rc=1 | 1
+  PASS: error=install_failed | {"detail": "release_install rc=1", "error": "install_failed", "state": "FAILED"}
+  PASS: staging 已清理 | []
+  PASS: 临时目录零残留 | []
+
+[7] rollback_on_health_fail
+  PASS: 健康检查失败 ⇒ rc=1 | 1
+  PASS: error=health_check_failed | {"detail": "\u5df2 rollback", "error": "health_check_failed", "state": "FAILED"}
+  PASS: **已调 rollback** | 1
+  PASS: staging 已清理
+
+结果: 0 failures

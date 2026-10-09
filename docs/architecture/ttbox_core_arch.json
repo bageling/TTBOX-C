@@ -1,0 +1,142 @@
+{
+  "kind": "swimlane",
+  "title": "TTBOX core 分层与一帧数据流向（RK3588 板端 C++ 引擎，171 文件 / 30336 行）",
+  "lanes": [
+    {
+      "id": "ctrl",
+      "label": "控制面（面板命令入口）",
+      "kind": "system"
+    },
+    {
+      "id": "orch",
+      "label": "流程编排（core 中枢）",
+      "kind": "system"
+    },
+    {
+      "id": "data",
+      "label": "数据面（三条并行分支）",
+      "kind": "system"
+    },
+    {
+      "id": "out",
+      "label": "输出面（注入鼠标）",
+      "kind": "system"
+    }
+  ],
+  "phases": [
+    {
+      "label": "一、命令进来",
+      "steps": [
+        {
+          "lane": "ctrl",
+          "text": "IPC 服务端：面板通过 Unix 域套接字 /run/ttbox/core.sock 发命令，共16 条（状态查询/ 配置写入 / 运行控制 / 模型管理 / 授权）",
+          "next_label": "读运行配置",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "ctrl",
+          "text": "运行配置真源：配置分层合并后的结果，产出「功能门 gates + 数值参数」",
+          "next_label": "按门决定启停",
+          "next_kind": "flow"
+        }
+      ]
+    },
+    {
+      "label": "二、按五步固定顺序装配",
+      "steps": [
+        {
+          "lane": "orch",
+          "text": "统一生命周期 CoreRuntime：线程全归它管，五步顺序是硬约束",
+          "next_label": "① 采集层起帧",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "① 采集：V4L2Capture 从摄像头取帧，DMA-BUF 零拷贝缓冲区池",
+          "next_label": "② 拉起推理线程",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "② 推理：WorkerPool 多线程跑 NPU（Rknn 引擎加载并执行模型）—— 仅当功能门允许推理，关掉就不起",
+          "next_label": "③ 鼠标透传通道",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "③ 鼠标透传通道 PhysicalMouseReader 启动 —— 红线段：与 AI 授权无关，恒启动，失败只告警不阻塞流水线",
+          "next_label": "④ 瞄准线程",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "④ 瞄准线程 AimThread：主循环做坐标转换 + PID 控制 —— 仅当功能门允许瞄准，关掉就不起",
+          "next_label": "⑤ 预览",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "⑤ 受限预览 PreviewModule：帧率封顶值由上层算好传入",
+          "next_label": "三、数据往下走",
+          "next_kind": "flow"
+        }
+      ]
+    },
+    {
+      "label": "三、一帧数据的实际流向",
+      "steps": [
+        {
+          "lane": "data",
+          "text": "采集分支把帧交给推理分支（RGA 硬件加速做色彩空间与缩放转换）",
+          "next_label": "推理结果交瞄准",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "data",
+          "text": "推理分支把检测结果交给瞄准分支（Pipeline 做前后处理：预处理 / 后处理 / 选靶）",
+          "next_label": "算移动量",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "out",
+          "text": "输出抽象 IOutputBackend 两种物理设备协议实现：本地 USB HID 直出 / 外接 AI 盒兜底后端",
+          "next_label": "绑按键源",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "out",
+          "text": "坐标变换域：像素坐标 ↔ 设备计数",
+          "next_label": "缺按键源则拒绝注入",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "out",
+          "text": "两个后端都必须绑「物理按键源」，缺按键源就拒绝注入（防误注入）",
+          "next_label": "回到控制面应答",
+          "next_kind": "reply"
+        }
+      ]
+    },
+    {
+      "label": "四、命令回去",
+      "steps": [
+        {
+          "lane": "ctrl",
+          "text": "IPC 服务端把状态变化回给面板（面板的启动/停止按钮即打在「运行控制」命令上）",
+          "next_label": "统一日志与配置",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "orch",
+          "text": "跨层支撑：common 域日志分三个文件落盘 —— 全量流水 12 小时轮转 / 只收最高两级报错直写并刷盘永不被轮转吃掉 / 记客户操作",
+          "next_label": "配置分层合并",
+          "next_kind": "flow"
+        },
+        {
+          "lane": "orch",
+          "text": "其余支撑域：config 配置分层合并 / auth 本地与云端授权校验 / hid USB 设备层（控制器名运行时解析，不写死编号）/ fan 风扇 PWM 控制"
+        }
+      ]
+    }
+  ]
+}

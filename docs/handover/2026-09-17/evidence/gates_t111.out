@@ -1,0 +1,33 @@
+===== 1) 语法 =====
+  OK  tools/ota/ttbox_ota_sign.py
+  OK  tools/ota/test_verify.py
+  OK  scripts/ttbox_ota_updater.py
+  OK  plugins/web/bin/ttbox-web.py
+
+===== 2) §4.4 私钥门禁（硬 FAIL）=====
+-- 产物/scripts/plugins --
+  命中=0  (期望 0)
+-- tools/ota/keys（公钥目录，生产私钥不得在此）--
+  命中=0  (期望 0)
+-- 入库公钥 --
+total 0
+-rwxrwxrwx 1 root root 113 Sep 17 09:59 ttbox-ota-2026a.pub
+
+===== 3) 私钥目录必须被忽略（不得入库）=====
+.gitignore:179:tools/ota/.testkeys/	tools/ota/.testkeys/ttbox-ota-2026a.priv.pem
+  已忽略 OK
+  未跟踪私钥数(期望 0) = 0
+
+===== 4) Web 测试回归（不得因新增端点回退）=====
+python3: can't open file '/mnt/c/Users/Administrator/Desktop/run_pytest_repo.py': [Errno 2] No such file or directory
+
+===== 5) OTA 单测 =====
+  PASS: staging 已清理
+
+结果: 0 failures
+
+===== 6) git status =====
+ M .gitignore
+ M plugins/web/bin/ttbox-web.py
+?? scripts/ttbox_ota_updater.py
+?? tools/ota/

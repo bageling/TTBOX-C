@@ -1,0 +1,38 @@
+===== 可执行位 =====
+-rwxrwxrwx scripts/ttbox_ota_updater.py
+-rwxrwxrwx tools/ota/test_verify.py
+-rwxrwxrwx tools/ota/ttbox_ota_sign.py
+===== 暂存（逐路径，不用 -A）=====
+===== 暂存集（必须恰 6 项且无私钥）=====
+.gitignore
+plugins/web/bin/ttbox-web.py
+scripts/ttbox_ota_updater.py
+tools/ota/keys/ttbox-ota-2026a.pub
+tools/ota/test_verify.py
+tools/ota/ttbox_ota_sign.py
+count=6
+私钥泄漏检查: 0 (必须 0)
+===== 提交 =====
+[main 902eab0] feat(ota): T1.11 OTA 验签设备端（SEC-01）+ OTA-01 调度 + OTA-02 健康检查回滚
+ Committer: root <root@PC-20260805NLLL.localdomain>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly:
+
+    git config --global user.name "Your Name"
+    git config --global user.email you@example.com
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 6 files changed, 755 insertions(+)
+ create mode 100644 scripts/ttbox_ota_updater.py
+ create mode 100644 tools/ota/keys/ttbox-ota-2026a.pub
+ create mode 100644 tools/ota/test_verify.py
+ create mode 100644 tools/ota/ttbox_ota_sign.py
+commit_rc=0
+===== 提交后 =====
+902eab0 feat(ota): T1.11 OTA 验签设备端（SEC-01）+ OTA-01 调度 + OTA-02 健康检查回滚
+016cdb8 chore(build): 重生出货留档（commit 对齐 1bf4737 = T1.07b）
+1bf4737 feat(web): T1.07b 删除 Web 假授权面——license 改为 core IPC 单一真相源投影

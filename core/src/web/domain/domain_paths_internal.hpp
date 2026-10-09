@@ -1,0 +1,53 @@
+// domain_paths_internal.hpp — 运行根前缀 / 预设目录 / 状态目录 / 模型库根路径解析。
+//
+// 自 domain_internal.hpp 拆出（因超 300 行）。全部 inline，domain_internal.hpp 顶层包含，
+// 供所有 domain 层 .cpp 继续经 domain_internal.hpp 使用。
+#pragma once
+
+#include <cstdlib>
+#include <string>
+
+namespace ttbox::core::web {
+
+// 运行根前缀 / 预设目录 / 状态目录（对齐 Python paths.py 与 core Paths.hpp）。
+// 运行根前缀（TTBOX_PREFIX > /opt/ttbox）。
+inline std::string ttbox_prefix() {
+    const char* v = std::getenv("TTBOX_PREFIX");
+    return (v != nullptr && *v != '\0') ? std::string(v) : std::string("/opt/ttbox");
+}
+// 预设目录（TTBOX_PRESETS_DIR > <prefix>/presets）。
+inline std::string presets_dir() {
+    const char* v = std::getenv("TTBOX_PRESETS_DIR");
+    return (v != nullptr && *v != '\0') ? std::string(v) : ttbox_prefix() + "/presets";
+}
+// 配置目录（TTBOX_CONFIG_DIR > <prefix>/config）。
+inline std::string config_dir() {
+    const char* v = std::getenv("TTBOX_CONFIG_DIR");
+    return (v != nullptr && *v != '\0') ? std::string(v) : ttbox_prefix() + "/config";
+}
+// 运动曲线目录（TTBOX_MOTION_PROFILES_DIR > <prefix>/config/motion-profiles）。
+inline std::string motion_profiles_dir() {
+    const char* v = std::getenv("TTBOX_MOTION_PROFILES_DIR");
+    return (v != nullptr && *v != '\0') ? std::string(v)
+                                        : ttbox_prefix() + "/config/motion-profiles";
+}
+// 运行状态目录（TTBOX_STATE > /opt/ttbox/state）。
+inline std::string state_dir() {
+    const char* v = std::getenv("TTBOX_STATE");
+    return (v != nullptr && *v != '\0') ? std::string(v) : std::string("/opt/ttbox/state");
+}
+// 以 '/' 连接 base 与 name（base 为空返回 name，base 已带 '/' 不重复加）。
+// 拼接路径（避免双斜杠；base 为空时直接返回 name）。
+inline std::string join_path(const std::string& base, const std::string& name) {
+    if (base.empty()) return name;
+    if (base.back() == '/') return base + name;
+    return base + "/" + name;
+}
+
+// 模型库根（V-04）：TTBOX_MODELS_ROOT > <prefix>/models。
+inline std::string models_root() {
+    const char* v = std::getenv("TTBOX_MODELS_ROOT");
+    return (v != nullptr && *v != '\0') ? std::string(v) : ttbox_prefix() + "/models";
+}
+
+}  // namespace ttbox::core::web

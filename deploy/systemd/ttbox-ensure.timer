@@ -1,0 +1,19 @@
+[Unit]
+Description=TTBOX 周期巡检：幂等自愈 unit（DEP-01 / T1.03）
+# 现场 unit 被误删/误改后，最迟 10 分钟内自动重建（PRD DEP-01 用户故事）。
+# 说明：本 timer【必须】由安装流程显式 enable（fhs_init 尾部会 `systemctl enable --now ttbox-ensure.timer`）——
+#       自愈脚本 ttbox_ensure_services.sh 只管 5 个运行 unit，不安装 timer 自身，避免自举循环。
+
+[Timer]
+# 开机 2 分钟先跑一次（避开启动风暴），此后每 10 分钟一次。
+OnBootSec=2min
+# ★ 注意：不能用 `OnCalendar=10min`——systemd 249 实测报
+#   "Failed to parse calendar specification '10min': Invalid argument"
+#   （`10min` 是合法【时间跨度】而非合法【日历规格】）。等价的合法写法是"每小时的第 0/10/20/… 分钟"。
+OnCalendar=*:0/10
+# 错过的触发在下次启动后补跑一次（巡检类定时器语义）。
+Persistent=true
+Unit=ttbox-ensure.service
+
+[Install]
+WantedBy=timers.target

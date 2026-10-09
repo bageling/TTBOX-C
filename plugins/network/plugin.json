@@ -1,0 +1,22 @@
+{
+  "id": "network",
+  "name": "TTBOX Network",
+  "version": "1.0.0",
+  "description": "TTBOX Network 管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-network",
+  "type": "process",
+  "autostart": false,
+  "enabled": true,
+  "permissions": [
+    "network",
+    "read_config",
+    "write_config"
+  ],
+  "stop_timeout": 5,
+  "health_check": {
+    "kind": "process"
+  },
+  "config": "config",
+  "data": "data"
+}

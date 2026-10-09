@@ -1,0 +1,167 @@
+/* 界面设计器 —— 独立于面板自身的样式，不参与 /ui-custom.css，
+   所以改面板样式不会把设计器自己也改坏。 */
+:root {
+  --bg: #0e100f;
+  --panel: #171a18;
+  --panel-2: #1d211f;
+  --line: rgba(232, 236, 229, 0.12);
+  --text: #eef1ec;
+  --muted: #98a094;
+  --accent: #79d6c5;
+  --danger: #ff697f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+}
+
+/* ---------- 顶栏 ---------- */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.bar__brand { font-weight: 700; letter-spacing: .02em; }
+.bar__hint { margin-left: 10px; color: var(--muted); font-weight: 400; }
+
+.bar__status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.bar__status.is-dirty { color: var(--accent); }
+.bar__status.is-err { color: var(--danger); }
+
+.bar__actions { display: flex; gap: 8px; }
+
+/* ---------- 按钮（设计器自己的，尺寸统一） ---------- */
+.btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .05);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.btn:hover { background: rgba(255, 255, 255, .1); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn--sm { min-height: 28px; padding: 4px 10px; font-size: 12px; }
+.btn--primary {
+  border-color: rgba(121, 214, 197, .5);
+  background: rgba(121, 214, 197, .18);
+  color: var(--accent);
+  font-weight: 650;
+}
+.btn--danger { border-color: rgba(255, 105, 127, .45); color: #ffd7de; }
+.btn.is-on {
+  border-color: var(--accent);
+  background: rgba(121, 214, 197, .22);
+  color: var(--accent);
+}
+
+/* ---------- 主体 ---------- */
+.wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: 0;
+}
+
+.stage { min-width: 0; background: #000; }
+.stage iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* ---------- 右侧检查器 ---------- */
+.inspector {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 0;
+}
+
+.grp { padding: 12px 12px 14px; border-bottom: 1px solid var(--line); min-width: 0; }
+.grp--grow { display: grid; grid-template-rows: auto minmax(0, 1fr); border-bottom: 0; min-height: 0; }
+.grp h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.grp h3 .hint { display: block; margin-top: 3px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+.sel {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+.row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* 属性网格 */
+.props { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.props label { color: var(--muted); font-size: 12px; }
+.props input {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.props input[type="color"] { padding: 2px; height: 28px; }
+.props .empty { grid-column: 1 / -1; color: var(--muted); }
+
+#css {
+  width: 100%;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: none;
+  white-space: pre;
+}
+
+@media (max-width: 1100px) {
+  .wrap { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+@media (max-width: 860px) {
+  body { height: auto; }
+  .wrap { grid-template-columns: 1fr; }
+  .stage iframe { height: 60vh; }
+  .bar { flex-wrap: wrap; }
+  .bar__status { margin-left: 0; }
+}

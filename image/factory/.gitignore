@@ -1,0 +1,7 @@
+# 出厂镜像烘焙用的敏感文件，禁止入库
+#
+# cloud.default.json 内含 cloud.app_secret（HMAC 签名密钥），是全网盒子共用的应用级凭据。
+# 依据产品纪律（config/README.md「凭据纪律」）：真实云端凭据唯一落点 = 板端
+# /opt/ttbox/config/default.json 与本地密钥库，**严禁入库**。
+# 这里只放"烘焙用输入"，不放"入库资产"。
+cloud.default.json

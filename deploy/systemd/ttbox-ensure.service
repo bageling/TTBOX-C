@@ -1,0 +1,17 @@
+[Unit]
+Description=TTBOX ensure services（幂等自愈 oneshot）
+# T1.03 / DEP-01：现场 unit 被误删/误改后自动长回。本 unit 由 ttbox-ensure.timer 周期拉起
+# （OnBootSec=2min 首次 + 之后每 10 分钟），也可手工 `systemctl start ttbox-ensure` 排障。
+#
+# 不设 Restart=（oneshot 语义即 Restart=no）：自愈是幂等无副作用操作，失败无需重启刷屏。
+# 因此也无需 StartLimit*——ttbox_release_verify.sh 按"Restart≠no 才要求限流"的规则判 N/A。
+#
+# 脚本由发布树随版本交付，与 unit 同源（current -> releases/<ver>/）：
+# 非 root / current 断链时脚本自身 exit 0（不制造半套自愈）。
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ttbox/current/scripts/ttbox_ensure_services.sh
+
+[Install]
+WantedBy=multi-user.target

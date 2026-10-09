@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TTBOX 界面设计器</title>
+  <link rel="stylesheet" href="/static/designer.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="bar__brand">
+      界面设计器
+      <span class="bar__hint">拾取元素 → 改属性 → 保存（保存后全站立即生效）</span>
+    </div>
+    <span id="status" class="bar__status">载入中…</span>
+    <div class="bar__actions">
+      <button id="pickBtn" class="btn">拾取元素</button>
+      <button id="undoBtn" class="btn" disabled>撤销</button>
+      <button id="resetBtn" class="btn btn--danger">恢复出厂</button>
+      <button id="saveBtn" class="btn btn--primary">保存</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="stage">
+      <iframe id="stage" src="/" title="界面预览"></iframe>
+    </div>
+
+    <aside class="inspector">
+      <section class="grp">
+        <h3>选中元素</h3>
+        <input id="sel" class="sel" placeholder="点「拾取元素」，再点左边的界面">
+        <div class="row">
+          <button id="copyBtn" class="btn btn--sm">复制选择器</button>
+          <button id="clearBtn" class="btn btn--sm">清除本元素样式</button>
+        </div>
+      </section>
+
+      <section class="grp">
+        <h3>属性</h3>
+        <div id="props" class="props"></div>
+      </section>
+
+      <section class="grp grp--grow">
+        <h3>
+          CSS 源码
+          <span class="hint">可直接手改，优先级高于界面自带样式</span>
+        </h3>
+        <textarea id="css" spellcheck="false" placeholder="这里会显示你改动生成的所有样式"></textarea>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/designer.js"></script>
+</body>
+</html>

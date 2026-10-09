@@ -1,0 +1,1024 @@
+{
+ "_doc": {
+  "generated_from": "scripts/ttbox_ota_updater.py（现役 Python 实现）",
+  "purpose": "OTA C++ 移植的逐字节对拍基准；不得在删 Python 前丢失本文件",
+  "note": "canonical 的输出是**字符串**（已 decode utf-8）；version_key 是嵌套数组"
+ },
+ "E_meta": {
+  "SIGNED_FIELDS": [
+   "sha256",
+   "version",
+   "built_at",
+   "key_id"
+  ],
+  "HEALTH_UNITS": [
+   "ttbox-core",
+   "ttbox-web",
+   "ttbox-usbproxy"
+  ],
+  "HEALTH_TIMEOUT_S": 30,
+  "DEFAULT_KEY_ID": "ttbox-ota-2026b",
+  "DEFAULT_JOBS_DIR": "/var/lib/ttbox/ota/jobs",
+  "SAFE_ID_RE": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+  "order_samples": [
+   [
+    "V1.0.9",
+    "V1.0.10"
+   ],
+   [
+    "V1.0.55",
+    "V1.0.9"
+   ],
+   [
+    "abc",
+    "1.0.0"
+   ]
+  ]
+ },
+ "A_canonical": [
+  {
+   "in": {
+    "sha256": "abc",
+    "version": "V1.0.1",
+    "built_at": 123,
+    "key_id": "k"
+   },
+   "out": "{\"built_at\":123,\"key_id\":\"k\",\"sha256\":\"abc\",\"version\":\"V1.0.1\"}"
+  },
+  {
+   "in": {
+    "key_id": "k",
+    "version": "V1.0.1",
+    "sha256": "abc",
+    "built_at": 123
+   },
+   "out": "{\"built_at\":123,\"key_id\":\"k\",\"sha256\":\"abc\",\"version\":\"V1.0.1\"}"
+  },
+  {
+   "in": {
+    "built_at": 123,
+    "sha256": "abc",
+    "key_id": "k",
+    "version": "V1.0.1"
+   },
+   "out": "{\"built_at\":123,\"key_id\":\"k\",\"sha256\":\"abc\",\"version\":\"V1.0.1\"}"
+  },
+  {
+   "in": {
+    "version": "V1.0.1"
+   },
+   "out": "{\"version\":\"V1.0.1\"}"
+  },
+  {
+   "in": {},
+   "out": "{}"
+  },
+  {
+   "in": {
+    "sha256": "中文字符",
+    "version": "V1.0.1",
+    "built_at": 0,
+    "key_id": "k"
+   },
+   "out": "{\"built_at\":0,\"key_id\":\"k\",\"sha256\":\"中文字符\",\"version\":\"V1.0.1\"}"
+  },
+  {
+   "in": {
+    "n": 1.5,
+    "b": true,
+    "z": null,
+    "s": "quote\"and\\backslash"
+   },
+   "out": "{\"b\":true,\"n\":1.5,\"s\":\"quote\\\"and\\\\backslash\",\"z\":null}"
+  },
+  {
+   "in": {
+    "n": 0,
+    "b": false
+   },
+   "out": "{\"b\":false,\"n\":0}"
+  },
+  {
+   "in": {
+    "big": 1791286707
+   },
+   "out": "{\"big\":1791286707}"
+  },
+  {
+   "in": {
+    "nested": {
+     "x": 1
+    },
+    "arr": [
+     1,
+     2,
+     3
+    ]
+   },
+   "out": "{\"arr\":[1,2,3],\"nested\":{\"x\":1}}"
+  },
+  {
+   "in": {
+    "sha256": "3b528ca2d2f6da3d5dccef7cb98feaff94347f7d27371b962a601649a69f17da",
+    "version": "V1.0.53",
+    "built_at": 1791286707,
+    "key_id": "ttbox-ota-2026b"
+   },
+   "out": "{\"built_at\":1791286707,\"key_id\":\"ttbox-ota-2026b\",\"sha256\":\"3b528ca2d2f6da3d5dccef7cb98feaff94347f7d27371b962a601649a69f17da\",\"version\":\"V1.0.53\"}"
+  }
+ ],
+ "B_version_key": [
+  {
+   "in": "V1.0.1",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V1.0.10",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     10,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V1.0.55",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     55,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V1.0.9",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     9,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "1.5.70",
+   "out": [
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     5,
+     ""
+    ],
+    [
+     0,
+     70,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "1.5.7",
+   "out": [
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     5,
+     ""
+    ],
+    [
+     0,
+     7,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "",
+   "out": []
+  },
+  {
+   "in": "abc",
+   "out": [
+    [
+     1,
+     0,
+     "abc"
+    ]
+   ]
+  },
+  {
+   "in": "V1.0",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V1",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ]
+   ]
+  },
+  {
+   "in": "V1.0.1-beta",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     1,
+     0,
+     "beta"
+    ]
+   ]
+  },
+  {
+   "in": "1.0.1_2",
+   "out": [
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     2,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "1-0+1",
+   "out": [
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V1.0.1.1",
+   "out": [
+    [
+     1,
+     0,
+     "V1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "V2.0.0",
+   "out": [
+    [
+     1,
+     0,
+     "V2"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     0,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "v1.0.1",
+   "out": [
+    [
+     1,
+     0,
+     "v1"
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ]
+   ]
+  },
+  {
+   "in": "1.0.1-delta-from-1.5.5",
+   "out": [
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     0,
+     ""
+    ],
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     1,
+     0,
+     "delta"
+    ],
+    [
+     1,
+     0,
+     "from"
+    ],
+    [
+     0,
+     1,
+     ""
+    ],
+    [
+     0,
+     5,
+     ""
+    ],
+    [
+     0,
+     5,
+     ""
+    ]
+   ]
+  }
+ ],
+ "C_is_downgrade": [
+  {
+   "new": "V1.0.1",
+   "cur": "V1.0.1",
+   "out": true
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "V1.0.9",
+   "out": true
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "V1.0.10",
+   "out": true
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "V1.0.1",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "V1.0.1",
+   "out": false
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "V1.0.9",
+   "out": true
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "V1.0.10",
+   "out": true
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "V1.0.9",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "V1.0.1",
+   "out": false
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "V1.0.9",
+   "out": false
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "V1.0.10",
+   "out": true
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "V1.0.10",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "V1.0.1",
+   "out": false
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "V1.0.9",
+   "out": false
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "V1.0.10",
+   "out": false
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "V1.0.55",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "V1.0.1",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "V1.0.9",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "V1.0.10",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "1.5.70",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "1.5.70",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "1.5.70",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "V1.0.1",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "V1.0.9",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "V1.0.10",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "V1.0.55",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "1.5.70",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "",
+   "cur": "V2.0.0",
+   "out": true
+  },
+  {
+   "new": "abc",
+   "cur": "V1.0.1",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "V1.0.9",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "V1.0.10",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "V1.0.55",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "abc",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "abc",
+   "cur": "V2.0.0",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "V1.0.1",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "V1.0.9",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "V1.0.10",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "V1.0.55",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "1.5.70",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "",
+   "out": false
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "abc",
+   "out": true
+  },
+  {
+   "new": "V2.0.0",
+   "cur": "V2.0.0",
+   "out": true
+  }
+ ],
+ "D_check_safe_id": [
+  {
+   "in": "ttbox-ota-2026b",
+   "ok": true,
+   "out": "ttbox-ota-2026b"
+  },
+  {
+   "in": "abc",
+   "ok": true,
+   "out": "abc"
+  },
+  {
+   "in": "a",
+   "ok": true,
+   "out": "a"
+  },
+  {
+   "in": "ABC-123_x.y",
+   "ok": true,
+   "out": "ABC-123_x.y"
+  },
+  {
+   "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "ok": true,
+   "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "in": "",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: ''"
+  },
+  {
+   "in": "   ",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '   '"
+  },
+  {
+   "in": "../../etc/passwd",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '../../etc/passwd'"
+  },
+  {
+   "in": "..",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '..'"
+  },
+  {
+   "in": "a..b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a..b'"
+  },
+  {
+   "in": "../x",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '../x'"
+  },
+  {
+   "in": "a/b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a/b'"
+  },
+  {
+   "in": "a b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a b'"
+  },
+  {
+   "in": "a\tb",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a\\tb'"
+  },
+  {
+   "in": "-lead",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '-lead'"
+  },
+  {
+   "in": ".dot",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '.dot'"
+  },
+  {
+   "in": "_under",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '_under'"
+  },
+  {
+   "in": "中文",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: '中文'"
+  },
+  {
+   "in": "a\nb",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a\\nb'"
+  },
+  {
+   "in": "a$b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a$b'"
+  },
+  {
+   "in": "a;b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a;b'"
+  },
+  {
+   "in": "a|b",
+   "ok": false,
+   "state": "unsafe_field",
+   "err": "unsafe_field: 非法 test: 'a|b'"
+  }
+ ],
+ "F_safe_members": [
+  {
+   "in": "RELEASE_MANIFEST.json",
+   "ok": true
+  },
+  {
+   "in": "payload",
+   "ok": true
+  },
+  {
+   "in": "payload/",
+   "ok": true
+  },
+  {
+   "in": "payload/bin/ttbox_core_main",
+   "ok": true
+  },
+  {
+   "in": "payload/plugins/web/static/panel/10-flow.js",
+   "ok": true
+  },
+  {
+   "in": "payload/a/../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/a/../b'"
+  },
+  {
+   "in": "payload/./x",
+   "ok": true
+  },
+  {
+   "in": "./payload/y",
+   "ok": true
+  },
+  {
+   "in": "",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: ''"
+  },
+  {
+   "in": ".",
+   "ok": true
+  },
+  {
+   "in": "..",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '..'"
+  },
+  {
+   "in": "/abs/path",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '/abs/path'"
+  },
+  {
+   "in": "/",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '/'"
+  },
+  {
+   "in": "../escape",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: '../escape'"
+  },
+  {
+   "in": "payload/../../etc/passwd",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/../../etc/passwd'"
+  },
+  {
+   "in": "payload/../..",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'payload/../..'"
+  },
+  {
+   "in": "a/../../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: 'a/../../b'"
+  },
+  {
+   "in": "./../b",
+   "ok": false,
+   "state": "unsafe_member",
+   "err": "unsafe_member: 非法成员名: './../b'"
+  },
+  {
+   "in": "payload//double",
+   "ok": true
+  },
+  {
+   "in": "payload/子目录/文件.txt",
+   "ok": true
+  }
+ ]
+}

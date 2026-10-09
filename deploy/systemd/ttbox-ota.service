@@ -1,0 +1,24 @@
+# ttbox-ota.service — OTA 特权通道的执行端（2026-09-18 定案 §2.2）
+#
+# User=root：更新器要写 /opt/ttbox/releases、切 current 软链、重启服务——这些只有 root 能做。
+# oneshot + --from-jobs：消费任务目录里的 *.json（web 写入），处理完移入 processed/failed。
+# 更新器自身强制 https + sha256 + Ed25519 双因子验签 ⇒ 即便有人能投递任务文件，
+# 也只能装我们签过名的包。
+
+[Unit]
+Description=TTBOX OTA updater (consume job files as root)
+# 升级过程会重启 ttbox-web 自身，绝不能与 web 同生共死
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+# ★ V1.0.56：入口由 python3 脚本换成 C++ 二进制（去 Python 收尾）。参数契约不变。
+ExecStart=/opt/ttbox/current/bin/ttbox_ota --from-jobs /var/lib/ttbox/ota/jobs
+# 任务处理可能含下载（七牛隧道 ~15KB/s，3MB 包 3.5 分钟，重试最坏 3 倍）+30 秒健康检查；
+# 2026-09-19 实测 600s 会在安装中段被 systemd 杀掉（current 已切、服务没重启的半程态），放宽到 30 分钟
+TimeoutStartSec=1800
+# 失败不自动重试（任务文件已归档到 failed/，重复执行无意义；重试 = 面板重新点安装）
+RemainAfterExit=no

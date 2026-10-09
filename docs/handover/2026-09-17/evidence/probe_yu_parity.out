@@ -1,0 +1,97 @@
+########## 0) 构建/测试环境 ##########
+build-aarch64
+build-aarch64-authon
+build-aarch64-t114
+build-aarch64-t114-repro
+build-aarch64-t114-repro.build.log
+build-aarch64-t114-repro.configure.log
+build-aarch64-t118
+--- host build 是否有 ctest ---
+
+########## 1) A1/A2 产物字符串三档门禁 ##########
+A1 第三方域名(antszy|blpro|blpt) = 0  (期望0)
+A2 自有端点(38.127.133.6)        = 0  (M1期望0/登记)
+
+########## 2) A3 凭据默认值源码门禁 ##########
+A3 命中 0 PASS
+
+########## 3) A4 产物 md5 == 留档 ##########
+实算 md5 = b156c5cc5a069b96ebc56fa703221999
+留档 md5 = 
+A4 不一致 FAIL
+
+########## 4) A5 RUNPATH ##########
+ 0x000000000000001d (RUNPATH)            Library runpath: [$ORIGIN/../lib]
+
+########## 5) A7/A8 payload bin 闭集 ##########
+stage 不存在（构建产物已被清理或目录不同）: build-aarch64-t114/stage
+CMakeCache.txt
+CMakeFiles
+CTestTestfile.cmake
+RELEASE_BUILD.md
+build.ninja
+cmake_install.cmake
+configure.log
+hardware_runner_main
+imgdetect
+ipc_ping
+
+########## 6) A17 unit 单一权威（同名 .service 计数） ##########
+有重复 FAIL
+--- 全部 unit ---
+ttbox-core.service
+ttbox-edid.service
+ttbox-ensure.service
+ttbox-preview.service
+ttbox-usbproxy.service
+ttbox-web.service
+
+########## 7) A30 usbproxy 诚实性 ##########
+-rwxrwxrwx 1 root root 134160 Sep 16 23:44 usb-proxy
+-rwxrwxrwx 1 root root  24062 Sep 13 19:55 usb-proxy.cpp
+-rwxrwxrwx 1 root root     76 Sep 17 09:05 usb-proxy.sha256
+usb-proxy: OK
+旧路径字面量 = 0  (期望0)
+
+########## 8) G4 CPU 亲和（是否仍硬编码 cpu6） ##########
+core/src/common/CpuAffinity.cpp:67:bool CpuAffinity::set_tid_affinity(uint64_t mask, unsigned tid, std::string* error) {
+core/src/common/CpuAffinity.cpp:69:    cpu_set_t set;
+core/src/common/CpuAffinity.cpp:72:        if (mask & (1ULL << c)) CPU_SET(c, &set);
+core/src/common/CpuAffinity.cpp:74:    const int rc = ::sched_setaffinity(tid ? static_cast<pid_t>(tid) : 0, sizeof(set), &set);
+core/src/common/CpuAffinity.cpp:76:        if (error) *error = "sched_setaffinity(tid=" + std::to_string(tid) +
+core/src/common/CpuAffinity.cpp:87:bool CpuAffinity::set_thread_affinity(uint64_t mask, std::string* error) {
+core/src/common/CpuAffinity.cpp:88:    return set_tid_affinity(mask, 0, error);
+core/src/common/CpuAffinity.cpp:130:bool CpuAffinity::set_tid_affinity(uint64_t, unsigned, std::string*) { return true; }
+core/src/common/CpuAffinity.cpp:131:bool CpuAffinity::set_thread_affinity(uint64_t, std::string*) { return true; }
+core/src/common/CpuAffinity.hpp:25:        bool affinity_ok = false;   // 线程亲和性是否设置成功
+
+########## 9) G6/G7 字段：features / ui_brand 是否在契约里 ##########
+412:        return {'activated': False, 'state': 'unactivated', 'plan': 'none', 'is_pro': False,
+413:                'features': [], 'expires_at': '', 'grace_until': '', 'message': '',
+417:    feats = lic.get('features') or []
+428:        'plan': str(lic.get('plan', 'none')),
+429:        'is_pro': bool(lic.get('is_pro', False)),
+430:        'features': list(feats),                              # 空数组合法（M1 无文档）
+1027:                'ui_brand': 'ttbox',
+1031:            'ui_brand': 'ttbox',
+3916:        'ui_brand': 'ttbox',
+3936:        'ui_brand': 'ttbox',
+
+########## 10) X1/T1.11 OTA 验签是否已存在 ##########
+tools/ota 不存在
+scripts/ 下无 ota 脚本
+./framework/plugin_manager/integrity.py
+
+########## 11) G1 自愈脚本是否已有（T1.03） ##########
+ttbox_ensure_selftest.sh
+ttbox_ensure_services.sh
+ttbox-core.service
+ttbox-edid.service
+ttbox-ensure.service
+ttbox-ensure.timer
+ttbox-preview.service
+ttbox-usbproxy.service
+ttbox-web.service
+
+########## 12) git 状态与 HEAD ##########
+016cdb8 chore(build): 重生出货留档（commit 对齐 1bf4737 = T1.07b）

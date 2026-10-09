@@ -1,0 +1,62 @@
+Internal ctest changing into directory: /mnt/c/Users/Administrator/Desktop/TTBOX-Module-Edition-main/build-host-yu
+Test project /mnt/c/Users/Administrator/Desktop/TTBOX-Module-Edition-main/build-host-yu
+      Start  1: ttbox_core_tests
+ 1/28 Test  #1: ttbox_core_tests ..................   Passed    0.52 sec
+      Start  2: test_license_daemon
+ 2/28 Test  #2: test_license_daemon ...............   Passed    0.01 sec
+      Start  3: test_aim_target_mailbox
+ 3/28 Test  #3: test_aim_target_mailbox ...........   Passed    0.00 sec
+      Start  4: test_decode_coords
+ 4/28 Test  #4: test_decode_coords ................   Passed    0.00 sec
+      Start  5: test_aim_thread
+ 5/28 Test  #5: test_aim_thread ...................   Passed    0.01 sec
+      Start  6: test_pid1
+ 6/28 Test  #6: test_pid1 .........................   Passed    0.00 sec
+      Start  7: test_hotkey_gate
+ 7/28 Test  #7: test_hotkey_gate ..................   Passed    0.41 sec
+      Start  8: test_pull_curve_aimthread
+ 8/28 Test  #8: test_pull_curve_aimthread .........   Passed    0.17 sec
+      Start  9: test_personal_trajectory_shader
+ 9/28 Test  #9: test_personal_trajectory_shader ...   Passed    0.00 sec
+      Start 10: test_lock_confirm
+10/28 Test #10: test_lock_confirm .................   Passed    0.00 sec
+      Start 11: test_head_aim_constraint
+11/28 Test #11: test_head_aim_constraint ..........   Passed    0.00 sec
+      Start 12: test_bytetrack_upgrade
+12/28 Test #12: test_bytetrack_upgrade ............   Passed    0.01 sec
+      Start 13: test_recoil
+13/28 Test #13: test_recoil .......................   Passed    0.00 sec
+      Start 14: test_hotkey_config
+14/28 Test #14: test_hotkey_config ................   Passed    0.73 sec
+      Start 15: test_selector_stress
+15/28 Test #15: test_selector_stress ..............   Passed    0.01 sec
+      Start 16: test_lifecycle_stress
+16/28 Test #16: test_lifecycle_stress .............   Passed    0.31 sec
+      Start 17: test_fov_angle
+17/28 Test #17: test_fov_angle ....................   Passed    0.00 sec
+      Start 18: test_detection_geometry_filter
+18/28 Test #18: test_detection_geometry_filter ....   Passed    0.00 sec
+      Start 19: test_coordinate_transform
+19/28 Test #19: test_coordinate_transform .........   Passed    0.00 sec
+      Start 20: test_pipeline
+20/28 Test #20: test_pipeline .....................   Passed    0.00 sec
+      Start 21: test_tracker
+21/28 Test #21: test_tracker ......................   Passed    0.00 sec
+      Start 22: test_output_backend
+22/28 Test #22: test_output_backend ...............   Passed    0.00 sec
+      Start 23: test_mouse_control_client
+23/28 Test #23: test_mouse_control_client .........   Passed    0.00 sec
+      Start 24: test_personal_motion
+24/28 Test #24: test_personal_motion ..............   Passed    0.00 sec
+      Start 25: test_preprocess
+25/28 Test #25: test_preprocess ...................   Passed    0.00 sec
+      Start 26: test_model_backend
+26/28 Test #26: test_model_backend ................   Passed    0.00 sec
+      Start 27: test_model_runtime_state
+27/28 Test #27: test_model_runtime_state ..........   Passed    0.00 sec
+      Start 28: test_rknn_failure_injection
+28/28 Test #28: test_rknn_failure_injection .......   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 28
+
+Total Test time (real) =   2.53 sec

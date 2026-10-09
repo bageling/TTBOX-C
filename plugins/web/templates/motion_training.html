@@ -1,0 +1,59 @@
+<section id="control-section-motion-training" class="control-section motion-training-section" data-control-section hidden>
+  <aside class="motion-training-guide" role="note" aria-label="个性曲线训练使用说明">
+    <strong>个性曲线训练</strong>
+    <p>记录你移动鼠标瞄准目标时的反应、速度和轨迹特征，用于生成更贴近个人习惯的 AI 拉枪曲线。</p>
+    <p><b>使用方法：</b>点击“开始采集”，按顺序将准星移动到绿色目标；完成反应训练和连续切换训练后，系统会自动生成并启用个人模型。</p>
+    <p class="motion-training-guide-warning"><b>请注意：</b>个人模型启用后会完全替代默认拉枪曲线，默认曲线的开关和参数均不再生效；停用个人模型后才会恢复默认曲线。</p>
+  </aside>
+
+  <div class="motion-training-layout">
+    <div class="motion-training-workspace">
+      <div id="motionTrainingCanvasShell" class="motion-training-canvas-shell">
+        <canvas id="motionTrainingCanvas" aria-label="鼠标轨迹训练画布"></canvas>
+        <div id="motionTrainingUnavailable" class="motion-training-unavailable" hidden>当前设备无法进行桌面鼠标训练</div>
+      </div>
+
+      <div class="motion-training-actions">
+        <button id="motionTrainingStart" class="primary-button" type="button">开始采集</button>
+        <button id="motionTrainingStop" class="ghost-button" type="button" disabled>结束采集</button>
+        <button id="motionTrainingRetry" class="ghost-button" type="button" hidden>重试上传</button>
+        <span id="motionTrainingLeaseBadge" class="status-badge idle">未采集</span>
+        <span id="motionTrainingMessage" class="motion-training-message" aria-live="polite"></span>
+      </div>
+    </div>
+
+    <aside class="motion-training-sidebar">
+      <section class="motion-training-panel">
+        <div class="module-title"><strong>个人模型</strong><span id="motionTrainingQualityBadge" class="status-badge idle">未训练</span></div>
+        <div class="motion-training-quality"><span id="motionTrainingQualityBar"></span></div>
+        <div class="motion-training-model-meta">
+          <span id="motionTrainingModelCoverage">样本不足</span>
+          <strong id="motionTrainingModelState">未启用</strong>
+        </div>
+        <div class="motion-training-model-actions">
+          <button id="motionTrainingTrain" class="primary-button" type="button">生成模型</button>
+          <button id="motionTrainingClear" class="ghost-button danger" type="button">清空样本</button>
+          <button id="motionTrainingActivate" class="ghost-button motion-training-model-toggle" type="button">启用</button>
+        </div>
+      </section>
+
+      <section class="motion-training-panel">
+        <div class="module-title"><strong>采集统计</strong><span id="motionTrainingProgress">0 / 168</span></div>
+        <div class="motion-training-stats">
+          <div><span>反应样本</span><strong id="motionTrainingReactionCount">0 / 72</strong></div>
+          <div><span>连续样本</span><strong id="motionTrainingContinuousCount">0 / 96</strong></div>
+          <div><span>平均反应</span><strong id="motionTrainingReactionMean">--</strong></div>
+          <div><span>路径效率</span><strong id="motionTrainingPathEfficiency">--</strong></div>
+        </div>
+      </section>
+
+      <section class="motion-training-panel motion-training-mix-panel">
+        <div class="module-title"><strong>混合参数</strong></div>
+        <label>曲率 <output id="motionTrainingCurveValue">100%</output><input id="motionTrainingCurveBlend" type="range" min="0" max="100" value="100"></label>
+        <label>速度 <output id="motionTrainingSpeedValue">100%</output><input id="motionTrainingSpeedBlend" type="range" min="0" max="100" value="100"></label>
+        <label>反应 <output id="motionTrainingReactionValue">70%</output><input id="motionTrainingReactionBlend" type="range" min="0" max="100" value="70"></label>
+        <label>最大反应延迟 <output id="motionTrainingDelayValue">250ms</output><input id="motionTrainingMaxDelay" type="range" min="0" max="1000" step="10" value="250"></label>
+      </section>
+    </aside>
+  </div>
+</section>

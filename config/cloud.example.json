@@ -1,0 +1,7 @@
+{
+  "cloud": {
+    "license_base_url": "https://cctv2.top:10086/ttbox",
+    "app_key": "ttbox",
+    "app_secret": "<YOUR_APP_SECRET>"
+  }
+}

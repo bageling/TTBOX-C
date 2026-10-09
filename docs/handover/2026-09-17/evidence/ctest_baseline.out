@@ -1,0 +1,32 @@
+Internal ctest changing into directory: /mnt/c/Users/Administrator/Desktop/TTBOX-Module-Edition-main/build-host-yu
+Test project /mnt/c/Users/Administrator/Desktop/TTBOX-Module-Edition-main/build-host-yu
+  Test  #1: ttbox_core_tests
+  Test  #2: test_license_daemon
+  Test  #3: test_aim_target_mailbox
+  Test  #4: test_decode_coords
+  Test  #5: test_aim_thread
+  Test  #6: test_pid1
+  Test  #7: test_hotkey_gate
+  Test  #8: test_pull_curve_aimthread
+  Test  #9: test_personal_trajectory_shader
+  Test #10: test_lock_confirm
+  Test #11: test_head_aim_constraint
+  Test #12: test_bytetrack_upgrade
+  Test #13: test_recoil
+  Test #14: test_hotkey_config
+  Test #15: test_selector_stress
+  Test #16: test_lifecycle_stress
+  Test #17: test_fov_angle
+  Test #18: test_detection_geometry_filter
+  Test #19: test_coordinate_transform
+  Test #20: test_pipeline
+  Test #21: test_tracker
+  Test #22: test_output_backend
+  Test #23: test_mouse_control_client
+  Test #24: test_personal_motion
+  Test #25: test_preprocess
+  Test #26: test_model_backend
+  Test #27: test_model_runtime_state
+  Test #28: test_rknn_failure_injection
+
+Total Tests: 28

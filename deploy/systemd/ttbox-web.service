@@ -1,0 +1,48 @@
+[Unit]
+Description=TTBOX Web Server (C++)
+After=local-fs.target
+# 不 Wants ttbox-core：TTBOX core 需独占 HDMI RX，按需手动启动
+# StartLimit* 属于 [Unit] 段：写成 [Service] 会被 systemd 忽略（实测报
+# "Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring"），
+# 导致失败重启无限刷（板端曾 82 次/31 分钟）。
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+# 运行用户（T02 方案 A）：与 Core 同组 ttbox，方可连接 /run/ttbox/core.sock（0660）
+User=ttbox
+Group=ttbox
+# 路径说明（DEP-06 / design §B1.1 设计决策，2026-09-16 更新）：
+# 旧注释称"Web 是插件、不属于 release 产物"，那是 current 下没有 plugins/ 时的
+# 止血修复（否则 ExecStart 203/EXEC）。根因（无人浇筑 current 软链）由 DEP-06 解决后，
+# 正确终态是【全部运行树进 release，含 plugins】：/opt/ttbox/current -> releases/<ver>/，
+# 该树内包含 plugins/web。这样 OTA/回滚对 Web 也原子生效。过渡期由发布脚本
+# `ln -sfn current/plugins /opt/ttbox/plugins` 保证旧路径兼容。
+WorkingDirectory=/opt/ttbox/current/plugins/web
+# ★ V1.0.52：Python 后端已彻底移除（业主令「去掉所有 Python 代码」）。
+#   原 TTBOX_WEB_BACKEND=cpp|py 双后端开关与 py 回退分支（exec plugins/web/bin/ttbox-web
+#   → python3 ttbox-web.py）一并删除：plugins/web 下已无任何 .py，
+#   仅保留 static/（前端资源）与 templates/，由 C++ 二进制直接伺服。
+#   ⇒ 回滚到 Python 后端的路径不再存在；如需回退，只能回退整个版本。
+ExecStart=/opt/ttbox/current/bin/ttbox_web
+# Web 插件根：C++ 端由它派生 static/ 与 templates/ 两个子目录
+# （core/src/web/WebServer.cpp:58-59，读 TTBOX_ROOT，默认 CWD）。
+Environment=TTBOX_ROOT=/opt/ttbox/current/plugins/web
+# ★ V1.0.52：PYTHONPATH 随 Python 后端一并移除（已无任何 Python 模块需要导入）。
+# IPC socket 唯一真源（A-PATH-5）：与 Core 的 --ipc 及 core/src/common/Paths.hpp::kIpcSocketDefault
+# 保持一致（值 = /run/ttbox/core.sock；跨语言同值由 scripts/ttbox_conventions_gate.sh 断言）。
+Environment=TTBOX_IPC_SOCKET=/run/ttbox/core.sock
+# V-04：模型库根与 Core 的 model_registry_root 对齐（/var/lib/ttbox/models）。
+# 缺省 /opt/ttbox/models 是旧布局且 root:root 不可写，会导致上传 500。
+Environment=TTBOX_MODELS_ROOT=/var/lib/ttbox/models
+# ★ V-20 根治式删除：原 `Environment=TTBOX_WEB_HOST/PORT` 是**装饰性 env**——web 控制台
+# 监听地址/端口由 C++ 侧自持：core/src/web/main.cpp:28 读 TTBOX_WEB_PORT（默认 8000），
+# 默认值见 core/src/web/WebServer.hpp::kDefaultPort。
+# ★ V1.0.52：TTBOX_PREVIEW_URL（指向 127.0.0.1:8001 的 Python 预览服务）已删除。
+#   预览流现在只有一条源：core GET_PREVIEW IPC（core/src/web/domain/preview.cpp）。
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

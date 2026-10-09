@@ -1,0 +1,219 @@
+[stage] 同步 /root/ttbox-image/_stage -> 镜像 /mnt/img/root/_bake
+===== [chroot] 执行 05_selfcheck.sh =====
+
+=========== A. 发布树独立体检（产品自带 ttbox_release_verify.sh） ===========
+  [verify] 校验版本 1.5.21  ->  /opt/ttbox/releases/1.5.21
+  [verify][ OK ] manifest 全量 sha256 通过（145 项）
+  [verify][ OK ] ttbox-core.service: ExecStart 可执行 (/opt/ttbox/current/bin/ttbox_core_main)
+  [verify][ OK ] ttbox-core.service: WorkingDirectory 存在 (/opt/ttbox/current)
+  [verify][ OK ] ttbox-edid.service: ExecStart 可执行 (/bin/sh)
+  [verify][ OK ] ttbox-ensure.service: ExecStart 可执行 (/opt/ttbox/current/scripts/ttbox_ensure_services.sh)
+  [verify][ OK ] ttbox-ota.service: ExecStart 可执行 (/usr/bin/python3)
+  [verify][ OK ] ttbox-preview.service: ExecStart 可执行 (/opt/ttbox/current/plugins/preview/bin/ttbox-preview)
+  [verify][ OK ] ttbox-preview.service: WorkingDirectory 存在 (/opt/ttbox/current/plugins/preview)
+  [verify][ OK ] ttbox-usbproxy.service: ExecStart 可执行 (/opt/ttbox/current/usbproxy/board/run-ttbox-usb-proxy.sh)
+  [verify][ OK ] ttbox-usbproxy.service: WorkingDirectory 存在 (/opt/ttbox/current/usbproxy)
+  [verify][ OK ] ttbox-web.service: ExecStart 可执行 (/opt/ttbox/current/plugins/web/bin/ttbox-web)
+  [verify][ OK ] ttbox-web.service: WorkingDirectory 存在 (/opt/ttbox/current/plugins/web)
+  [verify][ OK ] RUNPATH 自包含（逐段）: bin/ttbox_core_main  =>  $ORIGIN/../lib
+  [verify][ OK ] bin/ 闭集成员: ttbox_core_main
+  [verify][ OK ] 设备库 librknnrt.so 解析落在本 release lib/ 内: /opt/ttbox/releases/1.5.21/lib/librknnrt.so
+  [verify][ OK ] ttbox-core.service: StartLimitBurst=5 且位于 [Unit]
+  [verify][ OK ] ttbox-core.service: StartLimitIntervalSec=300 且位于 [Unit]
+  [verify][ OK ] ttbox-edid.service: StartLimit* N/A（Restart=no，不自动重启，无刷屏风险）
+  [verify][ OK ] ttbox-ensure.service: StartLimit* N/A（Restart=no，不自动重启，无刷屏风险）
+  [verify][ OK ] ttbox-ota.service: StartLimit* N/A（Restart=no，不自动重启，无刷屏风险）
+  [verify][ OK ] ttbox-preview.service: StartLimitBurst=5 且位于 [Unit]
+  [verify][ OK ] ttbox-preview.service: StartLimitIntervalSec=300 且位于 [Unit]
+  [verify][ OK ] ttbox-usbproxy.service: StartLimitBurst=5 且位于 [Unit]
+  [verify][ OK ] ttbox-usbproxy.service: StartLimitIntervalSec=300 且位于 [Unit]
+  [verify][ OK ] ttbox-web.service: StartLimitBurst=5 且位于 [Unit]
+  [verify][ OK ] ttbox-web.service: StartLimitIntervalSec=300 且位于 [Unit]
+  [verify][ OK ] 过渡软链: /opt/ttbox/plugins -> /opt/ttbox/releases/1.5.21/plugins
+  [verify][ OK ] 过渡软链: /opt/ttbox/scripts -> /opt/ttbox/releases/1.5.21/scripts
+  [verify] 口径门禁跳过（源码树不在场 —— 板端 release 树的正常情形）
+  ------------------------------------------------------------
+  [verify] RESULT: PASS (version 1.5.21)
+  >>> release_verify 通过（rc=0）
+
+=========== B. 动态链接闭包（core 二进制在【本镜像内】能否被加载器解析） ===========
+  -- readelf -d 的 NEEDED 清单 --
+    librga.so.2
+    librknnrt.so
+    libjpeg.so.8
+    libopencv_imgproc.so.4.5d
+    libopencv_core.so.4.5d
+    libstdc++.so.6
+    libm.so.6
+    libgcc_s.so.1
+    libc.so.6
+    ld-linux-aarch64.so.1
+  -- RUNPATH --
+    $ORIGIN/../lib
+  -- ldd 实际解析（每条必须落到具体文件，'not found' 即失败）--
+    	librga.so.2 => /lib/aarch64-linux-gnu/librga.so.2 (0x0000005501950000)
+    	librknnrt.so => /opt/ttbox/current/bin/../lib/librknnrt.so (0x00000055019a0000)
+    	libjpeg.so.8 => /lib/aarch64-linux-gnu/libjpeg.so.8 (0x0000005502120000)
+    	libopencv_imgproc.so.4.5d => /lib/aarch64-linux-gnu/libopencv_imgproc.so.4.5d (0x0000005502190000)
+    	libopencv_core.so.4.5d => /lib/aarch64-linux-gnu/libopencv_core.so.4.5d (0x0000005502500000)
+    	libstdc++.so.6 => /lib/aarch64-linux-gnu/libstdc++.so.6 (0x0000005502790000)
+    	libm.so.6 => /lib/aarch64-linux-gnu/libm.so.6 (0x00000055029d0000)
+    	libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000005502a70000)
+    	libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000005502aa0000)
+    	/lib/ld-linux-aarch64.so.1 (0x0000005500000000)
+    	libpthread.so.0 => /lib/aarch64-linux-gnu/libpthread.so.0 (0x0000005502c60000)
+    	libdl.so.2 => /lib/aarch64-linux-gnu/libdl.so.2 (0x0000005502c80000)
+    	libz.so.1 => /lib/aarch64-linux-gnu/libz.so.1 (0x0000005502ca0000)
+    	libtbb.so.2 => /lib/aarch64-linux-gnu/libtbb.so.2 (0x0000005502ce0000)
+  [✓] 无 'not found'
+  [✓] librga.so.2 可解析
+  [✓] libopencv_core 可解析
+  [✓] libopencv_imgproc 可解析
+  [✓] libjpeg.so.8 可解析
+  [✓] librknnrt 解析到本 release 的 lib/
+  -- libc/loader 家族（镜像自带，逐条列出以便人工复核）--
+    	libstdc++.so.6 => /lib/aarch64-linux-gnu/libstdc++.so.6 (0x0000005502790000)
+    	libm.so.6 => /lib/aarch64-linux-gnu/libm.so.6 (0x00000055029d0000)
+    	libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000005502a70000)
+    	libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000005502aa0000)
+    	/lib/ld-linux-aarch64.so.1 (0x0000005500000000)
+    	libpthread.so.0 => /lib/aarch64-linux-gnu/libpthread.so.0 (0x0000005502c60000)
+    	libdl.so.2 => /lib/aarch64-linux-gnu/libdl.so.2 (0x0000005502c80000)
+    	libz.so.1 => /lib/aarch64-linux-gnu/libz.so.1 (0x0000005502ca0000)
+    	libtbb.so.2 => /lib/aarch64-linux-gnu/libtbb.so.2 (0x0000005502ce0000)
+
+=========== C. Python 依赖闭包（出货 .py 的第三方 import 是否都能导入） ===========
+  出货树内自带模块（非第三方依赖）:
+    · model_service  <- current/plugins/model/model_service.py
+  stdlib 之外的**第三方**顶层模块: ['cryptography', 'flask', 'waitress']
+  [✓] 全部第三方模块在镜像内可导入 (3 个: cryptography, flask, waitress)
+  -- 关键第三方版本 --
+      flask 2.0.1 / waitress n/a / cryptography 3.4.8
+
+=========== D. 全部出货 .py 语法编译（含 plugins/scripts/framework） ===========
+  磁盘 .py 数量=54   清单(RELEASE_MANIFEST) .py 数量=54
+  [✓] 全部 .py 编译通过（54 个）
+
+=========== E. 制品完整性（对照 RELEASE_MANIFEST.json 全量 sha256） ===========
+  版本=1.5.21  git_sha=b9c923ea627a5b2bb2caa0aec4188f0f26550ce8
+  逐文件比对 145 项
+  [✓] 145 项全部一致
+
+=========== F. 用户/组/权限（独立重读，不复用浇筑时的判断） ===========
+  -- ttbox 身份 --
+    uid=999(ttbox) gid=999(ttbox) groups=999(ttbox),44(video)
+  -- 目录属主与权限 --
+    路径                                         属主         权限
+    /etc/ttbox                                     root:ttbox     775
+    /etc/ttbox/config.d                            root:ttbox     775
+    /etc/ttbox/config.d/00-factory.json            root:root      644
+    /etc/ttbox/config.d/10-device.json             root:ttbox     664
+    /var/lib/ttbox                                 ttbox:ttbox    775
+    /var/lib/ttbox/models                          ttbox:ttbox    775
+    /var/lib/ttbox/models/installed                ttbox:ttbox    775
+    /var/lib/ttbox/hid                             ttbox:ttbox    775
+    /var/lib/ttbox/activation                      ttbox:ttbox    700
+    /var/lib/ttbox/update                          root:ttbox     750
+    /var/lib/ttbox/ota/jobs                        root:ttbox     770
+    /var/lib/ttbox/motion-profiles                 ttbox:ttbox    775
+    /var/lib/ttbox/presets                         ttbox:ttbox    775
+    /var/log/ttbox                                 ttbox:ttbox    755
+    /opt/ttbox/config                              root:ttbox     775
+    /opt/ttbox/config/hardware_display.json        root:ttbox     664
+    /opt/ttbox/config/default.json                 root:ttbox     640
+    /opt/ttbox/config/motion-profiles              ttbox:ttbox    775
+    /opt/ttbox/presets                             ttbox:ttbox    775
+    /var/lib/ttbox/license                         root:root      700
+    /var/lib/ttbox/ota/processed                   root:root      755
+    /opt/ttbox/current                             root:root      777
+    /opt/ttbox/plugins                             root:root      777
+    /opt/ttbox/scripts                             root:root      777
+  [✓] ttbox 不在 sudo 组
+  [✓] ttbox shell 为 nologin
+  [✓] ttbox 在 video 组
+  [✓] 整棵 /opt/ttbox 无 world-writable（实体文件/目录）
+
+=========== F2. 开箱可用性（激活凭据 / 可写目录）——独立重读，与 04b 的写入不复用 ===========
+  cloud 段: license_base_url=https://cctv2.top:10046/ttbox, app_key=ttbox, app_secret=bc4e…4ede
+  [✓] 云端凭据权限 = root:ttbox 0640
+  [✓] 云端凭据世界不可读（secret 不外泄）
+  [✓] ttbox 身份可读云端凭据（web 要读）
+  [✓] ttbox 身份可写 /opt/ttbox/presets（面板保存预设）
+  [✓] ttbox 身份可写 /opt/ttbox/config/motion-profiles
+  [✓] /opt/ttbox 未被放开成 world-writable
+  -- 与开发板口径的差异（有意收紧，非缺陷）--
+     开发板 /opt/ttbox = 777（开发检出遗留）；出厂 = 755 root:root
+
+=========== G. systemd 单元与 enable 态 ===========
+  [✓] ttbox-core.service 已安装
+  [✓] ttbox-web.service 已安装
+  [✓] ttbox-preview.service 已安装
+  [✓] ttbox-usbproxy.service 已安装
+  [✓] ttbox-edid.service 已安装
+  [✓] ttbox-ota.path 已安装
+  [✓] ttbox-ota.service 已安装
+  [✓] ttbox-ensure.service 已安装
+  [✓] ttbox-ensure.timer 已安装
+  -- enable 落链 --
+    /etc/systemd/system/multi-user.target.wants/:
+    lrwxrwxrwx 1 root root 38 Sep 20 08:14 ttbox-core.service -> /etc/systemd/system/ttbox-core.service
+    lrwxrwxrwx 1 root root 38 Sep 20 08:14 ttbox-edid.service -> /etc/systemd/system/ttbox-edid.service
+    lrwxrwxrwx 1 root root 34 Sep 20 08:14 ttbox-ota.path -> /etc/systemd/system/ttbox-ota.path
+    lrwxrwxrwx 1 root root 41 Sep 20 08:14 ttbox-preview.service -> /etc/systemd/system/ttbox-preview.service
+    lrwxrwxrwx 1 root root 42 Sep 20 08:14 ttbox-usbproxy.service -> /etc/systemd/system/ttbox-usbproxy.service
+    lrwxrwxrwx 1 root root 37 Sep 20 08:14 ttbox-web.service -> /etc/systemd/system/ttbox-web.service
+    /etc/systemd/system/timers.target.wants/:
+    lrwxrwxrwx 1 root root 38 Sep 20 08:14 ttbox-ensure.timer -> /etc/systemd/system/ttbox-ensure.timer
+  [✓] ttbox-core.service 已 enable 且可解析
+  [✓] ttbox-web.service 已 enable 且可解析
+  [✓] ttbox-preview.service 已 enable 且可解析
+  [✓] ttbox-usbproxy.service 已 enable 且可解析
+  [✓] ttbox-edid.service 已 enable 且可解析
+  [✓] ttbox-ota.path 已 enable 且可解析
+  [✓] ttbox-ensure.timer 已 enable 且可解析
+
+=========== H. 交付姿态（客户无 SSH / 出厂固化 / 可维护） ===========
+  [✓] ssh.service 被 mask
+  [✓] ssh.socket 被 mask
+  [✓] cloud-init 已禁用
+  [✓] netplan 已固化
+  [✓] root 可控制台登录
+  [✓] machine-id 已清空
+  [✓] 无 SSH host key
+  构建暂存 /root/_bake: 在场（由 90_finalize_host.sh 交付前清除并复验）
+  [✓] journal 持久化已开
+  [✓] extlinux.conf 未被改动（与出厂同 sha256）
+  [✓] 镜像内无 TTBOX 私钥
+
+=========== I. 硬件前置（静态可判部分） ===========
+  内核 HDMI RX     : CONFIG_VIDEO_ROCKCHIP_HDMIRX=y
+  内核 USB HID 设备 : CONFIG_USB_CONFIGFS_F_HID=y
+  raw_gadget 模块   : /lib/modules/5.10.0-1012-rockchip/kernel/drivers/usb/gadget/legacy/raw_gadget.ko
+  hdmirx overlay    : /usr/lib/firmware/5.10.0-1012-rockchip/device-tree/rockchip/overlay/rk3588-hdmirx.dtbo
+  （/dev/video0、NPU、USB gadget 属真实硬件，chroot 内不可判 —— 须上板验）
+
+=========== J. 现场诊断器 ttbox_doctor.sh（部分项需 PID1，chroot 内 N/A） ===========
+  [doctor][PASS] current -> /opt/ttbox/releases/1.5.21（版本 1.5.21）
+  [doctor][N/A ] ttbox-core.service —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  [doctor][N/A ] ttbox-web.service —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  [doctor][N/A ] ttbox-usbproxy.service —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  [doctor][N/A ] ttbox-preview.service —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  [doctor][N/A ] ttbox-edid.service —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  [doctor][N/A ] /dev/video0 —— 需真实硬件（chroot 无设备节点）
+  [doctor][ OK ] boot 配置含 overlay 配置（静态可判）—— 运行时是否生效须上板看 /dev/video0
+  [doctor][PASS] python3-cryptography 可用
+  [doctor][PASS] OTA 公钥在位（ttbox-ota-2026b）
+  [doctor][PASS] OTA 更新器在位
+  [doctor][PASS] OTA 任务目录在位（root:ttbox 0770）
+  [doctor][PASS] OTA 服务器地址两处一致（https://cctv2.top:10046/ota）
+  [doctor][PASS] OTA 服务器地址非占位值
+  [doctor][N/A ] ttbox-ensure.timer —— chroot 内 systemctl 假成功，真实存活只能上板验（静态 enable 态见 G 段）
+  
+  [doctor] 1 项未通过（见上方 FAIL 行）
+  >>> 被标 [N/A ] 的项 = chroot 环境判不了（不是失败，也不是真通过）
+  >>> doctor 退出码在 chroot 内会被上面的假绿污染，故本段不参与 FAIL 汇总
+  >>> 真正的服务存活/HDMI RX/NPU 验证 = 烧录后上板（见交付文档）
+
+=========== 结论 ===========
+== 阶段三：镜像级自检全部通过 ==
+===== [chroot] 05_selfcheck.sh 退出码=0 =====

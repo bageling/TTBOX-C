@@ -1,0 +1,21 @@
+=== A22：未鉴权访问敏感端点必须 401 ===
+  /api/reboot -> 401  PASS
+  /api/poweroff -> 401  PASS
+  /api/config -> 401  PASS
+  /api/preview -> 401  PASS
+  /api/state -> 401  PASS
+
+=== 负控：A22 判据是否有牙（若不鉴权则端点裸奔 ⇒ 判据必须能打红）===
+  已登录状态码: {'reboot': 404, 'poweroff': 404, 'config': 200, 'preview': 404, 'state': 200}
+  登录后不再 401 ⇒ 401 确由鉴权层产生（判据有牙）
+
+=== A29：XFF 不可绕过封禁 ===
+  封禁请求: 401 {'error': 'unauthorized', 'ok': False}
+  被封IP + XFF=198.51.100.7 -> 401
+  被封IP + XFF=127.0.0.1    -> 401
+  A29 PASS（均被拒）
+
+=== 源码判据：XFF 读取点 == 0 ===
+  非注释命中 = 2（期望 0）
+
+结果: 1 failures ['XFF-src']

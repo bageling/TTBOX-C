@@ -1,0 +1,36 @@
+{
+  "_comment": "TTBOX 设备层配置（T01 配置分层）。部署到 /etc/ttbox/config.d/10-device.json，root:ttbox 0664，升级绝不覆盖，Core 经 SET_CONFIG 原子写回此文件。仅放客户/部署环境相关的键；算法与安全基线在 00-factory.json。",
+  "model_registry_root": "/var/lib/ttbox/models",
+  "hid_package_root": "/var/lib/ttbox/hid",
+  "output_backend": "usb_proxy",
+  "output_proxy_socket": "/run/ttbox-mouse-passthrough/cmd.sock",
+  "input_event_socket": "/run/ttbox-mouse-passthrough/event.sock",
+  "model_label": "jwdl_sjzv11",
+  "model_uploaded": false,
+  "runtime_profile": {
+    "model_id": "",
+    "capture": {
+      "width": 0,
+      "height": 0,
+      "offset_x": 0,
+      "offset_y": 0
+    },
+    "inference": {
+      "confidence": 0,
+      "iou": 0,
+      "class_filter": [],
+      "max_detections": 0
+    },
+    "fov": {
+      "enabled": false,
+      "shape": 0,
+      "radius": 0.5,
+      "center_x": 0.5,
+      "center_y": 0.5
+    },
+    "mouse": {
+      "enabled": true,
+      "calibrating": false
+    }
+  }
+}

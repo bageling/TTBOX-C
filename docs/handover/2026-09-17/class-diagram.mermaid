@@ -1,0 +1,102 @@
+classDiagram
+    class ConsoleApp {
+        +AppState state
+        +main() void
+        +refreshAll() void
+        +applyFullState(payload) void
+        +renderRuntime(payload) void
+        +applyBrand(payload) void
+        +applyTheme(theme, opts) void
+        +setLicenseNavigationLock(locked) void
+        +activateLicenseFromInput(inputId) void
+        +collectConfig() object
+        +populateForm(cfg) void
+    }
+    class BrandAdapter {
+        +normalizeSkin(token) string
+        +brandConfig(payload) BrandView
+        +applyText(view) void
+        +applyBodyClass(skin) void
+    }
+    class LicenseGate {
+        +isLicenseValid(payload) bool
+        +setLocked(locked) void
+        +updateStatus(msg) void
+        +focusInput() void
+    }
+    class PageRouter {
+        +activePageId string
+        +activate(pageId) void
+        +initNavigation() void
+    }
+    class BrandView {
+        +uiBrand string
+        +mark string
+        +eyebrow string
+        +title string
+        +allowThemeSwitch bool
+        +defaultLocalName string
+        +defaultHotspotSsid string
+    }
+    class TTBoxWeb {
+        +before_request() Response
+        +index() Response
+        +desktop() Response
+        +mobile() Response
+        +activate_page() Response
+        +get_state() Response
+        +get_config() Response
+        +put_config() Response
+        +get_license() Response
+        +activate_license() Response
+        +list_models() Response
+        +select_model() Response
+        +list_presets() Response
+        +load_preset() Response
+        +get_wifi_status() Response
+        +get_system_status() Response
+        +get_hailo_status() Response
+        +list_makcu_devices() Response
+        +preview_stream() Response
+    }
+    class BrandRegistry {
+        +default string
+        +brands map
+        +table() map
+        +normalize(token) string
+        +payload(brand) map
+        +skin(brand) string
+        +template_name(tpl, brand) string
+    }
+    class ActivationGate {
+        +isStatic(path) bool
+        +isBlocked(ip) bool
+        +activationOk() bool
+        +enforce() Response
+    }
+    class LicenseBlock {
+        +activated bool
+        +valid bool
+        +state string
+        +plan string
+        +capabilities map
+        +ui_brand string
+        +short_code string
+    }
+    class CloudSession {
+        +path string
+        +load() map
+        +save(map) void
+    }
+
+    ConsoleApp --> BrandAdapter : uses
+    ConsoleApp --> LicenseGate : uses
+    ConsoleApp --> PageRouter : uses
+    BrandAdapter --> BrandView : produces
+    ConsoleApp ..> TTBoxWeb : HTTP /api/*
+    TTBoxWeb --> BrandRegistry : resolves brand/skin
+    TTBoxWeb --> ActivationGate : registers before_request
+    TTBoxWeb --> LicenseBlock : projects license
+    TTBoxWeb --> CloudSession : cloud session
+    ActivationGate --> LicenseBlock : reads activated
+    BrandRegistry --> BrandAdapter : supplies skin+text via /api/state.data.ui

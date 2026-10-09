@@ -1,0 +1,383 @@
+<!doctype html>
+<!--
+  activate.html — 未激活引导页（T03 双保险·第一重）。
+
+  ★ 结构/文案 1:1 复刻参照物 index.html 的 #licenseGateOverlay 卡片
+    （同「设备授权 / 输入激活码后继续使用」标题、同状态行、同激活码输入、
+     同「激活设备 / 刷新状态」双按钮、同暗色卡片视觉）。
+  ★ 服务端才是唯一放行判据：未激活时 /、/desktop、/mobile ⇒ 302 /activate
+    （before_request fail-closed），本页只负责「呈现 + 引导」，不改变任何授权判定。
+  ★ 激活按钮直连 /api/license/activate（与参照物同端点同入参 {license_key}）。
+-->
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ app_title }}</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0c0b;
+  --surface-soft: rgba(255, 255, 255, 0.035);
+  --surface-hover: rgba(255, 255, 255, 0.065);
+  --line: rgba(232, 236, 229, 0.1);
+  --line-strong: rgba(232, 236, 229, 0.18);
+  --text: #f3f5f0;
+  --text-soft: #d8ddd4;
+  --muted: #92998f;
+  --muted-strong: #b7beb4;
+  --accent: #79d6c5;
+  --accent-strong: #a0eadb;
+  --red: #ff697f;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: Inter, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background:
+    linear-gradient(135deg, rgba(121, 214, 197, 0.06), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 42%),
+    var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+h2,
+p {
+  margin: 0;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface-soft);
+  cursor: pointer;
+  font-weight: 780;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(121, 214, 197, 0.2);
+}
+
+button:disabled,
+input:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  transform: none;
+  pointer-events: none;
+}
+
+input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.045);
+  padding: 10px 11px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+input:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+input:focus {
+  outline: none;
+  border-color: rgba(121, 214, 197, 0.7);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.field {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+/* ---- 参照物 #licenseGateOverlay 卡片样式（1:1） ---- */
+.license-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background:
+    linear-gradient(180deg, rgba(8, 10, 9, 0.78), rgba(8, 10, 9, 0.92)),
+    rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(12px);
+}
+
+.license-gate-overlay[hidden] {
+  display: none;
+}
+
+.license-gate-card {
+  display: grid;
+  gap: 14px;
+  width: min(520px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid rgba(121, 214, 197, 0.32);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: rgba(22, 24, 23, 0.98);
+  box-shadow: var(--shadow);
+}
+
+.license-gate-head {
+  display: grid;
+  gap: 5px;
+}
+
+.license-gate-head p {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.license-gate-head h2 {
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1.14;
+  font-weight: 820;
+}
+
+.license-gate-status {
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.5;
+}
+
+.license-gate-status.error {
+  color: var(--red);
+}
+
+.license-gate-field {
+  min-height: auto;
+  max-height: none;
+  padding: 12px;
+}
+
+.license-gate-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.ghost-button {
+  color: var(--text);
+  border-color: rgba(121, 214, 197, 0.28);
+  background: rgba(121, 214, 197, 0.1);
+}
+
+.ghost-button:hover {
+  border-color: rgba(121, 214, 197, 0.5);
+  background: rgba(121, 214, 197, 0.16);
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 100;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: rgba(24, 27, 25, 0.98);
+}
+
+@media (max-width: 520px) {
+  .license-gate-overlay {
+    padding: 14px;
+    align-items: stretch;
+  }
+
+  .license-gate-card {
+    align-self: center;
+    padding: 18px;
+  }
+
+  .license-gate-head h2 {
+    font-size: 22px;
+  }
+
+  .license-gate-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
+</head>
+<body class="license-loading">
+  <div id="licenseGateOverlay" class="license-gate-overlay" role="dialog" aria-modal="true" aria-labelledby="licenseGateTitle">
+    <section class="license-gate-card" aria-label="设备激活">
+      <div class="license-gate-head">
+        <p>设备授权</p>
+        <h2 id="licenseGateTitle">输入激活码后继续使用</h2>
+      </div>
+      <p id="licenseGateStatus" class="license-gate-status">设备未激活，请输入激活码后继续使用。</p>
+      <label class="field license-gate-field">激活码
+        <input id="licenseGateKeyInput" type="text" autocomplete="off" placeholder="输入激活码">
+      </label>
+      <div class="license-gate-actions">
+        <button id="licenseGateActivateButton" class="primary-button" type="button">激活设备</button>
+        <button id="licenseGateRefreshButton" class="ghost-button" type="button">刷新状态</button>
+      </div>
+    </section>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+<script>
+const statusEl = document.getElementById("licenseGateStatus");
+const keyInput = document.getElementById("licenseGateKeyInput");
+const activateButton = document.getElementById("licenseGateActivateButton");
+const refreshButton = document.getElementById("licenseGateRefreshButton");
+const toastEl = document.getElementById("toast");
+
+function setStatus(message, isError = false) {
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+  statusEl.classList.toggle("error", !!isError);
+}
+
+function showToast(message) {
+  if (!toastEl) return;
+  toastEl.textContent = message || "";
+  toastEl.hidden = false;
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => {
+    toastEl.hidden = true;
+  }, 2800);
+}
+
+function setBusy(busy) {
+  [keyInput, activateButton, refreshButton].forEach((el) => {
+    if (el) el.disabled = !!busy;
+  });
+}
+
+async function api(path, options = {}) {
+  // 与参照物一致：HTTP 200 也可能是 {ok:false}，须同时判 !response.ok || data.ok===false。
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  return payload.data;
+}
+
+function licenseValid(payload) {
+  const license = payload && payload.license;
+  return !!(license && license.valid);
+}
+
+async function refreshStatus({ quiet = false } = {}) {
+  setBusy(true);
+  try {
+    const payload = await api("/api/license");
+    if (licenseValid(payload)) {
+      setStatus("设备已激活，正在进入系统。");
+      window.location.replace("/");
+      return;
+    }
+    setStatus("设备未激活，请输入激活码后继续使用。");
+    if (!quiet) showToast("授权状态已刷新");
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+    if (!quiet) showToast(error.message || String(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function activate() {
+  const licenseKey = keyInput ? keyInput.value.trim() : "";
+  if (!licenseKey) {
+    setStatus("请输入激活码。", true);
+    if (keyInput) keyInput.focus();
+    return;
+  }
+  setBusy(true);
+  setStatus("正在验证激活码，请稍候。");
+  try {
+    await api("/api/license/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ license_key: licenseKey }),
+    });
+    setStatus("激活成功，正在进入系统。");
+    window.setTimeout(() => window.location.replace("/"), 600);
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+    showToast(error.message || String(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+if (activateButton) activateButton.addEventListener("click", activate);
+if (refreshButton) refreshButton.addEventListener("click", () => refreshStatus());
+if (keyInput) {
+  keyInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      activate();
+    }
+  });
+  keyInput.focus();
+}
+
+refreshStatus({ quiet: true });
+</script>
+</body>
+</html>

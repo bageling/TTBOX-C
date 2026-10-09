@@ -1,0 +1,42 @@
+{
+  "schema": "ttbox-ui-brand-v2",
+  "default": "ttbox",
+  "brands": {
+    "ttbox": {
+      "brand_name": "TTBOX",
+      "brand_mark": "TT",
+      "brand_eyebrow": "TTBOX SYSTEM",
+      "brand_title": "TTBOX 控制台",
+      "app_title": "TTBOX 控制台",
+      "default_theme": "dark",
+      "allow_theme_switch": true,
+      "default_local_name": "ttbox",
+      "default_hotspot_ssid": "TTBOX",
+      "fallback_reset_text": "重置默认 Wi-Fi",
+      "brand_accent": "#2F81F7",
+      "brand_logo": null,
+      "theme": { "mode": "dark", "accent": "#2F81F7" },
+      "skin": "yu",
+      "template_dir": null,
+      "static_dir": null
+    },
+    "sample": {
+      "brand_name": "SAMPLE",
+      "brand_mark": "SM",
+      "brand_eyebrow": "SAMPLE SYSTEM",
+      "brand_title": "SAMPLE 控制台",
+      "app_title": "SAMPLE 控制台",
+      "default_theme": "light",
+      "allow_theme_switch": false,
+      "default_local_name": "sample",
+      "default_hotspot_ssid": "SAMPLE",
+      "fallback_reset_text": "重置默认 Wi-Fi",
+      "brand_accent": "#E4572E",
+      "brand_logo": "logos/sample.png",
+      "theme": { "mode": "light", "accent": "#E4572E" },
+      "skin": "xh",
+      "template_dir": "sample",
+      "static_dir": "sample"
+    }
+  }
+}

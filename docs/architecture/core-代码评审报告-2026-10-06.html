@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TTBOX core 代码评审报告 · 2026-10-06</title>
+<style>
+  :root{
+    --bg:#f6f6f3; --card:#ffffff; --ink:#1f1f1d; --ink2:#5f5e5a; --ink3:#8a8880;
+    --line:#e3e2dc; --blue:#185FA5; --blue2:#378ADD; --gray:#888780; --gray2:#b4b2a9;
+    --red:#A32D2D; --redbg:#FBEAEA; --amber:#854F0B; --amberbg:#FAEEDA;
+    --green:#3B6D11; --greenbg:#EDF5E3; --teal:#0F6E56; --tealbg:#E1F5EE;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+       font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+  header.top{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 28px;margin-bottom:22px}
+  h1{margin:0 0 6px;font-size:23px;font-weight:600;letter-spacing:.2px}
+  .sub{color:var(--ink2);font-size:13.5px;margin-bottom:16px}
+  .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px 22px;font-size:13px}
+  .meta div{color:var(--ink2)}
+  .meta b{color:var(--ink);font-weight:600}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin-bottom:18px}
+  h2{font-size:17px;font-weight:600;margin:0 0 4px;padding-bottom:10px;border-bottom:2px solid var(--line)}
+  h3{font-size:14.5px;font-weight:600;margin:22px 0 8px}
+  h3:first-of-type{margin-top:14px}
+  p{margin:8px 0}
+  small{color:var(--ink3)}
+  table{width:100%;border-collapse:collapse;font-size:12.8px;margin:10px 0;table-layout:auto}
+  th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+  th{background:#fafaf8;font-weight:600;color:var(--ink2);white-space:nowrap}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  code{background:#f2f2ee;border:1px solid #e6e5df;border-radius:4px;padding:0 4px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+  .bar-row{display:grid;grid-template-columns:150px 1fr 150px;gap:12px;align-items:center;margin:6px 0;font-size:12.8px}
+  .bar-track{background:#f1f1ec;border-radius:5px;height:19px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:5px}
+  .bar-value{text-align:right;color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:14px 0 4px}
+  .kpi{background:#fafaf8;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi .lab{font-size:12px;color:var(--ink2);margin-bottom:4px}
+  .kpi .val{font-size:21px;font-weight:600;line-height:1.25}
+  .kpi .val small{font-size:12px;font-weight:400;color:var(--ink2)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .t-p0{background:var(--redbg);color:var(--red)}
+  .t-p1{background:var(--amberbg);color:var(--amber)}
+  .t-p2{background:#f0f0ec;color:var(--ink2)}
+  .t-a{background:var(--redbg);color:var(--red)}
+  .t-b{background:var(--amberbg);color:var(--amber)}
+  .t-c{background:#f0f0ec;color:var(--ink2)}
+  .t-d{background:var(--tealbg);color:var(--teal)}
+  .lock{background:var(--greenbg);color:var(--green);border:1px solid #d4e6bd}
+  .callout{border-left:3px solid var(--blue2);background:#f4f8fd;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13.2px}
+  .callout.warn{border-left-color:#d9a343;background:#fdf8ee}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}.bar-row{grid-template-columns:110px 1fr 118px}}
+  footer{color:var(--ink3);font-size:12.5px;text-align:center;padding:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>TTBOX core 代码评审报告</h1>
+  <div class="sub">评审对象：<code>core/src</code> 自有 C++（26 模块 / 约 42k 非空行） · 排除 <code>core/third_party</code> 与 <code>core/tests</code></div>
+  <div class="meta">
+    <div>评审日期：<b>2026-10-06</b></div>
+    <div>代码基线：<b>HEAD d3111b0</b>（工作区干净）</div>
+    <div>产品版本：<b>V1.0.61</b></div>
+    <div>实际编译标准：<b>C++17</b>（<code>CMakeLists.txt:391-393</code>）</div>
+    <div>目标工具链：<b>GCC 12 / aarch64</b>，无 <code>-Werror</code></div>
+    <div>评审方式：<b>四路专项 → 两派辩论 → 裁决</b></div>
+  </div>
+  <div class="callout warn" style="margin-bottom:0">
+    全程<b>静态只读</b>，未修改任何文件；结论均带 <code>文件:行号</code> 证据。<b>未做板端实测</b>——凡涉及运行期量级（延迟、占空比、竞争窗口）者均标注"需实测"。
+  </div>
+</header>
+
+<section>
+  <h2>0 · 结论速览</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="lab">C++ 系代码占比（自有）</div><div class="val">67.3%</div></div>
+    <div class="kpi"><div class="lab">自有代码规模</div><div class="val">100,838 <small>行 / 544 文件</small></div></div>
+    <div class="kpi"><div class="lab">P0 真实缺陷</div><div class="val" style="color:var(--red)">2 <small>数据竞争</small></div></div>
+    <div class="kpi"><div class="lab">立即修</div><div class="val">4 <small>项（A1–A4）</small></div></div>
+    <div class="kpi"><div class="lab">随批带</div><div class="val">7 <small>项（B1–B7）</small></div></div>
+    <div class="kpi"><div class="lab">标准</div><div class="val" style="color:var(--green)">维持 C++17</div></div>
+  </div>
+  <ul>
+    <li><b>语言构成：C++ 绝对主导。</b>自有代码中 C++（<code>.cpp</code>+<code>.hpp</code>+C 头）合计 67,873 行 = <b>67.3%</b>；前端 JS/CSS/HTML 合计 15.6%；Shell 9.3%；Python 7.5%。</li>
+    <li><b>代码健康度：高。</b>所有权/RAII 纪律、头文件规范（141/141 <code>#pragma once</code>）、多态基类虚析构（10/10）、零拷贝链路（V4L2 dma-buf → RGA → RKNN 直绑）均达同规模嵌入式项目上游水平。</li>
+    <li><b>真实缺陷集中且局部：</b>无 P0 架构缺陷；零散发现 <b>2 个 P0 数据竞争</b>、3 个 P1 竞争/撕裂读、1 个 UB（不可信输入触发的浮点越界转换）、1 个严格别名 UB。其余绝大多数为设计气味/可读性/机会主义改进。</li>
+    <li><b>裁决：</b>立即修 4 项 + 随批带 7 项，其余绑定证据后触发或明确不动；<b>全部单文件可 <code>git revert</code></b>；一次上板同时完成"采基线 + 验证修复 + 补瞄准阶段仪表"。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>1 · 语言占比</h2>
+  <p><small>口径：只计 git 跟踪文件（自动排除 <code>build-aarch64-*</code>、<code>dist/</code> 等构建产物）；代码行 = 非空行。</small></p>
+
+  <h3>1.1 自有代码（排除 <code>core/third_party</code>）— 544 文件 / 100,838 行</h3>
+  <div style="margin:12px 0 18px">
+    <div class="bar-row"><span class="bar-label">C++ (.cpp)</span><div class="bar-track"><div class="bar-fill" style="width:54.8%;background:#185FA5"></div></div><span class="bar-value">55,213 · 54.8%</span></div>
+    <div class="bar-row"><span class="bar-label">C++ 头 (.hpp)</span><div class="bar-track"><div class="bar-fill" style="width:12.2%;background:#378ADD"></div></div><span class="bar-value">12,268 · 12.2%</span></div>
+    <div class="bar-row"><span class="bar-label">Shell (.sh)</span><div class="bar-track"><div class="bar-fill" style="width:9.3%;background:#888780"></div></div><span class="bar-value">9,346 · 9.3%</span></div>
+    <div class="bar-row"><span class="bar-label">JavaScript</span><div class="bar-track"><div class="bar-fill" style="width:8.6%;background:#a3a199"></div></div><span class="bar-value">8,687 · 8.6%</span></div>
+    <div class="bar-row"><span class="bar-label">Python</span><div class="bar-track"><div class="bar-fill" style="width:7.5%;background:#a3a199"></div></div><span class="bar-value">7,608 · 7.5%</span></div>
+    <div class="bar-row"><span class="bar-label">CSS</span><div class="bar-track"><div class="bar-fill" style="width:4.9%;background:#d3d1c7"></div></div><span class="bar-value">4,894 · 4.9%</span></div>
+    <div class="bar-row"><span class="bar-label">HTML</span><div class="bar-track"><div class="bar-fill" style="width:2.1%;background:#d3d1c7"></div></div><span class="bar-value">2,123 · 2.1%</span></div>
+    <div class="bar-row"><span class="bar-label">其他（C头/Lua/C/PS/CMake）</span><div class="bar-track"><div class="bar-fill" style="width:0.7%;background:#e0ded6"></div></div><span class="bar-value">699 · 0.7%</span></div>
+  </div>
+
+  <table>
+    <thead><tr><th>语言</th><th class="n">文件数</th><th class="n">代码行</th><th class="n">行占比</th><th class="n">文件占比</th></tr></thead>
+    <tbody>
+      <tr><td>C++（<code>.cpp</code>）</td><td class="n">229</td><td class="n">55,213</td><td class="n"><b>54.8%</b></td><td class="n">42.1%</td></tr>
+      <tr><td>C++ 头文件（<code>.hpp</code>）</td><td class="n">147</td><td class="n">12,268</td><td class="n">12.2%</td><td class="n">27.0%</td></tr>
+      <tr><td>Shell（<code>.sh</code> 83 + 包内包装脚本 8）</td><td class="n">91</td><td class="n">9,346</td><td class="n">9.3%</td><td class="n">16.7%</td></tr>
+      <tr><td>JavaScript</td><td class="n">15</td><td class="n">8,687</td><td class="n">8.6%</td><td class="n">2.8%</td></tr>
+      <tr><td>Python</td><td class="n">41</td><td class="n">7,608</td><td class="n">7.5%</td><td class="n">7.5%</td></tr>
+      <tr><td>CSS</td><td class="n">3</td><td class="n">4,894</td><td class="n">4.9%</td><td class="n">0.6%</td></tr>
+      <tr><td>HTML</td><td class="n">5</td><td class="n">2,123</td><td class="n">2.1%</td><td class="n">0.9%</td></tr>
+      <tr><td>C/C++ 头文件（<code>usbproxy</code>）</td><td class="n">4</td><td class="n">279</td><td class="n">0.3%</td><td class="n">0.7%</td></tr>
+      <tr><td>Lua</td><td class="n">6</td><td class="n">181</td><td class="n">0.2%</td><td class="n">1.1%</td></tr>
+      <tr><td>C</td><td class="n">1</td><td class="n">113</td><td class="n">0.1%</td><td class="n">0.2%</td></tr>
+      <tr><td>PowerShell</td><td class="n">1</td><td class="n">75</td><td class="n">0.1%</td><td class="n">0.2%</td></tr>
+      <tr><td>CMake</td><td class="n">1</td><td class="n">51</td><td class="n">0.1%</td><td class="n">0.2%</td></tr>
+      <tr><td><b>合计</b></td><td class="n"><b>544</b></td><td class="n"><b>100,838</b></td><td class="n"><b>100%</b></td><td class="n"><b>100%</b></td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><b>C++ 系（<code>.cpp</code>+<code>.hpp</code>+C/C++ 头）合计 67,873 行 = 67.3%。</b></div>
+
+  <h3>1.2 第三方库代码（<code>core/third_party</code>，11 文件 / 20,805 行）</h3>
+  <p>全部为头文件：<code>httplib.h</code> 9,370 行、ONNX Runtime 头（9 个）合计约 12,151 行、<code>rknn_api.h</code> 804 行。若把第三方计入，全量 121,619 行，C++ 名义占比升至 72.7%——<b>故本报告将第三方单列，不混入"自有代码"</b>。</p>
+
+  <h3>1.3 三个必须说明的统计要点</h3>
+  <ol>
+    <li><b><code>plugins/*/bin/ttbox-*</code> 是 8 个 bash 包装脚本</b>（内容为 <code>#!/usr/bin/env bash</code> + <code>exec python3 .../plugin_entry.py</code>），<b>不是编译产物</b>——已归入 Shell 计数（文件数 83 → 91 的原因）。</li>
+    <li><b>Python 并未归零</b>：仍有 41 文件 / 7,608 行，主要在 <code>tools/</code>（3,042 行）与 <code>core/</code>（2,233 行）。HEAD 提交 <code>去 Python 收尾</code> 说明是进行时。</li>
+    <li><b>入库整洁度发现</b>（26 个二进制/无扩展名文件被跟踪）：<code>usbproxy/lib/libjsoncpp.so.*</code>、<code>usbproxy/usb-proxy</code>（ELF）、<code>deploy/dtb/*.dtb</code>、<code>image/factory/*.dtb</code>、<code>core/tests/data/*.onnx|*.bgr</code>、<code>tools/**/*.pub</code>。其中 <b><code>.so</code> 与可执行文件入库</b>值得复查是否符合仓库"构建产物不入库"的约定。</li>
+  </ol>
+</section>
+
+<section>
+  <h2>2 · 代码库画像</h2>
+  <h3>2.1 <code>core/src</code> 模块地图（26 模块 / 约 42k 非空行）</h3>
+  <table>
+    <thead><tr><th>模块</th><th class="n">文件</th><th class="n">行数</th><th>模块</th><th class="n">文件</th><th class="n">行数</th></tr></thead>
+    <tbody>
+      <tr><td>web（C++ 内嵌 HTTP 服务）</td><td class="n">54</td><td class="n">7,710</td><td>ota（自更新）</td><td class="n">11</td><td class="n">1,286</td></tr>
+      <tr><td>rknn（推理/解码/工作池）</td><td class="n">16</td><td class="n">3,700</td><td>capture（V4L2 采集）</td><td class="n">5</td><td class="n">987</td></tr>
+      <tr><td>mouse（选靶/路由/触发）</td><td class="n">30</td><td class="n">3,689</td><td>output（输出后端）</td><td class="n">13</td><td class="n">916</td></tr>
+      <tr><td>auth（卡密/授权）</td><td class="n">25</td><td class="n">3,631</td><td>runtime（运行时编排）</td><td class="n">4</td><td class="n">857</td></tr>
+      <tr><td>model（模型注册/配置）</td><td class="n">17</td><td class="n">3,291</td><td>preview（预览）</td><td class="n">4</td><td class="n">760</td></tr>
+      <tr><td>app（应用装配/IPC）</td><td class="n">7</td><td class="n">2,800</td><td>rga（硬件预处理）</td><td class="n">2</td><td class="n">480</td></tr>
+      <tr><td>aim（瞄准主循环/PID）</td><td class="n">8</td><td class="n">1,967</td><td>config</td><td class="n">2</td><td class="n">398</td></tr>
+      <tr><td>common（日志/JSON/指标）</td><td class="n">18</td><td class="n">1,938</td><td>input（物理鼠标）</td><td class="n">2</td><td class="n">236</td></tr>
+      <tr><td>edid</td><td class="n">11</td><td class="n">1,853</td><td>pipeline/detector/bench/main</td><td class="n">6</td><td class="n">284</td></tr>
+      <tr><td>hid（HID 透传）</td><td class="n">18</td><td class="n">1,724</td><td></td><td></td><td></td></tr>
+      <tr><td>ipc（AF_UNIX 服务端）</td><td class="n">2</td><td class="n">1,366</td><td></td><td></td><td></td></tr>
+    </tbody>
+  </table>
+  <p><small>另：<code>core/tests</code> 有 <b>108 个测试文件 / 20,770 行</b>——测试密度高，是本次评审可依赖的回归基础。</small></p>
+
+  <h3>2.2 超大规模文件（审查与拆分优先级）</h3>
+  <table>
+    <thead><tr><th>文件</th><th class="n">行数</th><th>文件</th><th class="n">行数</th></tr></thead>
+    <tbody>
+      <tr><td><code>ipc/IpcServer.cpp</code></td><td class="n">1,198</td><td><code>auth/TtboxLicenseClient.cpp</code></td><td class="n">764</td></tr>
+      <tr><td><code>aim/AimThread.cpp</code></td><td class="n">1,054</td><td><code>app/ApplicationIpc.cpp</code></td><td class="n">736</td></tr>
+      <tr><td><code>app/Application.cpp</code></td><td class="n">1,009</td><td><code>capture/V4L2Capture.cpp</code></td><td class="n">734</td></tr>
+      <tr><td><code>model/ModelRegistry.cpp</code></td><td class="n">1,002</td><td><code>mouse/TargetSelector.cpp</code></td><td class="n">733</td></tr>
+      <tr><td><code>model/RuntimeProfile.cpp</code></td><td class="n">954</td><td><code>rknn/WorkerPool.cpp</code></td><td class="n">676</td></tr>
+      <tr><td><code>rknn/DecodeNMS.cpp</code></td><td class="n">835</td><td><code>rknn/RKNNEngine.cpp</code></td><td class="n">637</td></tr>
+      <tr><td><code>runtime/CoreRuntime.cpp</code></td><td class="n">571</td><td><code>preview/PreviewModule.cpp</code></td><td class="n">534</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>3 · 评审发现（四路专项）</h2>
+
+  <h3>3.1 标准用法（史准通）— 无 P0，健康度很高</h3>
+  <p>裸 <code>new/delete</code> 近乎绝迹（唯一一处 <code>WebServer.cpp:116</code> 是 httplib 线程池 API 契约），<code>enum class</code>/<code>override</code>/虚析构/默认成员初始化器/<code>#pragma once</code> 全部到位。</p>
+  <table>
+    <thead><tr><th>等级</th><th>位置</th><th>问题</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>common/Json.cpp:89-93</code></td><td><code>as_int</code> 浮点→<code>int64_t</code> 转换<b>只挡了 NaN/Inf，未挡有限值越界</b>，属标准 UB；JSON 数字可为 <code>1e300</code>，经 web 请求体/<code>SET_CONFIG</code> 深合并即可触发（GCC 实测饱和为 <code>INT64_MIN</code>，但不可依赖）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>rknn/DecodeNMS.cpp:79,86,89,92</code></td><td><code>reinterpret_cast</code> 类型双关读 <code>float</code>/<code>int16_t</code> ⇒ 严格别名违规；<b>同文件 <code>:71/:82</code> 已用合法的 <code>memcpy</code></b>，写法自相矛盾</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>mouse/MouseRouter.cpp:29-31</code></td><td><code>buttons_size</code> 未校验 ≤4 即 <code>&lt;&lt; (8u*i)</code>，移位 ≥32 是 UB（该文件<b>全仓无生产调用方</b>，注释自承）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td>全仓</td><td><code>[[nodiscard]]</code> <b>0 处</b>（大量 <code>bool f(..., std::string* error)</code> 失败返回式接口）；<code>std::string_view</code> <b>0 处</b>；<code>std::optional</code> 仅 3 个文件</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>common/Json.cpp:156,179,461</code></td><td>用 locale 敏感的 <code>strtod</code>/<code>snprintf("%.9g")</code> 而非 <code>from_chars</code>/<code>to_chars</code>（切到 <code>de_DE</code> 等 locale 时 <code>1.5</code> 解析错）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>common/Json.hpp:53-60</code></td><td>手写标签联合（6 个成员全量常驻）替代 <code>std::variant</code>，每个 JsonValue 恒占一个 string+vector+map 的空壳体量</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>input/PhysicalMouseReader.cpp:146</code>、<code>runtime/HardwareRunner.cpp:20</code></td><td><b>压缩(minify)风格</b>，单行 400+ 字符（全仓 <code>awk length&gt;300</code> 仅命中这两文件），而 <code>HardwareRunner</code> 恰是核心生命周期</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>web/domain/hardware.cpp:41,60</code> 等</td><td><code>atoi/atof/sscanf</code> 无错误反馈（<code>atoi("abc")==0</code> 与真实 0 无法区分）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>mouse/TargetSelector.hpp:169</code></td><td>全仓唯一非 <code>enum class</code> 裸枚举；另有 20+ 文件手写 <code>(void)x;</code> 而非 <code>[[maybe_unused]]</code></td></tr>
+    </tbody>
+  </table>
+  <p><b>亮点：</b><span class="tag lock">好</span> 所有权纪律到位（<code>shared_ptr&lt;uint8_t[]&gt;</code>、<code>unique_ptr</code>、<code>=delete</code> 12+ 处）；10/10 多态基类有虚析构；<b>141/141 头文件 <code>#pragma once</code></b>；<code>using namespace</code> 0 处；浮点域层层 <code>isfinite</code>/<code>clamp</code> 设防；JSON 解析器有 RAII 递归深度护栏（<code>Json.cpp:251-265</code>）；真用上 C++17（<code>filesystem</code>/结构化绑定/<code>clamp</code>/<code>optional</code>/<code>scoped_lock</code>）。</p>
+
+  <h3>3.2 架构与所有权（楼稳基）— 无 P0，三处结构债</h3>
+  <table>
+    <thead><tr><th>等级</th><th>位置</th><th>问题</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>model/RuntimeProfile.hpp:22</code>、<code>Decoder.hpp:19</code>、<code>ModelAdapter.hpp:18</code> ↔ <code>rknn/DecodeNMS.hpp:22</code>、<code>Detector.hpp:9-10</code>、<code>WorkerPool.hpp:29-34</code></td><td><b>model 与 rknn 双向模块依赖（模块级环）</b>：两个最大模块（3291+3700 行）无法独立编译/复用，改一个公共头即触发两模块全量重编译</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>model/RuntimeProfile.hpp:129-130</code>，被 <b>10 处</b> include</td><td><b>"上帝配置头"</b>（值成员含 <code>aim::MouseProfile</code> + <code>DetectionGeometryFilterConfig</code>）：把 mouse+rknn 传递性拖进 output/preview/runtime/app</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>detector/IDetector.hpp</code> + <code>rknn/Detector.hpp:26</code></td><td><b>死抽象</b>：唯一实现从未被实例化（全仓无 <code>Detector</code> 构造点），<b>注释却称"HardwareRunner / imgdetect 在用"（误导）</b>；实际链路 <code>WorkerPool</code> 直接用 <code>decoder_</code>+<code>engine_</code></td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>capture/ICapture.hpp:10</code> vs <code>runtime/CoreRuntime.hpp:109</code></td><td><code>ICapture</code> 同样<b>未被多态使用</b>（持 <code>unique_ptr&lt;V4L2Capture&gt;</code>），属推测性抽象</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>output/AiboxHidOutput.hpp:12,24</code>、<code>FifoHidOutput.hpp:9,16</code>、<code>LocalHidBackend.hpp:16,35</code></td><td>裸 fd 所有者类<b>未 <code>= delete</code> 拷贝</b> ⇒ 潜在 <b>double-close</b>（对照 <code>capture/DmaBuf.hpp:20-21</code>、<code>MouseControlClient.hpp:32-33</code>、<code>RKNNEngine.hpp:103-104</code> 都删了）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>aim/PidTrace.hpp:56,107</code>、<code>DetTrace.hpp:72,168</code></td><td>裸 <code>FILE*</code> 所有者类可拷贝（复制即 double-fclose）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>capture/V4L2Capture.hpp:82</code> + <code>V4L2Capture.cpp:184-187</code></td><td>非 <code>final</code> 但<b>析构内调用虚函数</b> <code>stop()</code>/<code>close()</code>；头注释自陈"不要派生"（软约束）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>model/RuntimeProfile.hpp:141/143</code> vs <code>:160-163</code></td><td>注释称 <b>"Lock-free 读"</b>，实际每次 <code>snapshot()</code> 都 <code>lock_guard</code>——<b>文档与实现不符</b></td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>web/infra/ipc_client.cpp:6</code>、<code>core/CMakeLists.txt:729,928</code></td><td>web 为复用客户端函数而 include <code>ipc/IpcServer.hpp</code>（1198 行服务端头）；单一 <code>ttbox_core</code> 静态库 → web 链入全部内部实现，<b>无库内边界</b></td></tr>
+    </tbody>
+  </table>
+  <p><b>亮点：</b><span class="tag lock">好</span> <code>common/</code> 是干净叶子层；<code>app/</code> 仅被 <code>main.cpp</code> 引用；<b>web↔core 经 AF_UNIX + <code>std::function</code> 回调注入解耦</b>（web 不 include 硬件模块）；RAII 扎实（<code>DmaBufFd</code> move-only 幂等 close、<code>RKNNEngine</code> pimpl + 每条失败路径都 destroy、<code>LicenseGate</code> mutex+快照）；<code>shutdown()</code> <b>先停 IPC 再析构</b>；错误处理策略全仓一致（<code>bool</code> + <code>std::string* error</code> 出参）。</p>
+
+  <h3>3.3 并发正确性（纪序明）— 2 个 P0 数据竞争</h3>
+  <table>
+    <thead><tr><th>等级</th><th>位置</th><th>问题</th><th>触发场景</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-p0">P0</span></td><td><code>runtime/CoreRuntime.cpp:196-204</code> ↔ <code>AimThread.cpp:454,480,845,848,879,885,932</code></td><td><code>aim_thread_.start()</code> <b>已拉起线程后</b>，从调用线程再调 4 个 setter，<b>无任何同步</b>，与 loop 线程并发读写同一成员；<code>set_pid_trace</code> 会 <code>open()</code> 文件与 loop <code>record()</code> 并发</td><td>capture+workers 先于 aim 启动 ⇒ aim 首个周期即可能读这些成员</td></tr>
+      <tr><td><span class="tag t-p0">P0</span></td><td><code>capture/V4L2Capture.cpp:790-796</code> ↔ <code>:703,:781</code></td><td><code>in_use_count()</code> <b>无锁读</b> <code>impl_-&gt;captured</code>（<b><code>std::vector&lt;bool&gt;</code> 位压缩</b>），采集线程同时写；位压缩使相邻 bit 共享 machine word ⇒ 真竞争</td><td>IPC <code>GET_STATUS</code> 与采集线程并发（调用点 <code>CoreRuntime.cpp:391</code>）</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>output/OutputBackend.cpp:37-48</code> ↔ <code>:49-69</code></td><td><code>UsbProxyBackend::health_</code>（<b>非原子结构</b>）AimThread 写、IPC 线程读写 ⇒ 计数撕裂</td><td>每次状态轮询</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>output/MouseControlClient.hpp:48-49</code> ↔ <code>cpp:71,93,113,116</code></td><td><code>fd_</code>、<code>next_request_id_</code> <b>非原子</b>；AimThread 断线重连改 <code>fd_</code> 时 IPC 线程读 <code>fd_</code></td><td>断线重连 + 状态轮询</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>hid/HidRuntime.cpp:265-287</code> ↔ <code>:207-246,248-253</code></td><td><code>get_metrics()</code> 无锁遍历 <code>forwarders_</code>，而 <code>start()/stop()</code> 会 <code>push_back/clear</code></td><td><b>需先确认本构建是否接线</b>（未找到生产调用点）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>common/Stats.hpp:47-57</code></td><td><code>absorb()</code> 两把锁固定顺序（this→other），反向调用即 AB-BA 死锁</td><td>当前调用点均单向，未触发</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>aim/AimThread.cpp:935-1059</code> ↔ <code>:70-73</code></td><td><code>status_mutex_</code> 内整段写遥测 + 每帧 vector 深拷贝；读侧 <code>status()</code> 按值返回 ⇒ <b>锁内 malloc</b></td><td>预览 15fps × 3 次/帧抢锁；占空比 ~0.04%（已量化，非 RT）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>capture/V4L2Capture.cpp:90-91</code></td><td><code>wait_new</code> 的 <code>timeout_us&lt;=0</code> 分支用<b>无谓词</b> <code>wait()</code>（当前恒传 400µs，不触发）</td><td>接口隐患</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>web/infra/motion_store.hpp:93-94</code></td><td><code>has_session_/session_</code> 无锁（需确认是否 per-request 构造）</td><td>web 由 httplib 多线程服务</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><b>关闭语义缺口（新发现）：</b><code>SO_RCVTIMEO/SNDTIMEO</code> <b>只约束卡在 recv/send 的线程，不约束 handler 本身</b>。实际下界 = 最长在途 handler：RUNTIME_CONTROL ~1–2s、MODEL_ACTIVATE ~10s、<b><code>HARDWARE_ACTION</code>（APPLY_EDID/SET_USB_MODE，<code>IpcServer.cpp:752</code>）经脚本/systemctl 执行、潜在无界</b> ⇒ <b>脚本挂住则 <code>Application::shutdown()</code>（先调 <code>ipc_.stop()</code>，<code>Application.cpp:958</code>）永久退不出</b>。已确认无自死锁；不建议 detach 改 join；根治 = <code>shared_ptr</code> + <code>enable_shared_from_this</code>。</div>
+  <p><b>亮点：</b><span class="tag lock">好</span> <code>AimTargetMailbox</code> release/acquire 传不可变任务；<code>SpscQueue</code> 标准 Vyukov SPSC；热键位图 <code>atomic&lt;uint16_t&gt;*</code> acquire/release 且断线 release-clear；<code>LatestFrame</code> 原子 <code>shared_ptr</code> + weak_ptr 决定 QBUF 归还；IPC detach 有 <code>conn_fds_</code> 排空协议，根除 UAF。</p>
+
+  <h3>3.4 热路径性能（费敏杰）— 低延迟设计扎实，缺陷在"每帧轮询 + 每帧分配"</h3>
+  <p>链路是认真的低延迟设计：V4L2 mmap + dma-buf → RGA 常驻 DMA-BUF（缓存 import 句柄）→ RKNN 输入 DMA-BUF 直绑，<b>全程无 CPU 大图 memcpy</b>，<code>xor_shift128_copy</code> 已 NEON 向量化。判断不以"CPU 饱和"立论（板端实测 core CPU 仅 23.3%、RSS 174MB，有 4 倍余量）——<b>对实时瞄准设备，核心指标是延迟与抖动（尾延迟）</b>。</p>
+  <table>
+    <thead><tr><th>等级</th><th>位置</th><th>问题</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-p0">P0</span></td><td><code>runtime/CoreRuntime.cpp:196</code> + <code>aim/AimThread.cpp:83,1061</code></td><td>AimThread 以 <b>4000µs 非阻塞轮询</b>取帧（<code>take_latest</code> 无阻塞原语，取不到即 <code>sleep_for(interval_us_)</code>），worker 发布后最多要等 ~4ms 才进 PID（均值 ~2ms、尾 4ms，<b>需实测</b>）</td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>rknn/DecodeNMS.cpp:244-256,389-400</code></td><td>每帧对<b>全部 anchor × 全部类别</b>做 argmax 扫描（conf 过滤前），<code>read_elem</code> 每元素一次类型 switch，FP16 走 <code>half_to_float</code> denormal 循环；单输出 <code>(1,84,8400)</code> ⇒ 每帧 ~7×10⁵ 次 <code>read_elem</code></td></tr>
+      <tr><td><span class="tag t-p1">P1</span></td><td><code>capture/V4L2Capture.cpp:706,732-736,746-755</code></td><td>采集线程<b>每帧 2 次堆分配</b>（<code>make_shared&lt;FrameBuffer&gt;()</code> + <code>plane_lengths_of()</code> 返回 <code>vector&lt;size_t&gt;</code> 按值，而 <code>num_planes≤8</code> 已在 <code>:383</code> 校验）</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>DecodeNMS.cpp:288-301</code> 等</td><td>classwise 分组 O(k²) + 每类全量扫；<code>nms_boxes</code> 每次分配 <code>order/removed</code></td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>DecodeNMS.cpp:317,459,557,720,789</code></td><td><code>*detections = kept_;</code> 每帧整段拷贝</td></tr>
+      <tr><td><span class="tag t-p2">P2</span></td><td><code>mouse/TargetSelector.cpp:167,212-223,281</code></td><td><code>collect_candidates</code> 按值返回；<code>looks_like_round_object</code> O(n²)；<code>trim_tracks</code> 超限时每帧 <code>stable_sort</code></td></tr>
+    </tbody>
+  </table>
+  <p><b>亮点：</b><span class="tag lock">好</span> 零拷贝链路真实到位（<code>V4L2Capture.cpp:448-475</code>/<code>RgaProcessor.cpp:137-152,231-238</code>/<code>RKNNEngine.cpp:402-463</code>）；<code>InputQuant.hpp:127-144</code> 已 NEON 向量化；<code>WorkerPool.cpp:449</code> 用 <code>std::move(detections_)</code>；<b>RT 绑核在目标线程内部设置</b>，避免了"绑到调用线程"的经典错误。</p>
+  <div class="callout"><b>测量建议（关键）：</b>
+    <ul style="margin:6px 0 0">
+      <li><code>Metrics.hpp:19/31</code> 的 <code>capture_ms/aim_ms</code> <b>恒 0</b> ⇒ <b>瞄准阶段（选靶+PID+输出）完全没有计时</b>。</li>
+      <li><b>事实纠偏：</b><code>decode_ms</code>/<code>decode_p50/95/99</code> <b>其实已在测并上报</b>（<code>CoreRuntime.cpp:401-469</code> → <code>IpcServer.cpp:1224-1237</code> → <code>state_snapshot.cpp:153,161</code>）——性能重构的触发器是"<b>读面板已有数据</b>"，不是"先加仪表"。</li>
+      <li>先量后改，用 <b>p95/p99 尾延迟</b>验收（CPU 均值看不到肥尾）。</li>
+      <li><code>bench/npu_bench.cpp</code> 只压 <code>rknn_run</code>，<b>不含 decode/选靶/拷贝</b>，不足以验收端到端改动。</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>4 · 裁决（狄明断）</h2>
+  <div class="callout"><b>裁决总纲：</b>采纳稳健派为骨架，但把它漏掉/降档的<b>三条正确性项提到随批</b>：立即修只认"<b>真缺陷</b>"四条（A1–A4，含 2 个 P0 数据竞争）；随批带上零成本安全网；其余一律"暂缓 + 明确触发条件"或"明确不动"。<b>全程三步、一次上板搞定，回滚限单文件。</b> 标准维持 C++17。</div>
+
+  <h3>4.1 必须立即修（无条件，进同一 pre-acceptance build）</h3>
+  <p><small>判据：正确性/安全性一票通过（数据竞争、UB）。共 4 条，<b>全部单文件可 revert</b>。</small></p>
+  <table>
+    <thead><tr><th>#</th><th>问题（文件:行）</th><th>最小改法</th><th>验证</th><th>回滚</th></tr></thead>
+    <tbody>
+      <tr><td><b>A1</b></td><td>4 个 setter 与 loop 并发读写：<code>CoreRuntime.cpp:201-204</code> vs <code>AimThread.cpp:454,480,845,848,879,885,932</code></td><td>把 4 个 setter <b>上移到 <code>aim_thread_.start()</code> 之前</b>；happens-before 由 <code>std::thread</code> 构造保证（已核实 <code>reset_runtime_state()</code> 不触碰这 4 字段，全仓仅此一处调用）</td><td>编译+单测；板端开 <code>pid_trace</code> 正常落盘</td><td>单文件 revert（<b>4 行位移</b>）</td></tr>
+      <tr><td><b>A2</b></td><td><code>in_use_count()</code> 无锁读位压缩 <code>vector&lt;bool&gt;</code>：<code>V4L2Capture.cpp:790-796</code> vs <code>:703/:781</code></td><td>Impl 加 <code>std::atomic&lt;uint32_t&gt; captured_count_{0}</code>；写点 <code>fetch_add/fetch_sub</code>；<code>in_use_count()</code> 直接 load；<b>保留 <code>vector&lt;bool&gt;</code></b></td><td>编译；回环跑满 buffer 复用；面板计数稳定；soak 30min</td><td>单文件 revert（纯诊断量）</td></tr>
+      <tr><td><b>A3</b></td><td><code>as_int</code> 越界转换 UB：<code>Json.cpp:89-93</code></td><td>补<b>有限值范围判断</b>再 <code>static_cast</code>（越界 <code>return def</code>）</td><td>单测补 <code>1e300/-1e300/2^63</code> 边界</td><td>单文件 revert（约 2 行）</td></tr>
+      <tr><td><b>A4</b></td><td><code>read_elem</code> 类型双关：<code>DecodeNMS.cpp:79,86,89,92</code></td><td>4 处统一改 <code>std::memcpy</code>，<b>照抄同文件 <code>:82</code> 既有合法写法</b></td><td>编译；一帧 decode 输出与改前<b>逐位一致</b></td><td>单文件 revert</td></tr>
+    </tbody>
+  </table>
+  <p><small>裁决人<b>否决</b>现代派"A1 改 <code>start()</code> 签名 + 构造注入"的版本（虽同样正确），改用"4 行位移"——保住"单文件、无跨文件签名变更、revert 即回滚"，这是一次上板所需的最小动作。</small></p>
+
+  <h3>4.2 随批修（同一次上板批次 · 零/低成本安全网）</h3>
+  <p><small>若批次容量吃紧，按 <b>A → B1 → B7 → B2</b> 顺序砍尾。</small></p>
+  <table>
+    <thead><tr><th>#</th><th>问题（文件:行）</th><th>最小改法</th></tr></thead>
+    <tbody>
+      <tr><td><b>B1</b></td><td>瞄准阶段无计时（<b>解锁性能议题的钥匙</b>）：<code>Metrics.hpp:19,31</code> 恒 0</td><td>AimThread 加瞄准段计时，聚合进 <code>aim_ms</code>/<code>aim_p50/p95</code>，经 IpcServer 上报</td></tr>
+      <tr><td><b>B2</b></td><td>裸 fd/<code>FILE*</code> 所有者类未 delete 拷贝：<code>AiboxHidOutput.hpp:12,24</code>、<code>FifoHidOutput.hpp:9,16</code>、<code>LocalHidBackend.hpp:16,35</code>、<code>PidTrace.hpp:56,107</code>、<code>DetTrace.hpp:72,168</code></td><td>各类补 <code>= delete</code> 拷贝构造/赋值（约 2 行/类，纯安全网）</td></tr>
+      <tr><td><b>B3</b></td><td>移位 UB：<code>MouseRouter.cpp:29-31</code></td><td>循环前加 <code>if (layout.buttons_size &gt; sizeof(uint32_t)) return false;</code></td></tr>
+      <tr><td><b>B4</b></td><td><code>V4L2Capture</code> 非 final 但析构调虚：<code>V4L2Capture.hpp:82</code></td><td>加 <code>final</code>（1 个词）</td></tr>
+      <tr><td><b>B5</b></td><td><code>Stats::absorb</code> AB-BA 隐患：<code>Stats.hpp:47-57</code></td><td><code>std::scoped_lock lock(mutex_, other.mutex_);</code>（C++17，零开销）</td></tr>
+      <tr><td><b>B6</b></td><td>P1 撕裂读：<code>OutputBackend.cpp:37-48</code> <code>health_</code>、<code>MouseControlClient.hpp:48-49</code> <code>fd_</code>/<code>next_request_id_</code></td><td><code>health_</code> 用小 mutex 或原子快照；<code>fd_</code>→<code>std::atomic&lt;int&gt;</code></td></tr>
+      <tr><td><b>B7</b></td><td>注释与实现不符：<code>RuntimeProfile.hpp:141/143</code> 称 "Lock-free"；<code>IDetector.hpp</code>/<code>rknn/Detector.hpp</code> 谎称 HardwareRunner/imgdetect 在用</td><td>仅改注释为事实</td></tr>
+    </tbody>
+  </table>
+  <p><small>B5/B3/B4 原是稳健派判为"未触发/等接入调用方再做"，裁决人<b>上调到随批</b>：反正要烧一次板，这三项一行、零成本。稳健派的"<b>接入任何调用方之前必须补 B3</b>"被采纳为兜底红线。</small></p>
+
+  <h3>4.3 暂缓（明确触发条件）</h3>
+  <table>
+    <thead><tr><th>#</th><th>项</th><th>触发条件</th><th>为什么现在不做</th></tr></thead>
+    <tbody>
+      <tr><td>C1</td><td>性能侧重构（<code>DecodeNMS</code> 全量 argmax、<code>V4L2Capture</code> 每帧分配、<code>TargetSelector</code>、<code>AimThread.cpp:83</code> 4000µs 轮询）</td><td><b>读面板真实 <code>decode_ms/p50/95/99</code> + B1 上线后的 <code>aim_ms/p50/p95</code> + <code>e2e_p95/p99</code></b>，仅当尾延迟显示实际瓶颈且有离线回放/soak 兜底</td><td>无证据：CPU 23.3%、4 倍余量、零拷贝已到位；且 <code>decode_ms</code> 已在测</td></tr>
+      <tr><td>C2</td><td>上帝配置头拆分 / model↔rknn 依赖环</td><td>该环实际造成不可测；或下一个大特性必须同改两模块</td><td>编译期耦合、非运行期缺陷；拆公共头触发全量重编译，恰在 OTA 改动最热时</td></tr>
+      <tr><td>C3</td><td>死抽象删除/接线（<code>IDetector</code>/<code>ICapture</code>）</td><td>确认永不复用 或 确有第二实现需求</td><td>未实例化 = 零运行期成本；问题只是注释说谎——已用 B7 修</td></tr>
+      <tr><td>C4</td><td>web 与服务端分离（<code>ipc_client.cpp:6</code>、<code>CMakeLists.txt:729</code>）</td><td>由业主定"web 是否独立发布"；若独立发布则上调</td><td>当前单库里工作正常；拆分涉及构建系统</td></tr>
+      <tr><td>C6</td><td>locale 敏感 <code>strtod</code>/<code>snprintf</code> → <code>from_chars</code>/<code>to_chars</code></td><td>确认存在非 C locale 运行环境</td><td>当前大概率 C locale；属机会主义项</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.4 明确不动</h3>
+  <table>
+    <thead><tr><th>#</th><th>项</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>D1</td><td><code>Json.hpp:53-60</code> 手写标签联合 → <code>std::variant</code></td><td>无缺陷、非逐帧（CPU/延迟收益≈0）；节点 115B→56B 的内存腰斩在 RSS 174MB/4 倍余量下<b>非瓶颈</b>；重写 ~300 行需解析回归测试</td></tr>
+      <tr><td>D2</td><td>批量 <code>[[nodiscard]]</code> / <code>std::string_view</code> 全面化（现均 0 处）</td><td>42k 行机械改动、review 成本极高、<b>不修任何已发现缺陷</b>；<code>string_view</code> 有悬垂风险。允许在恰好碰到的文件顺手加，<b>永不做独立批量 PR</b></td></tr>
+      <tr><td>D3</td><td>升 C++20</td><td><b>两派实质一致</b>。GCC 12 部分库特性不全（<code>&lt;format&gt;</code>、部分 ranges），单台设备无从灰度，且<b>无一个被 C++17 挡住的需求</b></td></tr>
+      <tr><td>D4</td><td><code>status()</code> 每帧 <code>atomic&lt;shared_ptr&gt;</code> 无锁化</td><td><b>并发 + 性能 + 现代派三方一致</b>：AimThread 非 RT、占空比 ~0.04% ⇒ 收益不成立；反而把每帧分配搬到控制写侧</td></tr>
+      <tr><td>D5</td><td><code>AimTargetMailbox</code>/<code>SpscQueue</code>/热键位图/<code>LatestFrame</code> 归还协议；零拷贝链路</td><td>均正确；<b>别用 span/抽象去"美化"零拷贝</b></td></tr>
+      <tr><td>D6</td><td>minify 风格文件重排版；协程 / ranges / modules</td><td>纯 churn、污染 git blame；目标工具链不支持或无收益</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.5 分歧裁决表</h3>
+  <table>
+    <thead><tr><th>分歧项</th><th>现代派</th><th>稳健派</th><th>裁决</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr><td><code>Stats.hpp</code> <code>scoped_lock</code></td><td>立即</td><td>P2 未触发</td><td><b>采纳现代派 → 随批 B5</b></td><td>零开销 1 行根除 AB-BA 整类隐患</td></tr>
+      <tr><td><code>MouseRouter</code> 校验</td><td>立即</td><td>接入调用方前必须补</td><td><b>采纳现代派 → 随批 B3</b>，稳健派作兜底红线</td><td>1 行、现无调用方 ⇒ 现在补零风险</td></tr>
+      <tr><td>批量 <code>[[nodiscard]]</code>/<code>string_view</code></td><td>分模块全面化</td><td>永不独立批量 PR</td><td><b>采纳稳健派 → D2 不动</b></td><td>42k 行 review 债压过收益，不修任何已发现缺陷</td></tr>
+      <tr><td><code>V4L2Capture final</code></td><td>立即</td><td>未列</td><td><b>采纳现代派 → 随批 B4</b></td><td>1 个词消灭"析构期虚派发→fd/mmap 泄漏"整类隐患</td></tr>
+      <tr><td><code>Json</code>→<code>variant</code></td><td>值得做，排安全项之后</td><td>不动</td><td><b>采纳稳健派 → D1 不动</b></td><td>无缺陷、非逐帧、非瓶颈</td></tr>
+      <tr><td>上帝头/依赖环拆分</td><td>可选低优先</td><td>不动</td><td><b>采纳稳健派 → C2 暂缓</b></td><td>编译期非运行期缺陷</td></tr>
+      <tr><td>死抽象删/注释</td><td>删或改注释</td><td>只改注释</td><td><b>采纳稳健派 → B7 只改注释</b></td><td>未实例化=零成本；删/接=风险动作</td></tr>
+      <tr><td><code>health_</code>/<code>fd_</code> 原子化</td><td>立即</td><td>并发 P1</td><td><b>A/B 之间 → 随批 B6</b></td><td>P1 撕裂读非崩溃，不占"无条件"位，但建议同批</td></tr>
+      <tr><td>locale <code>from_chars</code></td><td>计划</td><td>仅当确认非 C locale</td><td><b>采纳稳健派 → C6 暂缓</b></td><td>当前大概率 C locale</td></tr>
+      <tr><td>性能侧重构</td><td>与性能侧一致</td><td>先读数据</td><td><b>采纳稳健派 → C1 暂缓，并纠正事实</b></td><td><code>decode_ms</code> 已在测 ⇒ 触发=读数据非加仪表</td></tr>
+      <tr><td>C++20 升级</td><td>维持 C++17</td><td>推迟</td><td><b>一致：维持 C++17（D3）</b></td><td>非分歧</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.6 修复顺序与验收（分步 + gate + 回滚）</h3>
+  <div class="callout"><b>关键设计：唯一一次上板同时产出「基线数据 + 修复验证 + 新增 aim 仪表数据」。</b></div>
+  <ul>
+    <li><b>Step 0 · 冻结基线</b>（同一上板 session 前半段）：先读面板 <code>decode_ms / decode_p50/95/99</code>、<code>e2e_p50/95/99</code>、<code>infer_ms</code>、<code>fps</code>、<code>CPU%</code>、<code>RSS</code> 并归档。<b>Gate0</b>：数据成功读取并归档——<b>若读不到，不得烧修复批次</b>。</li>
+    <li><b>Step 1 · 必改批次</b>（A1–A4 + 随批 B1–B7）：编译 → 单测 → 离线回放/soak → 板端验证。<b>Gate1</b>：① 零新增告警；② 单测全过；③ 离线回放/soak 无回归；④ 板端开 <code>pid_trace</code> 正常落盘；⑤ 面板 <code>last_dequeued_count</code> 稳定、<code>aim_ms/p50/p95</code> 非 0。</li>
+    <li><b>Step 2 · 读数据判性能</b>（纯读，不烧板）：读 <code>aim_ms/p50/p95</code> + <code>decode_ms/p95</code> + <code>e2e_p95/p99</code>。<b>Gate2</b>：只有到这一步、且尾延迟显示实际瓶颈，才允许讨论 C1 性能重构；否则关闭性能议题。</li>
+    <li><b>Step 3 · 有条件重构</b>（仅当 Gate2 触发）：先补离线回放测试再动结构。<b>Gate3</b>：结构化改动必须有回放对照（逐位/统计等价）。</li>
+  </ul>
+  <p><b>回滚总纲：</b>A/B 类全部单文件、无跨文件签名变更 ⇒ <code>git revert &lt;commit&gt;</code>。这正是裁决人否决"改 <code>start()</code> 签名"版的根本原因。</p>
+</section>
+
+<section>
+  <h2>5 · 遗留待业主决策（必须拍板）</h2>
+  <ol>
+    <li><b><code>HARDWARE_ACTION</code> 脚本超时（<code>IpcServer.cpp:752</code>）</b>：脚本/systemctl 潜在无界 ⇒ 脚本挂住则 <code>Application::shutdown()</code> 永久退不出（<b>关机/重启会卡死</b>）。<b>选项</b>：(a) 硬化——<code>shared_ptr</code>+<code>enable_shared_from_this</code>（需把 <code>Application.hpp:164</code> 按值 <code>IpcServer ipc_;</code> 改 shared_ptr）+ handler 超时；(b) 运维约束——要求脚本自带限时。<b>涉及关机安全性，需业主选。</b></li>
+    <li><b>web 是否独立发布</b>：决定 C4（web/core 分离、单一静态库拆分）的优先级。若不独立发布，C4 可长期不动。</li>
+    <li><b><code>decode_ms</code> 端到端现状核实</b>：代码已证有产出，但<b>板端面板显示值</b>需在 Step0 确认非 0；若为 0 ⇒ 上游统计吸收点断线，需单独排查。</li>
+    <li><b>一次上板窗口安排</b>：必须同一 session 内先采基线、后烧修复批次，否则拿不到修复前基线。</li>
+    <li><b>B1 落盘路径/权限</b>：aim 阶段 trace/计时在板端的落盘位置与 root 权限确认。</li>
+  </ol>
+</section>
+
+<section>
+  <h2>6 · 版本敏感标注汇总</h2>
+  <table>
+    <thead><tr><th>特性</th><th>引入标准 / 编译器</th><th>本报告中的使用</th></tr></thead>
+    <tbody>
+      <tr><td>项目实际标准</td><td><b>C++17</b>（<code>core/CMakeLists.txt:391-393</code>，<code>EXTENSIONS OFF</code>）；板端 <b>GCC 12</b></td><td>维持不动</td></tr>
+      <tr><td><code>std::scoped_lock</code></td><td>C++17</td><td>B5</td></tr>
+      <tr><td><code>std::from_chars</code>/<code>to_chars</code> 整数重载</td><td>C++17</td><td>C6</td></tr>
+      <tr><td><code>std::from_chars</code>/<code>to_chars</code> <b>浮点重载</b></td><td><b>GCC 11+</b>（GCC 12 满足）</td><td>C6</td></tr>
+      <tr><td><code>[[nodiscard]]</code> / <code>[[maybe_unused]]</code></td><td>C++17</td><td>D2</td></tr>
+      <tr><td><code>std::optional</code> / <code>std::variant</code></td><td>C++17</td><td>C6 / D1</td></tr>
+      <tr><td><code>= delete</code> / <code>final</code> / <code>std::atomic&lt;T&gt;</code> / <code>std::memcpy</code></td><td>C++11/98 基线，无版本风险</td><td>A2/A4/B2/B4/B6</td></tr>
+      <tr><td><code>std::atomic&lt;std::shared_ptr&lt;T&gt;&gt;</code></td><td><b>C++20</b>，libstdc++ 上为<b>锁实现</b>（非 128-bit CAS）</td><td><b>判"可不做"</b></td></tr>
+      <tr><td><code>std::bit_cast</code> / <code>std::span</code></td><td><b>C++20</b></td><td>判"可不做"</td></tr>
+      <tr><td><code>std::expected</code></td><td><b>C++23</b>，<b>GCC 12 不可用</b></td><td>弃</td></tr>
+      <tr><td><code>std::format</code> / 部分 <code>ranges</code></td><td>C++20，<b>GCC 12 不全</b></td><td>不做</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>附录 · 评审方法与证据链</h2>
+  <ul>
+    <li><b>流程：</b>Workflow A（代码评审）—— Phase 1 四路专项并行（标准/架构/并发/性能）→ Phase 2 现代派 vs 稳健派分别出方案 → 独立裁决人综合裁决。</li>
+    <li><b>交叉校正（团队流程的实际价值）：</b>
+      <ol>
+        <li>性能侧纠正了架构侧"改用 <code>atomic&lt;shared_ptr&gt;</code> 即真无锁"的错误说法（libstdc++ 上仍为锁实现），架构侧已认错并作废该建议。</li>
+        <li>并发侧与性能侧共同纠正了"<code>AimThread</code> 是 RT 线程"的误判（<code>AimThread.cpp:74-81</code> 只绑核、无 <code>RtSched::apply_fifo</code>），该项由"RT 优先级反转"更正为"CFS 下的可控尾延迟"。</li>
+        <li>并发侧精确化了 IpcServer 关闭语义（<code>SO_RCVTIMEO</code> 不约束 handler），并否定了"detach 改 join"的方向。</li>
+        <li>稳健派核实了"<code>decode_ms</code> 其实已在测"，纠正了性能侧"需先测"的表述。</li>
+      </ol>
+    </li>
+    <li><b>约束：</b>全程静态只读；未上板、未编译、未运行测试。凡涉及运行期量级（延迟、占空比、竞争窗口）的结论，均由分析者显式标注"需实测"，本报告保留该标注。</li>
+    <li><b>证据索引：</b>所有结论均可由文中的 <code>文件:行号</code> 在原仓复核；语言占比口径为 <code>git ls-files</code> + 非空行计数（可复现）。</li>
+  </ul>
+  <div class="callout warn">本报告结论的采纳与执行由业主决定。按项目铁律：<b>改 → 本地测 → WSL 交叉 → 板验，无证据不写 PASS。</b></div>
+</section>
+
+<footer>TTBOX core 代码评审报告 · 2026-10-06 · C++ 超级专家团 Workflow A · 全程静态只读</footer>
+</div>
+</body>
+</html>

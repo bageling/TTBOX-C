@@ -1,0 +1,42 @@
+[Unit]
+Description=TTBOX EDID Inject (oneshot)
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+# 统一 EDID 脚本入口（T02）：此前 ttbox-edid.service / deploy/DEPENDENCIES.md /
+# ttbox-web.py 三处指向各不相同；统一到 /opt/ttbox/current/scripts/edid/edid_apply.sh
+#
+# T1.04（DEP-02）启动链路非致命化：EDID 注入是【可选】步骤——
+#   PC 源未接 / EDID 节点未就绪 / 协商超时，一律不得令本 unit 进入 failed 态、更不得拖挂启动链。
+#   · `|| true` 令失败/超时只 WARN、unit 退出 0（core 照常启动并推理）。
+#   （Web 端手动应用 EDID 走的是另一条路径——直接调 edid_apply.sh 并看其退出码，
+#     不受本处"非致命"包裹影响。）
+#
+# ★★ 2026-09-28 修「开机黑屏多次」：超时预算从 20s 改为 45s ★★
+#   旧值 20s 是错的，两个原因：
+#     ① 预算算错：注释原写"兜住脚本内部最多 12 轮重试"，但脚本内部**单轮**就含
+#        `wait_for_lock`（默认 10s）+ HPD settle（0.5s）+ 应用与回读，一轮实际 7~15s；
+#        叠加当时还挂在入口最前面的 ttbox_dtb_fix.sh（开机窗口实测吃 12.06s，空闲态仅 0.23s）
+#        ⇒ 20s 连一轮都跑不完。板端 09-27 实测：12:27:41 起跑、12:27:53 才写完 EDID、
+#        12:28:01 被本处 timeout 精确杀死（systemd 记录 ExecMainStart=12:27:41 / Exit=12:28:01），
+#        而内核实测显示**再晚 1~2 秒 HPD 重协商就 lock ok 了**。
+#     ② 它同时是黑屏源：脚本内每一轮重协商都要拉低/拉高一次 HPD，源端就会重新枚举一次
+#        （= 屏幕黑一次）。被掐断后本 unit 又会在下一次开机重来 ⇒ 客户体感"开机黑屏多次"。
+#   配合这次同时落地的三项改动，45s 是「一轮 10s 等锁 + settle + 应用」× 最多 2 轮 + 余量：
+#     · scripts/edid/edid_apply.sh: ATTEMPTS_DEFAULT 12 → 2（黑屏上限从 12 次降到 2 次）
+#     · scripts/edid/edid_apply.sh: TTBOX_EDID_LOCK_TIMEOUT_SEC 默认 14 → 10
+#     · ttbox_dtb_fix.sh 从 edid_apply.sh 入口移出（改挂 ttbox_ensure_services.sh，
+#       DTB 修复本就需要重启才生效，晚一点无影响）
+#   正常路径（源端已接、一轮即锁）实测 3~9 秒内自行退出，45s 只是上界，不会拖慢开机。
+# ★ V1.0.53：入口由 shell 脚本换成 C++ 二进制（业主令「去掉所有 Python 代码」）。
+#   原 scripts/edid/edid_apply.sh 内含 **4 段内嵌 python3**（生成 EDID / 回读比对 / 读配置），
+#   连同 scripts/edid/*.py 已全部移植到 core/src/edid/ 并删除。
+#   参数与环境变量契约**未变**（仍可用 TTBOX_EDID_REHANDSHAKE=0 退回纯注入、
+#   TTBOX_EDID_REHANDSHAKE_ATTEMPTS / TTBOX_EDID_LOCK_TIMEOUT_SEC / TTBOX_EDID_HPD_SETTLE_SEC 同名）；
+#   45s 超时预算与「非致命」包裹原样保留（理由见上一段，与实现语言无关）。
+ExecStart=/bin/sh -c 'timeout 45s /opt/ttbox/current/bin/ttbox_edid || echo "[ttbox-edid][WARN] EDID 注入失败或超时（可选步骤，非致命；core 照常启动并推理）"'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

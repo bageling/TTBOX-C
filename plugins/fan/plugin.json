@@ -1,0 +1,21 @@
+{
+  "id": "fan",
+  "name": "TTBOX Fan",
+  "version": "1.0.0",
+  "description": "TTBOX Fan 管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-fan",
+  "type": "process",
+  "autostart": false,
+  "enabled": true,
+  "permissions": [
+    "read_core_status",
+    "hardware"
+  ],
+  "stop_timeout": 5,
+  "health_check": {
+    "kind": "process"
+  },
+  "config": "config",
+  "data": "data"
+}

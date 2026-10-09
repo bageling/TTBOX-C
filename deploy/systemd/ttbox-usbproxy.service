@@ -1,0 +1,46 @@
+[Unit]
+Description=TTBOX USB mouse passthrough proxy
+After=multi-user.target usb-proxy.service
+Conflicts=usb-proxy.service usb-proxy-test.service
+# T02：删除原 StartLimitIntervalSec=0（那是主动关闭限流）。统一 5 次/300s：
+# USB gadget 反复失败时不再无限重启刷日志，留出排障窗口。
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+# root 运行（raw_gadget/USB gadget 需要），但主组设为 ttbox（T02 方案 A 配套）：
+# cmd.sock/event.sock 权限已收紧为 0660，Core 以 ttbox 组运行方能连接。
+User=root
+Group=ttbox
+WorkingDirectory=/opt/ttbox/current/usbproxy
+Environment=USB_PROXY_DEVICE=fc000000.usb
+Environment=USB_PROXY_DRIVER=dwc3-gadget
+Environment=USB_PROXY_SOCKET_DIR=/run/ttbox-mouse-passthrough
+# 1.5.62：合成模式已删除，找不到物理鼠标就一直等（脚本默认无限等待）。
+# 默认 TimeoutStartSec（90s）会把"还在等鼠标"误判成启动失败并杀掉服务 ⇒ 显式关掉。
+TimeoutStartSec=0
+RuntimeDirectory=ttbox-mouse-passthrough
+RuntimeDirectoryMode=0750
+# T1.04（DEP-02）启动链路非致命化：下面这条是【可选】步骤（压制板端其它 USB 透传服务，
+#   避免与 raw-gadget 抢 UDC）。`-` 前缀 + `timeout 20s` 双保险：既不因某个冲突服务停不掉而
+#   让本服务起不来，也不因 systemctl 卡住而无限挂起——失败/超时只留一条日志。
+ExecStartPre=-/usr/bin/timeout 20s /usr/bin/systemctl stop usb-proxy.service usb-proxy-test.service mouse-passthrough.service opi-mouse-gadget.service usbdevice.service
+# ★ 必需项，【禁止】用 `-` 前缀或 `|| true` 包裹：`raw_gadget` 内核模块是 /dev/raw-gadget
+#   设备节点存在的唯一前提，模块加载失败时 usb-proxy 一定起不来。此处保留"加载失败 ⇒ 本 unit
+#   失败"的硬语义，配合 [Unit] 段的 5 次/300s 限流，在排障窗口内暴露问题；静默降级只会把故障
+#   推迟到运行期、更难诊断。
+ExecStartPre=/usr/sbin/modprobe raw_gadget
+ExecStart=/opt/ttbox/current/usbproxy/board/run-ttbox-usb-proxy.sh
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=5
+# mlockall / SCHED_FIFO 需要这两个额度（代码里也会自己 setrlimit 兜底，
+# 因为客户机上跑的可能是镜像里那份旧 unit）。
+LimitMEMLOCK=infinity
+LimitRTPRIO=infinity
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

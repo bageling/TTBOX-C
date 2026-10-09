@@ -1,0 +1,21 @@
+{
+  "id": "system",
+  "name": "TTBOX System",
+  "version": "1.0.0",
+  "description": "TTBOX System 管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-system",
+  "type": "process",
+  "autostart": true,
+  "enabled": true,
+  "permissions": [
+    "read_core_status",
+    "hardware"
+  ],
+  "stop_timeout": 5,
+  "health_check": {
+    "kind": "process"
+  },
+  "config": "config",
+  "data": "data"
+}
